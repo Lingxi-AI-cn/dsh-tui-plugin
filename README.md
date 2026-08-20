@@ -4,6 +4,17 @@
 
 An independently installable native terminal UI for the official DeepSeek Harness. This repository publishes one user-facing bundle, `@lingxi-ai-cn/dsh-tui`, and five exact internal packages under the same npm scope.
 
+## Published release
+
+| Surface | Current public artifact |
+| --- | --- |
+| Source | [`Lingxi-AI-cn/dsh-tui-plugin`](https://github.com/Lingxi-AI-cn/dsh-tui-plugin), default branch `main` |
+| Release | [`v0.1.0-rc.8`](https://github.com/Lingxi-AI-cn/dsh-tui-plugin/releases/tag/v0.1.0-rc.8), pre-release |
+| npm entry | [`@lingxi-ai-cn/dsh-tui@0.1.0-rc.8`](https://www.npmjs.com/package/@lingxi-ai-cn/dsh-tui/v/0.1.0-rc.8) |
+| Automated matrix | Ubuntu 24.04 and macOS 14: source verification, tests, build, package audit, official-DSH clean room, and PTY exit |
+
+At publication, both npm `next` and `latest` resolve the user-facing package to `0.1.0-rc.8`. This release is intentionally pinned to the matching official Harness release rather than claiming compatibility with later candidates.
+
 ## Compatibility
 
 | TUI | DeepSeek Harness | Node.js | Release level |
@@ -49,6 +60,8 @@ pnpm run verify:clean-room
 ```
 
 The clean-room gate installs the unmodified official Harness from npm, installs locally packed TUI packages through `dsh plugin`, composes the profile, boots a PTY, exits through `/quit`, restores terminal state, and confirms that the official installation was not modified.
+
+This repository is the sanitized public release surface. Package-source changes must keep all six versions and exact internal dependencies aligned, regenerate `SOURCE_MANIFEST.json`, and follow [AGENTS.md](AGENTS.md). Public release tags and npm versions are immutable.
 
 ## Security
 

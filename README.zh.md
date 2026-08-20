@@ -4,6 +4,17 @@
 
 这是面向官方 DeepSeek Harness 的可独立安装原生终端界面。本仓库发布一个用户入口包 `@lingxi-ai-cn/dsh-tui`，以及同一 npm scope 下五个精确版本内部包。
 
+## 已发布版本
+
+| 发布面 | 当前公开产物 |
+| --- | --- |
+| 源码 | [`Lingxi-AI-cn/dsh-tui-plugin`](https://github.com/Lingxi-AI-cn/dsh-tui-plugin)，默认分支 `main` |
+| Release | [`v0.1.0-rc.8`](https://github.com/Lingxi-AI-cn/dsh-tui-plugin/releases/tag/v0.1.0-rc.8)，pre-release |
+| npm入口 | [`@lingxi-ai-cn/dsh-tui@0.1.0-rc.8`](https://www.npmjs.com/package/@lingxi-ai-cn/dsh-tui/v/0.1.0-rc.8) |
+| 自动矩阵 | Ubuntu 24.04与macOS 14：公开源码校验、测试、构建、包审计、官方DSH clean-room和PTY退出 |
+
+发布时npm `next`和`latest`都把用户入口包解析到`0.1.0-rc.8`。本版本故意只支持精确匹配的官方Harness release，不推断兼容后续候选版。
+
 ## 兼容性
 
 | TUI | DeepSeek Harness | Node.js | 发布等级 |
@@ -34,6 +45,8 @@ pnpm run verify:clean-room
 ```
 
 clean-room 门禁会从 npm 安装未经修改的官方 Harness，通过 `dsh plugin` 安装本地打包的 TUI，完成 profile 组合和 PTY 启动，使用 `/quit` 退出并恢复终端，同时确认官方安装目录没有被修改。
+
+本仓库是经过清理的公开发布面。修改package源码时必须保持六包版本和内部精确依赖一致，重新生成`SOURCE_MANIFEST.json`，并遵守[AGENTS.md](AGENTS.md)。公开release tag和npm版本不可覆盖或移动。
 
 ## 安全提示
 
