@@ -14,6 +14,31 @@ const packageDirectories = [
   'packages/bundle/tui-app',
 ]
 
+function stableJson(value) {
+  if (Array.isArray(value)) return value.map(stableJson)
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(Object.keys(value).sort().map(key => [key, stableJson(value[key])]))
+}
+
+function payloadDigest(tarball) {
+  const files = execFileSync('tar', ['-tzf', tarball], { encoding: 'utf8' })
+    .split('\n')
+    .filter(entry => entry !== '' && !entry.endsWith('/'))
+    .sort()
+  const hash = createHash('sha512')
+  for (const file of files) {
+    let bytes = execFileSync('tar', ['-xOzf', tarball, file])
+    if (file === 'package/package.json') {
+      const manifest = JSON.parse(bytes.toString('utf8'))
+      delete manifest.gitHead
+      bytes = Buffer.from(`${JSON.stringify(stableJson(manifest))}\n`)
+    }
+    hash.update(`${file}\0${bytes.byteLength}\0`)
+    hash.update(bytes)
+  }
+  return hash.digest('hex')
+}
+
 rmSync(artifacts, { recursive: true, force: true })
 mkdirSync(artifacts, { recursive: true })
 const releases = []
@@ -34,6 +59,7 @@ for (const directory of packageDirectories) {
     file: basename(tarball),
     integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`,
     sha512: createHash('sha512').update(bytes).digest('hex'),
+    payloadSha512: payloadDigest(tarball),
   })
 }
 writeFileSync(join(artifacts, 'release-manifest.json'), `${JSON.stringify({
