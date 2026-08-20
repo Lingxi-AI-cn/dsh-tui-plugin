@@ -82,7 +82,12 @@ for (const directory of packages) {
 
 try {
   const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8' }).trim()
-  if (remote !== 'https://github.com/Lingxi-AI-cn/dsh-tui-plugin.git') violations.push(`origin points to ${remote}`)
+  const normalizedRemote = remote
+    .replace(/^git@github\.com:/u, 'https://github.com/')
+    .replace(/\.git$/u, '')
+  if (normalizedRemote !== 'https://github.com/Lingxi-AI-cn/dsh-tui-plugin') {
+    violations.push(`origin points to ${remote}`)
+  }
 } catch {
   violations.push('public repository has no readable origin remote')
 }
