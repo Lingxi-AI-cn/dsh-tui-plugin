@@ -1,0 +1,616 @@
+/** Native-TUI interaction actions, contexts, defaults, and settings overrides. */
+
+import { z } from './host.ts'
+
+/** Input ownership contexts supported by the native TUI. */
+export type TuiInteractionContext =
+  | 'Global'
+  | 'Composer'
+  | 'Suggestion'
+  | 'HistorySearch'
+  | 'TranscriptSearch'
+  | 'Transcript'
+  | 'Detail'
+  | 'PluginHub'
+  | 'Dialog'
+  | 'Work'
+  | 'Footer'
+  | 'Approval'
+
+/** Stable action identifiers consumed by input dispatch and help rendering. */
+export type TuiInteractionActionId =
+  | 'app.interrupt'
+  | 'view.root'
+  | 'composer.submit'
+  | 'composer.newline'
+  | 'composer.historyPrevious'
+  | 'composer.historyNext'
+  | 'composer.historySearch'
+  | 'composer.transcriptSearch'
+  | 'composer.stash'
+  | 'composer.undo'
+  | 'composer.redo'
+  | 'composer.openModels'
+  | 'composer.openResume'
+  | 'composer.openFooter'
+  | 'composer.cancel'
+  | 'composer.transcriptPreviousPage'
+  | 'composer.transcriptNextPage'
+  | 'composer.transcriptOldest'
+  | 'composer.transcriptLatest'
+  | 'suggestion.previous'
+  | 'suggestion.next'
+  | 'suggestion.accept'
+  | 'suggestion.dismiss'
+  | 'historySearch.next'
+  | 'historySearch.accept'
+  | 'historySearch.cancel'
+  | 'transcriptSearch.next'
+  | 'transcriptSearch.previous'
+  | 'transcriptSearch.accept'
+  | 'transcriptSearch.cancel'
+  | 'transcript.open'
+  | 'transcript.previous'
+  | 'transcript.next'
+  | 'transcript.inspect'
+  | 'transcript.copy'
+  | 'transcript.close'
+  | 'detail.previousPage'
+  | 'detail.nextPage'
+  | 'detail.copy'
+  | 'detail.close'
+  | 'pluginHub.close'
+  | 'pluginHub.previous'
+  | 'pluginHub.next'
+  | 'pluginHub.previousPage'
+  | 'pluginHub.nextPage'
+  | 'pluginHub.accept'
+  | 'pluginHub.toggleView'
+  | 'pluginHub.search'
+  | 'pluginHub.refresh'
+  | 'pluginHub.sort'
+  | 'pluginHub.category'
+  | 'dialog.previous'
+  | 'dialog.next'
+  | 'dialog.accept'
+  | 'dialog.cancel'
+  | 'dialog.previousPage'
+  | 'dialog.nextPage'
+  | 'work.previous'
+  | 'work.next'
+  | 'work.cancel'
+  | 'work.inspect'
+  | 'work.close'
+  | 'footer.previous'
+  | 'footer.next'
+  | 'footer.activate'
+  | 'footer.close'
+  | 'approval.previous'
+  | 'approval.next'
+  | 'approval.previousPage'
+  | 'approval.nextPage'
+  | 'approval.allowOnce'
+  | 'approval.reject'
+  | 'help.open'
+
+/** One normalized key or command gesture attached to an interaction action. */
+export interface TuiInteractionBinding {
+  /** Stable lowercase sequence used by input matching. */
+  readonly sequence: string
+  /** User-facing sequence that preserves familiar key spelling. */
+  readonly label: string
+  /** Whether input dispatch or the command registry owns the gesture. */
+  readonly kind: 'key' | 'command'
+}
+
+/** One immutable action shown by the interaction help panel. */
+export interface TuiInteractionDescriptor {
+  /** Stable package-owned action identifier. */
+  readonly id: TuiInteractionActionId
+  /** Input context that owns the action. */
+  readonly context: TuiInteractionContext
+  /** Concise user-facing action name. */
+  readonly description: string
+  /** Key and command gestures in this built-in or resolved descriptor. */
+  readonly bindings: readonly TuiInteractionBinding[]
+  /** Optional runtime capability required before help exposes the action. */
+  readonly requires?: 'modelPicker' | 'resumePicker' | 'approval' | 'childView'
+}
+
+/** Ink key flags used by the pure keybinding matcher. */
+export interface TuiKeypress {
+  /** Ctrl modifier. */
+  readonly ctrl?: boolean
+  /** Shift modifier. */
+  readonly shift?: boolean
+  /** Alt/Meta modifier. */
+  readonly meta?: boolean
+  /** Return key. */
+  readonly return?: boolean
+  /** Escape key. */
+  readonly escape?: boolean
+  /** Tab key. */
+  readonly tab?: boolean
+  /** Up arrow. */
+  readonly upArrow?: boolean
+  /** Down arrow. */
+  readonly downArrow?: boolean
+  /** Left arrow. */
+  readonly leftArrow?: boolean
+  /** Right arrow. */
+  readonly rightArrow?: boolean
+  /** Page Up key. */
+  readonly pageUp?: boolean
+  /** Page Down key. */
+  readonly pageDown?: boolean
+  /** Home key. */
+  readonly home?: boolean
+  /** End key. */
+  readonly end?: boolean
+  /** Backspace key. */
+  readonly backspace?: boolean
+  /** Forward Delete key. */
+  readonly delete?: boolean
+  /** Bracketed-paste payload rather than a shortcut key. */
+  readonly paste?: boolean
+  /** Super or Command modifier reported by an enhanced keyboard protocol. */
+  readonly super?: boolean
+  /** Hyper modifier reported by an enhanced keyboard protocol. */
+  readonly hyper?: boolean
+}
+
+/** Runtime facts that select the one non-global input owner. */
+export interface TuiInteractionModeState {
+  /** Approval currently owns input. */
+  readonly approval: boolean
+  /** Help or structured-question dialog currently owns input. */
+  readonly dialog: boolean
+  /** Background-work panel currently owns input. */
+  readonly work: boolean
+  /** A bounded transcript detail is open. */
+  readonly detail: boolean
+  /** The read-only Plugin Hub panel owns input. */
+  readonly pluginHub?: boolean
+  /** Transcript browse mode is active. */
+  readonly transcript: boolean
+  /** Complete-transcript search is active. */
+  readonly transcriptSearch: boolean
+  /** Submitted-history search is active. */
+  readonly historySearch: boolean
+  /** A suggestion query is active. */
+  readonly suggestion: boolean
+  /** Actionable footer navigation is active. */
+  readonly footer: boolean
+}
+
+/** Capabilities used to remove unavailable actions from interaction help. */
+export interface TuiInteractionCapabilities {
+  /** The effective command registry provides the model picker. */
+  readonly modelPicker: boolean
+  /** The effective command registry provides the Session picker. */
+  readonly resumePicker: boolean
+  /** The TUI composition provides approval interaction. */
+  readonly approval: boolean
+  /** A child Agent transcript is the active view. */
+  readonly childView: boolean
+}
+
+/** One preformatted physical row in the bounded interaction help panel. */
+export interface TuiInteractionHelpLine {
+  /** Stable React key. */
+  readonly key: string
+  /** One terminal row of help text. */
+  readonly text: string
+  /** Visual role used by the renderer. */
+  readonly kind: 'heading' | 'binding' | 'description'
+}
+
+const key = (sequence: string, label: string): TuiInteractionBinding => Object.freeze({
+  sequence, label, kind: 'key' as const,
+})
+const command = (sequence: string): TuiInteractionBinding => Object.freeze({
+  sequence, label: sequence, kind: 'command' as const,
+})
+const descriptor = (
+  id: TuiInteractionActionId,
+  context: TuiInteractionContext,
+  description: string,
+  bindings: readonly TuiInteractionBinding[],
+  requires?: TuiInteractionDescriptor['requires'],
+): TuiInteractionDescriptor => Object.freeze({
+  id, context, description, bindings: Object.freeze([...bindings]),
+  ...requires === undefined ? {} : { requires },
+})
+
+/** Fixed input-priority order; Global escape actions are checked before the active modal context. */
+export const TUI_INTERACTION_CONTEXT_PRIORITY: readonly TuiInteractionContext[] = Object.freeze([
+  'Global', 'Approval', 'PluginHub', 'Dialog', 'Work', 'Detail', 'TranscriptSearch', 'Transcript', 'HistorySearch', 'Suggestion', 'Footer', 'Composer',
+])
+
+/** Built-in bindings used by dispatch and help when settings do not override an action. */
+export const TUI_INTERACTION_REGISTRY: readonly TuiInteractionDescriptor[] = Object.freeze([
+  descriptor('app.interrupt', 'Global', 'Interrupt, cancel, or exit', [key('ctrl+c', 'Ctrl+C')]),
+  descriptor('view.root', 'Global', 'Return to root Agent', [key('ctrl+g', 'Ctrl+G')], 'childView'),
+  descriptor('help.open', 'Global', 'Open interaction help', [command('/help')]),
+  descriptor('transcript.open', 'Global', 'Browse transcript blocks', [key('ctrl+o', 'Ctrl+O')]),
+
+  descriptor('composer.submit', 'Composer', 'Send prompt', [key('enter', 'Enter')]),
+  descriptor('composer.newline', 'Composer', 'Insert newline', [key('ctrl+j', 'Ctrl+J')]),
+  descriptor('composer.historyPrevious', 'Composer', 'Previous submitted prompt', [key('up', 'Up')]),
+  descriptor('composer.historyNext', 'Composer', 'Next submitted prompt', [key('down', 'Down')]),
+  descriptor('composer.historySearch', 'Composer', 'Search submitted prompts', [key('ctrl+r', 'Ctrl+R')]),
+  descriptor('composer.transcriptSearch', 'Composer', 'Search complete transcript', [key('ctrl+f', 'Ctrl+F')]),
+  descriptor('composer.stash', 'Composer', 'Stash, restore, or swap draft', [key('ctrl+s', 'Ctrl+S')]),
+  descriptor('composer.undo', 'Composer', 'Undo composer edit', [
+    key('ctrl+_', 'Ctrl+_'), key('ctrl+shift+-', 'Ctrl+Shift+-'),
+  ]),
+  descriptor('composer.redo', 'Composer', 'Redo composer edit', [key('ctrl+y', 'Ctrl+Y')]),
+  descriptor('composer.openModels', 'Composer', 'Open model picker', [
+    key('meta+p', 'Alt+P'), command('/models'),
+  ], 'modelPicker'),
+  descriptor('composer.openResume', 'Composer', 'Open Session picker', [
+    key('meta+r', 'Alt+R'), command('/resume'),
+  ], 'resumePicker'),
+  descriptor('composer.openFooter', 'Composer', 'Focus status footer', [key('tab', 'Tab')]),
+  descriptor('composer.transcriptPreviousPage', 'Composer', 'Previous transcript page', [key('pageup', 'PageUp')]),
+  descriptor('composer.transcriptNextPage', 'Composer', 'Next transcript page', [key('pagedown', 'PageDown')]),
+  descriptor('composer.transcriptOldest', 'Composer', 'Oldest transcript block when prompt is empty', [key('home', 'Home')]),
+  descriptor('composer.transcriptLatest', 'Composer', 'Latest transcript block when prompt is empty', [key('end', 'End')]),
+  descriptor('composer.cancel', 'Composer', 'Cancel running Agent', [key('escape', 'Escape')]),
+
+  descriptor('suggestion.previous', 'Suggestion', 'Previous suggestion', [
+    key('up', 'Up'), key('shift+tab', 'Shift+Tab'),
+  ]),
+  descriptor('suggestion.next', 'Suggestion', 'Next suggestion', [key('down', 'Down')]),
+  descriptor('suggestion.accept', 'Suggestion', 'Accept selected suggestion', [
+    key('tab', 'Tab'), key('enter', 'Enter'),
+  ]),
+  descriptor('suggestion.dismiss', 'Suggestion', 'Close suggestions', [key('escape', 'Escape')]),
+
+  descriptor('historySearch.next', 'HistorySearch', 'Select an older match', [key('ctrl+r', 'Ctrl+R')]),
+  descriptor('historySearch.accept', 'HistorySearch', 'Accept current match', [key('enter', 'Enter')]),
+  descriptor('historySearch.cancel', 'HistorySearch', 'Restore original draft', [key('escape', 'Escape')]),
+
+  descriptor('transcriptSearch.next', 'TranscriptSearch', 'Select next transcript match', [key('enter', 'Enter')]),
+  descriptor('transcriptSearch.previous', 'TranscriptSearch', 'Select previous transcript match', [
+    key('shift+enter', 'Shift+Enter'),
+  ]),
+  descriptor('transcriptSearch.accept', 'TranscriptSearch', 'Keep selected transcript position', [
+    key('ctrl+f', 'Ctrl+F'),
+  ]),
+  descriptor('transcriptSearch.cancel', 'TranscriptSearch', 'Restore previous transcript position', [
+    key('escape', 'Escape'),
+  ]),
+
+  descriptor('transcript.previous', 'Transcript', 'Previous transcript block', [key('up', 'Up')]),
+  descriptor('transcript.next', 'Transcript', 'Next transcript block', [key('down', 'Down')]),
+  descriptor('transcript.inspect', 'Transcript', 'Open focused detail', [key('enter', 'Enter')]),
+  descriptor('transcript.copy', 'Transcript', 'Copy focused transcript block', [key('y', 'Y')]),
+  descriptor('transcript.close', 'Transcript', 'Return to composer', [key('escape', 'Escape')]),
+
+  descriptor('detail.previousPage', 'Detail', 'Previous detail page', [key('pageup', 'PageUp')]),
+  descriptor('detail.nextPage', 'Detail', 'Next detail page', [key('pagedown', 'PageDown')]),
+  descriptor('detail.copy', 'Detail', 'Copy complete detail', [key('y', 'Y')]),
+  descriptor('detail.close', 'Detail', 'Close detail', [key('enter', 'Enter'), key('escape', 'Escape')]),
+
+  descriptor('pluginHub.close', 'PluginHub', 'Close Plugin Hub', [key('escape', 'Escape')]),
+  descriptor('pluginHub.previous', 'PluginHub', 'Previous plugin', [key('up', 'Up')]),
+  descriptor('pluginHub.next', 'PluginHub', 'Next plugin', [key('down', 'Down')]),
+  descriptor('pluginHub.previousPage', 'PluginHub', 'Previous plugin page', [key('pageup', 'PageUp')]),
+  descriptor('pluginHub.nextPage', 'PluginHub', 'Next plugin page', [key('pagedown', 'PageDown')]),
+  descriptor('pluginHub.accept', 'PluginHub', 'Open or confirm selected plugin action', [key('enter', 'Enter')]),
+  descriptor('pluginHub.toggleView', 'PluginHub', 'Switch Discover and Installed', [key('tab', 'Tab')]),
+  descriptor('pluginHub.search', 'PluginHub', 'Search Plugin Hub', [key('ctrl+f', 'Ctrl+F')]),
+  descriptor('pluginHub.refresh', 'PluginHub', 'Refresh Plugin Hub', [key('r', 'R')]),
+  descriptor('pluginHub.sort', 'PluginHub', 'Change catalog sort', [key('meta+s', 'Alt+S')]),
+  descriptor('pluginHub.category', 'PluginHub', 'Change catalog category', [key('meta+c', 'Alt+C')]),
+
+  descriptor('dialog.previous', 'Dialog', 'Previous option or help row', [key('up', 'Up')]),
+  descriptor('dialog.next', 'Dialog', 'Next option or help row', [key('down', 'Down')]),
+  descriptor('dialog.previousPage', 'Dialog', 'Previous help page', [key('pageup', 'PageUp')]),
+  descriptor('dialog.nextPage', 'Dialog', 'Next help page', [key('pagedown', 'PageDown')]),
+  descriptor('dialog.accept', 'Dialog', 'Accept selected option', [key('enter', 'Enter')]),
+  descriptor('dialog.cancel', 'Dialog', 'Close or cancel dialog', [key('escape', 'Escape')]),
+
+  descriptor('work.previous', 'Work', 'Select previous work item', [key('up', 'Up')]),
+  descriptor('work.next', 'Work', 'Select next work item', [key('down', 'Down')]),
+  descriptor('work.cancel', 'Work', 'Stop selected live work', [key('x', 'X')]),
+  descriptor('work.inspect', 'Work', 'Open selected Agent transcript', [key('enter', 'Enter')]),
+  descriptor('work.close', 'Work', 'Close work panel', [key('escape', 'Escape')]),
+
+  descriptor('footer.previous', 'Footer', 'Previous status item', [
+    key('left', 'Left'), key('shift+tab', 'Shift+Tab'),
+  ]),
+  descriptor('footer.next', 'Footer', 'Next status item', [
+    key('right', 'Right'), key('tab', 'Tab'),
+  ]),
+  descriptor('footer.activate', 'Footer', 'Open selected status item', [key('enter', 'Enter')]),
+  descriptor('footer.close', 'Footer', 'Return to composer', [key('escape', 'Escape')]),
+
+  descriptor('approval.previous', 'Approval', 'Scroll approval detail up', [key('up', 'Up')], 'approval'),
+  descriptor('approval.next', 'Approval', 'Scroll approval detail down', [key('down', 'Down')], 'approval'),
+  descriptor('approval.previousPage', 'Approval', 'Previous approval detail page', [key('pageup', 'PageUp')], 'approval'),
+  descriptor('approval.nextPage', 'Approval', 'Next approval detail page', [key('pagedown', 'PageDown')], 'approval'),
+  descriptor('approval.allowOnce', 'Approval', 'Allow this request once', [key('y', 'Y')], 'approval'),
+  descriptor('approval.reject', 'Approval', 'Reject this request', [
+    key('n', 'N'), key('escape', 'Escape'),
+  ], 'approval'),
+])
+
+/** Per-action key replacements; command gestures remain attached to their action. */
+export type TuiKeybindingOverrides = Readonly<Partial<Record<TuiInteractionActionId, readonly string[]>>>
+
+/** Stable action ids accepted as keys in {@link TuiKeybindingOverrides}. */
+export const TUI_INTERACTION_ACTION_IDS: readonly TuiInteractionActionId[] = Object.freeze(
+  TUI_INTERACTION_REGISTRY.map(candidate => candidate.id),
+)
+
+// Each accepted sequence must be producible by normalizeKeypress(). Text keys are
+// one printable ASCII character; modified text also admits canonical `space`.
+const TUI_KEYBINDING_SEQUENCE_PATTERN = new RegExp([
+  '^(?!.*[A-Z])(?:',
+  'enter|escape|tab|shift\\+tab|shift\\+enter|up|down|left|right|pageup|pagedown|home|end|ctrl\\+shift\\+-|',
+  '(?:ctrl\\+(?:meta|super)\\+|ctrl\\+|meta\\+|super\\+|hyper\\+)(?:space|[!-~])|',
+  '[!-~])$',
+].join(''), 'u')
+const RESERVED_CONTEXT_SEQUENCES: Readonly<Partial<Record<TuiInteractionContext, ReadonlySet<string>>>> = Object.freeze({
+  Dialog: new Set(['tab', 'y', 'n', 's', 'd']),
+})
+
+/** Schema for canonical lowercase key sequences keyed by known action id. */
+export const TUI_KEYBINDING_OVERRIDES_SCHEMA = z.dict(
+  z.array(z.string().min(1).max(32).pattern(TUI_KEYBINDING_SEQUENCE_PATTERN)).max(8),
+  z.union(TUI_INTERACTION_ACTION_IDS),
+) as unknown as z<TuiKeybindingOverrides>
+
+/**
+ * Reject ambiguous or unsafe effective bindings that the structural schema cannot express.
+ * @param overrides - schema-validated per-action key replacements.
+ * @throws when one action repeats a key, two actions in one context share a key, or Ctrl+C could be removed.
+ */
+export function validateTuiKeybindingOverrides(overrides: TuiKeybindingOverrides): void {
+  const interrupt = overrides['app.interrupt']
+  if (interrupt !== undefined && !interrupt.includes('ctrl+c')) {
+    throw new Error('tui.keybindings: app.interrupt must retain ctrl+c for cancellation and terminal restoration')
+  }
+  const occupied = new Map<string, TuiInteractionActionId>()
+  for (const candidate of TUI_INTERACTION_REGISTRY) {
+    const sequences = overrides[candidate.id]
+      ?? candidate.bindings.filter(binding => binding.kind === 'key').map(binding => binding.sequence)
+    const local = new Set<string>()
+    for (const sequence of sequences) {
+      if (RESERVED_CONTEXT_SEQUENCES[candidate.context]?.has(sequence) === true) {
+        throw new Error(`tui.keybindings: ${JSON.stringify(sequence)} is reserved by dialog-local input`)
+      }
+      if (local.has(sequence)) {
+        throw new Error(`tui.keybindings: ${candidate.id} repeats ${JSON.stringify(sequence)}`)
+      }
+      local.add(sequence)
+      const key = `${candidate.context}\0${sequence}`
+      const previous = occupied.get(key)
+      if (previous !== undefined) {
+        throw new Error(`tui.keybindings: ${JSON.stringify(sequence)} conflicts in ${candidate.context} between ${previous} and ${candidate.id}`)
+      }
+      occupied.set(key, candidate.id)
+    }
+  }
+}
+
+/**
+ * Replace configured key gestures while retaining command gestures and descriptor metadata.
+ * @param overrides - schema-validated per-action key replacements.
+ * @returns one deeply immutable registry consumed by both dispatch and help.
+ * @throws when the effective registry is ambiguous or removes the Ctrl+C safety path.
+ */
+export function resolveTuiInteractionRegistry(
+  overrides: TuiKeybindingOverrides,
+): readonly TuiInteractionDescriptor[] {
+  validateTuiKeybindingOverrides(overrides)
+  return Object.freeze(TUI_INTERACTION_REGISTRY.map((candidate) => {
+    const sequences = overrides[candidate.id]
+    if (sequences === undefined) return candidate
+    const commands = candidate.bindings.filter(binding => binding.kind === 'command')
+    return descriptor(candidate.id, candidate.context, candidate.description, [
+      ...sequences.map(sequence => key(sequence, tuiKeybindingLabel(sequence))),
+      ...commands,
+    ], candidate.requires)
+  }))
+}
+
+const helpContextOrder: readonly TuiInteractionContext[] = Object.freeze([
+  'Global', 'Composer', 'Suggestion', 'HistorySearch', 'TranscriptSearch', 'Transcript', 'Detail', 'PluginHub', 'Dialog', 'Work', 'Footer', 'Approval',
+])
+
+const contextLabels: Readonly<Record<TuiInteractionContext, string>> = Object.freeze({
+  Global: 'Global',
+  Composer: 'Composer',
+  Suggestion: 'Suggestions',
+  HistorySearch: 'History search',
+  TranscriptSearch: 'Transcript search',
+  Transcript: 'Transcript browse',
+  Detail: 'Detail',
+  PluginHub: 'Plugin Hub',
+  Dialog: 'Dialogs',
+  Work: 'Background work',
+  Footer: 'Status footer',
+  Approval: 'Approval',
+})
+
+const controlSequences: Readonly<Record<string, string>> = Object.freeze({
+  '\u0003': 'ctrl+c',
+  '\u0006': 'ctrl+f',
+  '\u0007': 'ctrl+g',
+  '\n': 'ctrl+j',
+  '\u0012': 'ctrl+r',
+  '\u0013': 'ctrl+s',
+  '\u0019': 'ctrl+y',
+  '\u001f': 'ctrl+_',
+})
+
+const terminalSequences: Readonly<Record<string, string>> = Object.freeze({
+  '[13;2u': 'shift+enter',
+  '[27;2;13~': 'shift+enter',
+  '\u001b[13;2u': 'shift+enter',
+  '\u001b[27;2;13~': 'shift+enter',
+  '\u001b[H': 'home',
+  '\u001bOH': 'home',
+  '\u001b[1~': 'home',
+  '\u001b[7~': 'home',
+  '\u001b[F': 'end',
+  '\u001bOF': 'end',
+  '\u001b[4~': 'end',
+  '\u001b[8~': 'end',
+  '\u001b[D': 'left',
+  '\u001b[C': 'right',
+})
+
+/**
+ * Resolve the highest-priority non-global input owner.
+ * @param state - active local and modal modes.
+ * @returns the one context allowed to consume ordinary input.
+ */
+export function resolveTuiInteractionContext(state: TuiInteractionModeState): Exclude<TuiInteractionContext, 'Global'> {
+  for (const context of TUI_INTERACTION_CONTEXT_PRIORITY) {
+    if (context !== 'Global' && context !== 'Composer' && tuiInteractionContextActive(context, state)) return context
+  }
+  return 'Composer'
+}
+
+/**
+ * Match an Ink key event against one effective registry for one context.
+ * @param context - current input owner.
+ * @param input - Ink input text or terminal control sequence.
+ * @param keypress - Ink key flags.
+ * @param registry - effective bindings; defaults to the built-in registry.
+ * @returns the matching action id, or `undefined` for ordinary text and unbound keys.
+ */
+export function matchTuiInteractionAction(
+  context: TuiInteractionContext,
+  input: string,
+  keypress: TuiKeypress,
+  registry: readonly TuiInteractionDescriptor[] = TUI_INTERACTION_REGISTRY,
+): TuiInteractionActionId | undefined {
+  const sequence = normalizeKeypress(input, keypress)
+  if (sequence === undefined) return undefined
+  return registry.find(candidate => candidate.context === context
+    && candidate.bindings.some(binding => binding.kind === 'key' && binding.sequence === sequence))?.id
+}
+
+/**
+ * Filter interaction help to actions supported by the current composition.
+ * @param capabilities - effective model-picker, Session-picker, and approval availability.
+ * @param registry - effective bindings; defaults to the built-in registry.
+ * @returns immutable descriptors in stable context and registry order.
+ */
+export function effectiveTuiInteractionDescriptors(
+  capabilities: TuiInteractionCapabilities,
+  registry: readonly TuiInteractionDescriptor[] = TUI_INTERACTION_REGISTRY,
+): readonly TuiInteractionDescriptor[] {
+  return Object.freeze(registry.filter((candidate) => {
+    if (candidate.requires === 'modelPicker') return capabilities.modelPicker
+    if (candidate.requires === 'resumePicker') return capabilities.resumePicker
+    if (candidate.requires === 'approval') return capabilities.approval
+    if (candidate.requires === 'childView') return capabilities.childView
+    return true
+  }))
+}
+
+/**
+ * Project effective descriptors into fixed physical rows for a bounded panel.
+ * @param descriptors - effective immutable action descriptors.
+ * @param columns - available panel columns.
+ * @returns stable heading, binding, and description rows.
+ */
+export function tuiInteractionHelpLines(
+  descriptors: readonly TuiInteractionDescriptor[],
+  columns: number,
+): readonly TuiInteractionHelpLine[] {
+  const wide = columns >= 72
+  const lines: TuiInteractionHelpLine[] = []
+  for (const context of helpContextOrder) {
+    const actions = descriptors.filter(candidate => candidate.context === context)
+    if (actions.length === 0) continue
+    lines.push({ key: `heading:${context}`, text: contextLabels[context], kind: 'heading' })
+    const bindingWidth = wide
+      ? Math.max(...actions.map(action => bindingLabel(action).length))
+      : 0
+    for (const action of actions) {
+      const bindings = bindingLabel(action)
+      if (wide) {
+        lines.push({
+          key: `action:${action.id}`,
+          text: `  ${bindings.padEnd(bindingWidth)}  ${action.description}`,
+          kind: 'binding',
+        })
+      } else {
+        lines.push({ key: `binding:${action.id}`, text: `  ${bindings}`, kind: 'binding' })
+        lines.push({ key: `description:${action.id}`, text: `    ${action.description}`, kind: 'description' })
+      }
+    }
+  }
+  return Object.freeze(lines.map(line => Object.freeze(line)))
+}
+
+function bindingLabel(action: TuiInteractionDescriptor): string {
+  return action.bindings.length === 0 ? 'Unbound' : action.bindings.map(binding => binding.label).join(' / ')
+}
+
+function tuiKeybindingLabel(sequence: string): string {
+  const named: Readonly<Record<string, string>> = {
+    enter: 'Enter', escape: 'Escape', tab: 'Tab', up: 'Up', down: 'Down', left: 'Left', right: 'Right',
+    pageup: 'PageUp', pagedown: 'PageDown', home: 'Home', end: 'End', space: 'Space',
+  }
+  return sequence.split('+').map((part) => {
+    if (part === 'ctrl') return 'Ctrl'
+    if (part === 'meta') return 'Alt'
+    if (part === 'super') return 'Super'
+    if (part === 'hyper') return 'Hyper'
+    if (part === 'shift') return 'Shift'
+    return named[part] ?? part.toLocaleUpperCase()
+  }).join('+')
+}
+
+function normalizeKeypress(input: string, keypress: TuiKeypress): string | undefined {
+  if (keypress.paste === true) return undefined
+  const control = controlSequences[input]
+  if (control !== undefined) return control
+  const terminal = terminalSequences[input]
+  if (terminal !== undefined) return terminal
+  if (keypress.pageUp === true) return 'pageup'
+  if (keypress.pageDown === true) return 'pagedown'
+  if (keypress.home === true) return 'home'
+  if (keypress.end === true) return 'end'
+  if (keypress.return === true) return keypress.shift === true ? 'shift+enter' : 'enter'
+  if (keypress.escape === true) return 'escape'
+  if (keypress.tab === true) return keypress.shift === true ? 'shift+tab' : 'tab'
+  if (keypress.upArrow === true) return 'up'
+  if (keypress.downArrow === true) return 'down'
+  if (keypress.leftArrow === true) return 'left'
+  if (keypress.rightArrow === true) return 'right'
+  if (input === '' || input.includes('\u001b')) return undefined
+  const value = input === ' ' ? 'space' : input.toLocaleLowerCase()
+  if (keypress.ctrl === true && keypress.shift === true && (value === '-' || value === '_')) return 'ctrl+shift+-'
+  if (keypress.ctrl === true && keypress.meta === true) return `ctrl+meta+${value}`
+  if (keypress.ctrl === true && keypress.super === true) return `ctrl+super+${value}`
+  if (keypress.ctrl === true) return `ctrl+${value}`
+  if (keypress.super === true) return `super+${value}`
+  if (keypress.hyper === true) return `hyper+${value}`
+  if (keypress.meta === true) return `meta+${value}`
+  return value
+}
+
+function tuiInteractionContextActive(
+  context: Exclude<TuiInteractionContext, 'Global' | 'Composer'>,
+  state: TuiInteractionModeState,
+): boolean {
+  if (context === 'Approval') return state.approval
+  if (context === 'Dialog') return state.dialog
+  if (context === 'PluginHub') return state.pluginHub === true
+  if (context === 'Work') return state.work
+  if (context === 'Detail') return state.detail
+  if (context === 'TranscriptSearch') return state.transcriptSearch
+  if (context === 'Transcript') return state.transcript
+  if (context === 'HistorySearch') return state.historySearch
+  if (context === 'Suggestion') return state.suggestion
+  return state.footer
+}

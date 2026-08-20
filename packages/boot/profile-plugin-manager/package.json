@@ -1,0 +1,53 @@
+{
+  "name": "@lingxi-ai-cn/dsh-profile-plugin-manager",
+  "description": "Host-side profile plugin locks, installed truth, detached plans, and exact local mutations",
+  "version": "0.1.0-rc.8",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lingxi-AI-cn/dsh-tui-plugin.git",
+    "directory": "packages/boot/profile-plugin-manager"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "js-yaml": "^4.2.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-app-boot": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-atomic-write": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-invariants": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-native-command": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-output-retention": "0.1.0-rc.8",
+    "@deepseek-ai/cordis": "4.0.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-app-boot": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-atomic-write": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-invariants": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-native-command": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-output-retention": "0.1.0-rc.8",
+    "@types/js-yaml": "^4.0.9",
+    "@deepseek-ai/cordis": "4.0.1"
+  }
+}

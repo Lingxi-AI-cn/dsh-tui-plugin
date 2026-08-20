@@ -1,0 +1,32 @@
+{
+  "name": "@lingxi-ai-cn/dsh-tui-plugin-workspace",
+  "version": "0.1.0-rc.8",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown",
+    "test": "vitest run",
+    "test:perf": "vitest run packages/ui/tui/tests/long-session.perf.tsx",
+    "verify:source": "node scripts/verify-public-source.mjs",
+    "verify:source-manifest": "node scripts/generate-source-manifest.mjs --check",
+    "generate:source-manifest": "node scripts/generate-source-manifest.mjs --write",
+    "verify:pack": "tsx scripts/verify-tui-plugin-pack.ts",
+    "verify:clean-room": "tsx scripts/verify-tui-plugin-clean-room.ts",
+    "pack:release": "node scripts/pack-release.mjs",
+    "verify": "pnpm run verify:source && pnpm run verify:source-manifest && pnpm run test && pnpm run build && pnpm run verify:pack"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-base": "0.1.0-rc.8",
+    "@lingxi-ai-cn/dsh-tui": "workspace:*",
+    "@types/node": "^22.20.0",
+    "tsdown": "^0.22.2",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

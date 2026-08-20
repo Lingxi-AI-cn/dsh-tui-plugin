@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/boot/profile-plugin-manager" },
+    { "path": "packages/interaction/plugin-hub" },
+    { "path": "packages/host/session-export" },
+    { "path": "packages/interaction/plugin-hub-local" },
+    { "path": "packages/ui/tui" },
+    { "path": "packages/bundle/tui-app" }
+  ]
+}

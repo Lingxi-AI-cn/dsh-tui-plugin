@@ -1,0 +1,104 @@
+{
+  "name": "@lingxi-ai-cn/dsh-tui-runtime",
+  "description": "Native terminal UI for one in-process DeepSeek Harness Agent and Session",
+  "version": "0.1.0-rc.8",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lingxi-AI-cn/dsh-tui-plugin.git",
+    "directory": "packages/ui/tui"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "ink": "5.2.1",
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-gfm": "^3.1.0",
+    "micromark-extension-gfm": "^3.0.0",
+    "react": "^18.3.1",
+    "string-width": "^7.2.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis-plugin-loader": "1.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-agent-default-model": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-agent-presets": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-cmdline": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-compaction": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-commands": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-fs": "0.1.0-rc.8",
+    "@lingxi-ai-cn/dsh-session-export": "workspace:*",
+    "@deepseek-ai/dsh-invariants": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-jobs": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-native-command": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-permission-presets": "0.1.0-rc.8",
+    "@lingxi-ai-cn/dsh-plugin-hub": "workspace:*",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-projection": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-projection-cache": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-query": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-title": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-subagent": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-token-meter": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-persistence": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-user-approval": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-user-questions": "0.1.0-rc.8",
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/schemastery": "3.18.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis-plugin-loader": "1.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-agent-default-model": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-agent-presets": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-cmdline": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-compaction": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-commands": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-fs": "0.1.0-rc.8",
+    "@lingxi-ai-cn/dsh-session-export": "workspace:*",
+    "@deepseek-ai/dsh-invariants": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-jobs": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-native-command": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-permission-presets": "0.1.0-rc.8",
+    "@lingxi-ai-cn/dsh-plugin-hub": "workspace:*",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-projection": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-projection-cache": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-query": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-title": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-subagent": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-token-meter": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-persistence": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-user-approval": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-user-questions": "0.1.0-rc.8",
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/schemastery": "3.18.1",
+    "@types/react": "~18.3.1"
+  }
+}

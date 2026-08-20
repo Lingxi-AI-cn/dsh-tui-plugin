@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "declaration": true,
+    "sourceMap": true,
+    "declarationMap": true,
+    "composite": true,
+    "incremental": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": false,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["node"],
+    "paths": {
+      "@lingxi-ai-cn/dsh-profile-plugin-manager": ["./packages/boot/profile-plugin-manager/src"],
+      "@lingxi-ai-cn/dsh-plugin-hub": ["./packages/interaction/plugin-hub/src"],
+      "@lingxi-ai-cn/dsh-plugin-hub-local": ["./packages/interaction/plugin-hub-local/src"],
+      "@lingxi-ai-cn/dsh-session-export": ["./packages/host/session-export/src"],
+      "@lingxi-ai-cn/dsh-tui-runtime": ["./packages/ui/tui/src"],
+      "@lingxi-ai-cn/dsh-tui": ["./packages/bundle/tui-app/src"],
+      "@lingxi-ai-cn/dsh-tui/startup": ["./packages/bundle/tui-app/src/startup.ts"]
+    }
+  }
+}
