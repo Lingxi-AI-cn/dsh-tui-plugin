@@ -206,7 +206,13 @@ async function bootPty(official: string, dshScript: string, home: string, env: R
   const nodePtyRoot = join(store, nodePtyEntry, 'node_modules/node-pty')
   const requireFromOfficial = createRequire(join(nodePtyRoot, 'package.json'))
   const pty = requireFromOfficial(nodePtyRoot) as NodePty
-  const child = pty.spawn(process.execPath, [dshScript, '--profile', 'tui'], { cwd: home, cols: 100, rows: 30, env })
+  // Ink intentionally withholds live frames when CI=true. The PTY is the
+  // interactive user boundary under test, so make only its child environment
+  // advertise an ordinary terminal while the surrounding workflow stays CI.
+  const terminalEnv = { ...env, CI: 'false' }
+  const child = pty.spawn(process.execPath, [dshScript, '--profile', 'tui'], {
+    cwd: home, cols: 100, rows: 30, env: terminalEnv,
+  })
   let output = ''
   let probe = ''
   const data = child.onData((chunk) => {
