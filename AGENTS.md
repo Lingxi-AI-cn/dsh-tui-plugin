@@ -18,7 +18,9 @@ This repository is the sanitized public source and release surface for the indep
 ## Compatibility and versioning
 
 - Keep the root version, all six package versions, exact internal dependencies, compatibility guards, clean-room fixture, pack/release scripts, source-manifest metadata, and official DSH dependency catalog aligned.
+- The canonical post-install `tui` profile bundle list is exactly `@deepseek-ai/dsh-base` followed by `@lingxi-ai-cn/dsh-tui`. Treat legacy `@deepseek-ai/dsh-tui-app` entries as an explicit backup-and-recreate migration; never compose both bundles or install the reported upstream peers into the profile.
 - Support for a new DSH release is explicit and evidence-based. Do not widen peer ranges or dist-tags merely because a build compiles; require an official-package clean-room install, composition, PTY startup/exit, and terminal restoration on the exact target.
+- The bootstrap release uses only adapters supplied by the official base and does not include `openai-codex`. Keep provider migration guidance explicit; do not rewrite persisted settings or provider credentials during package installation.
 - Do not restore `dsh tui` as a required alias, modify the official DSH installation, install profile-local copies of upstream Service Definition packages, or add npm lifecycle scripts to the released package family.
 - Keep Plugin Hub profile mutation on the official external `dsh plugin` path until a generic official pre-composition recovery contract is available. Do not infer recovery safety from the TUI being able to start.
 

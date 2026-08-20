@@ -306,7 +306,14 @@ try {
   if (Object.keys(profileManifest.dependencies ?? {}).some(name => name !== TOP_PACKAGE)) {
     fail(`profile exposes internal TUI packages as direct dependencies: ${Object.keys(profileManifest.dependencies ?? {}).join(', ')}`)
   }
-  if (!profileManifest.dsh?.profile?.bundles?.includes(TOP_PACKAGE)) fail('top-level TUI bundle is not active')
+  const profileBundles = profileManifest.dsh?.profile?.bundles ?? []
+  const expectedProfileBundles = ['@deepseek-ai/dsh-base', TOP_PACKAGE]
+  const hasUnexpectedProfileBundles = profileBundles.length !== expectedProfileBundles.length
+    || profileBundles.some((name, index) => name !== expectedProfileBundles[index])
+  if (hasUnexpectedProfileBundles) {
+    const actualProfileBundles = profileBundles.join(', ')
+    fail(`profile bundle list is not the canonical post-install composition: ${actualProfileBundles}`)
+  }
   const profileLock = readFileSync(join(profile, 'pnpm-lock.yaml'), 'utf8')
   if (/\b(?:workspace|file|link):/u.test(profileLock)) fail('profile lockfile retains a local dependency protocol')
   if (existsSync(join(profile, 'node_modules/@deepseek-ai'))) fail('profile materialized duplicate official Host packages')

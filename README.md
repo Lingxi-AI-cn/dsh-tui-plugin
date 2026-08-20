@@ -35,6 +35,30 @@ dsh --profile tui
 
 For a project-local Harness installation, run the same commands through that installation's `dsh` binary.
 
+### Existing `tui` profiles
+
+The profile must contain exactly the official base bundle and the Lingxi TUI bundle. If `$DSH_HOME/profiles/tui/package.json` still lists the older `@deepseek-ai/dsh-tui-app`, adding this package leaves both patches active and startup fails with `duplicate loader entry id: storage`. Preserve the old profile as a backup, then let official DSH create a clean one:
+
+```sh
+export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
+mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.8
+```
+
+Sessions and credentials remain outside the profile directory. Reapply only reviewed custom profile patches; do not copy the old profile back wholesale.
+
+The missing-peer list printed by pnpm during profile installation is expected. Official DSH supplies those exact Host packages from its own installation, so installing the suggested `@deepseek-ai/*` peers into the profile would create a duplicate Host graph.
+
+The bootstrap release does not include an `openai-codex` adapter. If an existing `$DSH_HOME/settings.yaml` selects that provider, back up the file and change the default to an adapter supplied by official DSH before starting the TUI, for example:
+
+```yaml
+agent-default-model:
+  provider: deepseek-official
+  model: deepseek-v4-flash
+```
+
+The npm `install-scripts` warning shown while installing official DSH is separate from the plugin-profile warnings. Follow npm's printed `--allow-scripts` command if you choose to enable those official native helpers; do not install their packages into the TUI profile.
+
 ## Operations
 
 ```sh
@@ -59,7 +83,7 @@ pnpm run verify
 pnpm run verify:clean-room
 ```
 
-The clean-room gate installs the unmodified official Harness from npm, installs locally packed TUI packages through `dsh plugin`, composes the profile, boots a PTY, exits through `/quit`, restores terminal state, and confirms that the official installation was not modified.
+The clean-room gate installs the unmodified official Harness from npm, installs locally packed TUI packages through `dsh plugin`, asserts the exact two-bundle profile composition, boots a PTY, exits through `/quit`, restores terminal state, and confirms that the official installation was not modified.
 
 This repository is the sanitized public release surface. Package-source changes must keep all six versions and exact internal dependencies aligned, regenerate `SOURCE_MANIFEST.json`, and follow [AGENTS.md](AGENTS.md). Public release tags and npm versions are immutable.
 
