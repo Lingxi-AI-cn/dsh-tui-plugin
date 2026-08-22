@@ -133,6 +133,16 @@ function nodeRows(node: TranscriptNode, width: number, projectedText?: string): 
   return 1 + Math.max(1, terminalWrappedLines(projectedText ?? displayText(node, width), width).length) + 1
 }
 
+/**
+ * Read the exact physical rows occupied by one mounted transcript entry.
+ * @param entry - semantic node and the text selected for this frame.
+ * @param width - available terminal cells inside the transcript padding.
+ * @returns rendered rows, including the entry's visible bottom margin.
+ */
+export function tuiTranscriptWindowEntryRows(entry: TranscriptWindowEntry, width: number): number {
+  return nodeRows(entry.node, Math.max(1, width), entry.text)
+}
+
 function estimatedNodeRows(node: TranscriptNode, width: number): number {
   if (node.kind !== 'text') return nodeRows(node, width)
   if (node.tone === 'reasoning' && node.key.startsWith('event:')) return 2

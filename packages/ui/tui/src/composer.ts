@@ -1,6 +1,7 @@
 /** Pure Unicode-aware editor state and layout for the native TUI composer. */
 
 import stringWidth from 'string-width'
+import type { ImageAttachmentRef } from './host.ts'
 import { terminalSafe } from './sanitize.ts'
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
@@ -22,6 +23,12 @@ export interface TuiComposerPasteReference {
   readonly lines: number
 }
 
+/** Process-local image chip backed by a durable content-addressed reference. */
+export interface TuiComposerImageAttachment {
+  /** Durable image metadata; encoded bytes never enter composer state. */
+  readonly ref: ImageAttachmentRef
+}
+
 /** Text and insertion point restored by one composer undo or redo action. */
 export interface TuiComposerSnapshot {
   /** Complete editor text. */
@@ -30,6 +37,8 @@ export interface TuiComposerSnapshot {
   cursor: number
   /** Large-paste payloads still referenced by the visible text. */
   references?: readonly TuiComposerPasteReference[] | undefined
+  /** Image chips retained with this undo snapshot. */
+  attachments?: readonly TuiComposerImageAttachment[] | undefined
 }
 
 /** Edit category used to define composer undo units. */
@@ -43,6 +52,8 @@ export type TuiComposerEditKind =
   | 'multiline'
   | 'suggestion'
   | 'history'
+  | 'external-editor'
+  | 'attachment'
 
 /** Bounded process-local undo and redo stacks for one active draft. */
 export interface TuiComposerEditHistory {
@@ -66,6 +77,8 @@ export interface ComposerState {
   historyScratch?: TuiComposerDraft | undefined
   /** Large-paste payloads referenced by bounded placeholders in {@link text}. */
   references?: readonly TuiComposerPasteReference[] | undefined
+  /** Durable image chips attached to this draft. */
+  attachments?: readonly TuiComposerImageAttachment[] | undefined
   /** Process-local bounded edit history, created after the first text change. */
   editHistory?: TuiComposerEditHistory | undefined
 }
@@ -80,6 +93,8 @@ export interface TuiComposerDraft {
   editHistory?: TuiComposerEditHistory | undefined
   /** Large-paste payloads retained with this process-local draft. */
   references?: readonly TuiComposerPasteReference[] | undefined
+  /** Durable image chips retained with this process-local draft. */
+  attachments?: readonly TuiComposerImageAttachment[] | undefined
 }
 
 /** Result of one stash, restore, or swap action. */
@@ -117,6 +132,7 @@ function composerFromDraft(draft: TuiComposerDraft): ComposerState {
     cursor: draft.cursor,
     ...(draft.editHistory === undefined ? {} : { editHistory: draft.editHistory }),
     ...(draft.references === undefined ? {} : { references: draft.references }),
+    ...(draft.attachments === undefined ? {} : { attachments: draft.attachments }),
   }
 }
 
@@ -135,8 +151,9 @@ export function toggleTuiComposerStash(
     cursor: composer.cursor,
     ...(composer.editHistory === undefined ? {} : { editHistory: composer.editHistory }),
     ...(composer.references === undefined ? {} : { references: composer.references }),
+    ...(composer.attachments === undefined ? {} : { attachments: composer.attachments }),
   }
-  if (composer.text === '') {
+  if (composer.text === '' && (composer.attachments?.length ?? 0) === 0) {
     if (stash === undefined) return { composer, action: 'unchanged' }
     return { composer: composerFromDraft(stash), action: 'restored' }
   }
@@ -176,6 +193,7 @@ function snapshot(state: ComposerState): TuiComposerSnapshot {
     text: state.text,
     cursor: state.cursor,
     ...(state.references === undefined ? {} : { references: state.references }),
+    ...(state.attachments === undefined ? {} : { attachments: state.attachments }),
   }
 }
 
@@ -197,6 +215,7 @@ function referencesInText(
  * @param kind - edit category controlling coalescing.
  * @param now - edit timestamp used for bounded typing and deletion coalescing.
  * @param references - paste references retained by placeholders in the replacement text.
+ * @param attachments - image chips retained with the replacement text.
  * @returns updated editor with redo cleared.
  */
 export function replaceComposerText(
@@ -206,8 +225,9 @@ export function replaceComposerText(
   kind: TuiComposerEditKind,
   now = Date.now(),
   references = referencesInText(text, state.references),
+  attachments = state.attachments,
 ): ComposerState {
-  if (state.text === text && state.cursor === cursor && state.references === references) return state
+  if (state.text === text && state.cursor === cursor && state.references === references && state.attachments === attachments) return state
   const previous = state.editHistory
   const coalescing = previous?.coalescing
   const merge = mergeable(kind)
@@ -222,6 +242,7 @@ export function replaceComposerText(
     cursor,
     historyIndex: -1,
     ...(references === undefined ? {} : { references }),
+    ...(attachments === undefined ? {} : { attachments }),
     editHistory: {
       past,
       future: [],
@@ -244,6 +265,7 @@ export function undoComposerEdit(state: ComposerState): ComposerState {
     cursor: previous.cursor,
     historyIndex: -1,
     ...(previous.references === undefined ? {} : { references: previous.references }),
+    ...(previous.attachments === undefined ? {} : { attachments: previous.attachments }),
     editHistory: {
       past: history.past.slice(0, -1),
       future: boundedSnapshots([...history.future, snapshot(state)]),
@@ -265,6 +287,7 @@ export function redoComposerEdit(state: ComposerState): ComposerState {
     cursor: next.cursor,
     historyIndex: -1,
     ...(next.references === undefined ? {} : { references: next.references }),
+    ...(next.attachments === undefined ? {} : { attachments: next.attachments }),
     editHistory: {
       past: boundedSnapshots([...history.past, snapshot(state)]),
       future: history.future.slice(0, -1),
@@ -380,6 +403,7 @@ export function tuiComposerDraft(state: ComposerState): TuiComposerDraft {
     cursor: state.cursor,
     ...(state.editHistory === undefined ? {} : { editHistory: state.editHistory }),
     ...(state.references === undefined ? {} : { references: state.references }),
+    ...(state.attachments === undefined ? {} : { attachments: state.attachments }),
   }
 }
 
@@ -390,6 +414,105 @@ export function tuiComposerDraft(state: ComposerState): TuiComposerDraft {
  */
 export function restoreTuiComposerDraft(draft: TuiComposerDraft): ComposerState {
   return composerFromDraft(draft)
+}
+
+/** Add one durable image chip, deduplicating by its content-addressed id.
+ * @param state - current editor state.
+ * @param ref - durable image reference to retain.
+ * @param now - edit timestamp used for the undo unit.
+ * @returns updated editor state, or the unchanged state for a duplicate.
+ */
+export function addComposerImageAttachment(
+  state: ComposerState,
+  ref: ImageAttachmentRef,
+  now = Date.now(),
+): ComposerState {
+  if (state.attachments?.some(item => item.ref.attachmentId === ref.attachmentId)) return state
+  const attachments = Object.freeze([
+    ...(state.attachments ?? []),
+    Object.freeze({ ref }),
+  ])
+  return replaceComposerText(state, state.text, state.cursor, 'attachment', now, state.references, attachments)
+}
+
+/** Insert one system-clipboard payload as a single undoable text/chip edit.
+ * @param state - current editor state.
+ * @param input - clipboard text, normalized and terminal-sanitized before insertion.
+ * @param refs - durable image references admitted by the clipboard owner.
+ * @param now - edit timestamp used for the undo unit.
+ * @returns updated editor state containing the text/reference and image chips.
+ */
+export function insertComposerClipboard(
+  state: ComposerState,
+  input: string,
+  refs: readonly ImageAttachmentRef[] = [],
+  now = Date.now(),
+): ComposerState {
+  const attachments = refs.reduce<readonly TuiComposerImageAttachment[]>((current, ref) => {
+    if (current.some(item => item.ref.attachmentId === ref.attachmentId)) return current
+    return Object.freeze([...current, Object.freeze({ ref })])
+  }, state.attachments ?? [])
+  const nextAttachments = attachments.length === 0 ? undefined : attachments
+  const value = terminalSafe(input.replace(/\r\n?|\n/gu, '\n'))
+  if (value === '') {
+    return nextAttachments === state.attachments
+      ? state
+      : replaceComposerText(state, state.text, state.cursor, 'attachment', now, state.references, nextAttachments)
+  }
+  if (isLargeComposerPaste(value)) {
+    let number = (state.references?.length ?? 0) + 1
+    const bytes = Buffer.byteLength(value)
+    const lines = value.split('\n').length
+    let placeholder = `[Pasted text #${number}: ${lines} lines, ${formatPasteBytes(bytes)}]`
+    while (state.text.includes(placeholder)) {
+      number += 1
+      placeholder = `[Pasted text #${number}: ${lines} lines, ${formatPasteBytes(bytes)}]`
+    }
+    const reference = Object.freeze({ placeholder, text: value, bytes, lines })
+    return replaceComposerText(
+      state,
+      state.text.slice(0, state.cursor) + placeholder + state.text.slice(state.cursor),
+      state.cursor + placeholder.length,
+      'paste',
+      now,
+      Object.freeze([...(state.references ?? []), reference]),
+      nextAttachments,
+    )
+  }
+  const text = state.text.slice(0, state.cursor) + value + state.text.slice(state.cursor)
+  const kind = value.includes('\n')
+    ? 'multiline'
+    : Array.from(graphemes.segment(value)).length === 1 ? 'typing' : 'paste'
+  return replaceComposerText(state, text, state.cursor + value.length, kind, now, state.references, nextAttachments)
+}
+
+/** Remove one image chip by durable attachment id.
+ * @param state - current editor state.
+ * @param attachmentId - content-addressed id of the chip to remove.
+ * @param now - edit timestamp used for the undo unit.
+ * @returns updated editor state, or the unchanged state when no chip matches.
+ */
+export function removeComposerImageAttachment(
+  state: ComposerState,
+  attachmentId: ImageAttachmentRef['attachmentId'],
+  now = Date.now(),
+): ComposerState {
+  const attachments = state.attachments?.filter(item => item.ref.attachmentId !== attachmentId)
+  if (attachments === undefined || attachments.length === state.attachments?.length) return state
+  return replaceComposerText(
+    state, state.text, state.cursor, 'attachment', now, state.references,
+    attachments.length === 0 ? undefined : Object.freeze(attachments),
+  )
+}
+
+/** Remove the last image chip, used by Backspace when the text buffer is empty.
+ * @param state - current editor state.
+ * @param now - edit timestamp used for the undo unit.
+ * @returns updated editor state, or the unchanged state when no chip exists.
+ */
+export function removeLastComposerImageAttachment(state: ComposerState, now = Date.now()): ComposerState {
+  const last = state.attachments?.at(-1)
+  return last === undefined ? state : removeComposerImageAttachment(state, last.ref.attachmentId, now)
 }
 
 function formatPasteBytes(bytes: number): string {
@@ -491,7 +614,7 @@ export function traverseComposerHistory(
     const entry = history[history.length - 1 - index] ?? ''
     const draft = typeof entry === 'string' ? { text: entry, cursor: entry.length } : entry
     const edited = replaceComposerText(
-      state, draft.text, draft.cursor, 'history', now, draft.references,
+      state, draft.text, draft.cursor, 'history', now, draft.references, draft.attachments,
     )
     return {
       ...edited, historyIndex: index,
@@ -503,7 +626,7 @@ export function traverseComposerHistory(
   const entry = index < 0 ? state.historyScratch ?? { text: '', cursor: 0 } : history[history.length - 1 - index] ?? ''
   const draft = typeof entry === 'string' ? { text: entry, cursor: entry.length } : entry
   const edited = replaceComposerText(
-    state, draft.text, draft.cursor, 'history', now, draft.references,
+    state, draft.text, draft.cursor, 'history', now, draft.references, draft.attachments,
   )
   return { ...edited, historyIndex: index, historyScratch: index < 0 ? undefined : state.historyScratch }
 }

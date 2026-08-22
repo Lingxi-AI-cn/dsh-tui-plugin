@@ -22,6 +22,12 @@ import {
   type SessionLogCompressionLevel,
   type SessionLogExportReady,
 } from './zip.ts'
+import {
+  renderSessionMarkdown,
+  sessionMarkdownExportDeps,
+  sessionMarkdownFilename,
+} from './markdown.ts'
+import type { SessionMarkdownExportRequest } from './markdown.ts'
 
 export {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
@@ -37,6 +43,17 @@ export type {
   SessionLogExportReady,
   SessionLogZipEntry,
 } from './zip.ts'
+export {
+  renderSessionMarkdown,
+  sessionMarkdownExportDeps,
+  sessionMarkdownFilename,
+} from './markdown.ts'
+export type {
+  SessionMarkdownAttachmentPolicy,
+  SessionMarkdownExportDeps,
+  SessionMarkdownExportRequest,
+  SessionMarkdownSessionStore,
+} from './markdown.ts'
 
 /** Stable failure categories shared by the native writer and host transports. */
 export type SessionLogExportErrorCode =
@@ -315,6 +332,74 @@ export default class SessionLogExporter extends Service {
       throw new SessionLogExportError('write-failed', 'session log export failed while writing the archive', { cause: error })
     } finally {
       reader.releaseLock()
+    }
+  }
+
+  /**
+   * Render a summary-only human-readable Markdown projection and publish it
+   * atomically under the first available safe filename. The raw ZIP remains
+   * the diagnostic source of truth; tool arguments are omitted and attachment
+   * references are never copied into the Markdown file.
+   * @param request - root identity, descendant policy, and explicit attachment policy.
+   * @param directory - existing absolute host directory chosen by the operator.
+   * @param signal - complete projection, writing, and publication lifetime.
+   * @returns the exact published Markdown path and filename.
+   */
+  async writeMarkdownToDirectory(
+    request: SessionMarkdownExportRequest,
+    directory: string,
+    signal: AbortSignal,
+  ): Promise<SessionLogExportFile> {
+    signal.throwIfAborted()
+    if (!isAbsolute(directory)) {
+      throw new SessionLogExportError('destination-invalid', 'Session Markdown export destination must be an absolute directory')
+    }
+    try {
+      if (!(await stat(directory)).isDirectory()) {
+        throw new Error('destination is not a directory')
+      }
+    } catch (error) {
+      throw new SessionLogExportError(
+        'destination-invalid',
+        `Session Markdown export destination is not an accessible directory: ${directory}`,
+        { cause: error },
+      )
+    }
+
+    let markdown: string
+    try {
+      markdown = await renderSessionMarkdown(sessionMarkdownExportDeps(this.ctx), request, signal)
+      signal.throwIfAborted()
+    } catch (error) {
+      signal.throwIfAborted()
+      throw new SessionLogExportError(
+        'prepare-failed',
+        'Session Markdown export failed to prepare the projection',
+        { cause: error },
+      )
+    }
+
+    const filename = sessionMarkdownFilename(request.sessionId)
+    const tempPath = join(directory, `.${filename}.${randomUUID()}.tmp`)
+    let file: FileHandle | undefined
+    try {
+      file = await open(tempPath, 'wx', 0o600)
+      await writeChunk(file, new TextEncoder().encode(markdown), signal)
+      signal.throwIfAborted()
+      await file.sync()
+      await file.close()
+      file = undefined
+      return await publishExclusive(tempPath, directory, filename, signal)
+    } catch (error) {
+      try {
+        await file?.close()
+      } catch {
+        // Cleanup continues with unlink; close failure is secondary to the export failure.
+      }
+      await rm(tempPath, { force: true })
+      signal.throwIfAborted()
+      if (error instanceof SessionLogExportError) throw error
+      throw new SessionLogExportError('write-failed', 'Session Markdown export failed while writing the projection', { cause: error })
     }
   }
 }

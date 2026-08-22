@@ -7,7 +7,9 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const artifacts = join(root, 'artifacts')
 const publish = process.argv.includes('--publish')
+const audit = process.argv.includes('--audit')
 const provenance = process.argv.includes('--provenance')
+if (publish && audit) throw new Error('--publish and --audit are mutually exclusive')
 const tagAt = process.argv.indexOf('--tag')
 const tag = tagAt === -1 ? 'next' : process.argv[tagAt + 1]
 if (tag === undefined || !/^[a-z][a-z0-9._-]*$/u.test(tag)) throw new Error(`invalid npm tag ${String(tag)}`)
@@ -64,13 +66,22 @@ try {
     if (integrity !== entry.integrity || localPayload !== entry.payloadSha512) {
       throw new Error(`${entry.name}: artifact changed after packing`)
     }
-    if (publish) {
+    if (publish || audit) {
       const view = spawnSync('npm', ['view', `${entry.name}@${entry.version}`, 'dist', '--json', '--registry=https://registry.npmjs.org/'], { encoding: 'utf8' })
       if (view.status === 0) {
         const value = JSON.parse(view.stdout)
         const dist = Array.isArray(value) ? value[0] : value
         if (dist?.integrity === integrity) {
-          process.stdout.write(`publish-release: ${entry.name}@${entry.version} already matches; skipped\n`)
+          process.stdout.write(`publish-release: ${entry.name}@${entry.version} registry tarball matches\n`)
+          if (audit) {
+            const tags = JSON.parse(execFileSync('npm', [
+              'view', entry.name, 'dist-tags', '--json', '--registry=https://registry.npmjs.org/',
+            ], { encoding: 'utf8' }))
+            if (tags?.next !== entry.version) {
+              throw new Error(`${entry.name}: next dist-tag is ${String(tags?.next)}, expected ${entry.version}`)
+            }
+            process.stdout.write(`publish-release: ${entry.name} next dist-tag matches ${entry.version}\n`)
+          }
           continue
         }
         if (typeof dist?.tarball !== 'string') throw new Error(`${entry.name}@${entry.version} has no published tarball URL`)
@@ -78,9 +89,19 @@ try {
         if (publishedPayload !== localPayload) {
           throw new Error(`${entry.name}@${entry.version} already exists with different package contents`)
         }
-        process.stdout.write(`publish-release: ${entry.name}@${entry.version} payload matches; skipped\n`)
+        process.stdout.write(`publish-release: ${entry.name}@${entry.version} registry payload matches\n`)
+        if (audit) {
+          const tags = JSON.parse(execFileSync('npm', [
+            'view', entry.name, 'dist-tags', '--json', '--registry=https://registry.npmjs.org/',
+          ], { encoding: 'utf8' }))
+          if (tags?.next !== entry.version) {
+            throw new Error(`${entry.name}: next dist-tag is ${String(tags?.next)}, expected ${entry.version}`)
+          }
+          process.stdout.write(`publish-release: ${entry.name} next dist-tag matches ${entry.version}\n`)
+        }
         continue
       }
+      if (audit) throw new Error(`${entry.name}@${entry.version} is not published`)
     }
     const args = ['publish', tarball, '--access', 'public', '--tag', tag, '--registry=https://registry.npmjs.org/']
     if (!publish) args.push('--dry-run')

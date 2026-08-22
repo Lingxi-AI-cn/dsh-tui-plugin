@@ -1,8 +1,16 @@
 /** Pure actionable-footer descriptors and width-bounded projections. */
 
 import stringWidth from 'string-width'
-import type { ContextPressureProjection, ModelSelection, PermissionSelect } from './host.ts'
+import type {
+  ContextBreakdownProjection,
+  ContextPressureProjection,
+  ModelSelection,
+  PermissionSelect,
+  SessionStatsProjection,
+  TokenUsageProjection,
+} from './host.ts'
 import { terminalSafe } from './sanitize.ts'
+import { tuiMessage, type TuiLocale } from './locale.ts'
 import type { TuiWorkSummary } from './work.ts'
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
@@ -22,6 +30,16 @@ export interface TuiFooterItemDescriptor {
   readonly action: 'models' | 'permissions' | 'work' | 'detail'
   /** Complete read-only detail shown for local status items. */
   readonly detailLines: readonly string[]
+}
+
+/** One visible footer item span measured from the status row's content origin. */
+export interface TuiFooterPointerTarget {
+  /** Stable footer item identity. */
+  readonly itemId: TuiFooterItemId
+  /** Zero-based inclusive start cell within the status row content. */
+  readonly left: number
+  /** Zero-based inclusive end cell within the status row content. */
+  readonly right: number
 }
 
 /** Current viewport position needed by the transcript footer item. */
@@ -48,6 +66,12 @@ export interface TuiFooterSources {
   readonly permissions?: PermissionSelect | undefined
   /** Provider-anchored approximate context occupancy. */
   readonly context?: ContextPressureProjection | undefined
+  /** Durable provider usage buckets for the latest complete Session log. */
+  readonly tokenUsage?: TokenUsageProjection | undefined
+  /** Heuristic composition of the next request context. */
+  readonly contextBreakdown?: ContextBreakdownProjection | undefined
+  /** Whole-log settled model timing and decode facts. */
+  readonly sessionStats?: SessionStatsProjection | undefined
   /** Authoritative background-work counters. */
   readonly work?: TuiWorkSummary | undefined
   /** Full Session workspace path. */
@@ -59,23 +83,33 @@ export interface TuiFooterSources {
 /**
  * Project current authoritative state into stable actionable footer items.
  * @param sources - model, permission, context, workspace, and viewport facts.
+ * @param locale - active TUI locale; defaults to English for non-UI callers.
  * @returns immutable items in navigation order; unavailable context is omitted.
  */
-export function tuiFooterItems(sources: TuiFooterSources): readonly TuiFooterItemDescriptor[] {
+export function tuiFooterItems(
+  sources: TuiFooterSources,
+  locale: TuiLocale = 'en',
+): readonly TuiFooterItemDescriptor[] {
   const items: TuiFooterItemDescriptor[] = []
   const selection = sources.modelSelection
   if (selection !== undefined) {
     const effort = selection.reasoningEffort
     items.push(item(
       'model',
-      'model',
+      tuiMessage(locale, 'footer.label.model'),
       effort === undefined ? selection.model : `${selection.model}/${effort}`,
       'models',
       [
-        `Selection: ${sources.modelSelectionKind}`,
-        `Provider: ${selection.provider}`,
-        `Model: ${selection.model}`,
-        `Reasoning effort: ${effort ?? 'provider default'}`,
+        tuiMessage(locale, 'footer.model.selection', {
+          selection: tuiMessage(locale, sources.modelSelectionKind === 'running request'
+            ? 'footer.model.selection.running'
+            : 'footer.model.selection.next'),
+        }),
+        tuiMessage(locale, 'footer.model.provider', { provider: selection.provider }),
+        tuiMessage(locale, 'footer.model.model', { model: selection.model }),
+        tuiMessage(locale, 'footer.model.effort', {
+          effort: effort ?? tuiMessage(locale, 'footer.model.default'),
+        }),
       ],
     ))
   }
@@ -85,13 +119,15 @@ export function tuiFooterItems(sources: TuiFooterSources): readonly TuiFooterIte
     const current = permissions.options.find(option => option.value === permissions.currentValue)
     items.push(item(
       'permission',
-      'perm',
+      tuiMessage(locale, 'footer.label.permission'),
       current?.name ?? permissions.currentValue,
       'permissions',
       [
-        `Current preset: ${current?.name ?? permissions.currentValue}`,
+        tuiMessage(locale, 'footer.permission.current', { preset: current?.name ?? permissions.currentValue }),
         ...current?.description === undefined ? [] : [current.description],
-        `Available presets: ${permissions.options.filter(option => option.value !== 'custom').map(option => option.name).join(', ')}`,
+        tuiMessage(locale, 'footer.permission.available', {
+          presets: permissions.options.filter(option => option.value !== 'custom').map(option => option.name).join(', '),
+        }),
       ],
     ))
   }
@@ -99,18 +135,23 @@ export function tuiFooterItems(sources: TuiFooterSources): readonly TuiFooterIte
   const work = sources.work
   if (work !== undefined && work.total > 0) {
     const value = work.failed > 0
-      ? `${work.running}r/${work.queued}q/${work.failed}f`
-      : work.queued > 0 ? `${work.running}r/${work.queued}q` : `${work.running} running`
+      ? tuiMessage(locale, 'footer.work.compact.failed', {
+        running: work.running, queued: work.queued, failed: work.failed,
+      })
+      : work.queued > 0 ? tuiMessage(locale, 'footer.work.compact.queued', {
+        running: work.running, queued: work.queued,
+      })
+        : tuiMessage(locale, 'footer.work.value', { count: work.running })
     items.push(item(
       'work',
-      'work',
+      tuiMessage(locale, 'footer.label.work'),
       value,
       'work',
       [
-        `Running: ${work.running}`,
-        `Queued: ${work.queued}`,
-        `Failed: ${work.failed}`,
-        `Visible work rows: ${work.total}`,
+        tuiMessage(locale, 'footer.work.running', { count: work.running }),
+        tuiMessage(locale, 'footer.work.queued', { count: work.queued }),
+        tuiMessage(locale, 'footer.work.failed', { count: work.failed }),
+        tuiMessage(locale, 'footer.work.visible', { count: work.total }),
       ],
     ))
   }
@@ -121,17 +162,22 @@ export function tuiFooterItems(sources: TuiFooterSources): readonly TuiFooterIte
   if (used !== undefined && capacity !== undefined && capacity > 0) {
     const boundedUsed = Math.max(0, used)
     const percent = Math.round((boundedUsed / capacity) * 100)
-    const kind = context?.projectedTokens === undefined ? 'last request prompt' : 'next request projection'
+    const kind = tuiMessage(locale, context?.projectedTokens === undefined
+      ? 'footer.context.kind.last'
+      : 'footer.context.kind.next')
     items.push(item(
       'context',
-      'ctx',
+      tuiMessage(locale, 'footer.label.context'),
       `~${percent}%`,
       'detail',
       [
-        `Approximate ${kind}: ${formatTokens(boundedUsed)} tokens`,
-        `Context window: ${formatTokens(capacity)} tokens`,
-        `Approximate remaining: ${formatTokens(Math.max(0, capacity - boundedUsed))} tokens`,
-        'Provider usage anchors the sample; surface changes after that sample are estimated.',
+        tuiMessage(locale, 'footer.context.approximate', { kind, tokens: formatTokens(boundedUsed) }),
+        tuiMessage(locale, 'footer.context.window', { tokens: formatTokens(capacity) }),
+        tuiMessage(locale, 'footer.context.remaining', { tokens: formatTokens(Math.max(0, capacity - boundedUsed)) }),
+        tuiMessage(locale, 'footer.context.estimate'),
+        ...contextBreakdownLines(sources.contextBreakdown, locale),
+        ...tokenUsageLines(sources.tokenUsage, locale),
+        ...sessionTimingLines(sources.sessionStats, locale),
       ],
     ))
   }
@@ -139,10 +185,10 @@ export function tuiFooterItems(sources: TuiFooterSources): readonly TuiFooterIte
   if (sources.workspace !== undefined) {
     items.push(item(
       'workspace',
-      'cwd',
+      tuiMessage(locale, 'footer.label.workspace'),
       pathLabel(sources.workspace),
       'detail',
-      [`Session workspace: ${sources.workspace}`],
+      [tuiMessage(locale, 'footer.workspace', { workspace: sources.workspace })],
     ))
   }
 
@@ -153,14 +199,18 @@ export function tuiFooterItems(sources: TuiFooterSources): readonly TuiFooterIte
   const positionValue = `${position.hasOlder ? '↑' : ''}${range}${position.hasNewer ? '↓' : ''}`
   items.push(item(
     'transcript',
-    'view',
+    tuiMessage(locale, 'footer.label.transcript'),
     positionValue,
     'detail',
     [
-      `Mounted transcript blocks: ${range}`,
-      `Older content: ${position.hasOlder ? 'available' : 'none'}`,
-      `Newer content: ${position.hasNewer ? 'available' : 'none'}`,
-      'Transcript truth remains the durable Session log.',
+      tuiMessage(locale, 'footer.transcript.mounted', { range }),
+      tuiMessage(locale, 'footer.transcript.older', {
+        value: tuiMessage(locale, position.hasOlder ? 'footer.transcript.available' : 'footer.transcript.none'),
+      }),
+      tuiMessage(locale, 'footer.transcript.newer', {
+        value: tuiMessage(locale, position.hasNewer ? 'footer.transcript.available' : 'footer.transcript.none'),
+      }),
+      tuiMessage(locale, 'footer.transcript.truth'),
     ],
   ))
   return Object.freeze(items)
@@ -214,7 +264,23 @@ export function tuiFooterStatusLine(
   items: readonly TuiFooterItemDescriptor[],
   columns: number,
 ): string {
-  if (items.length === 0 || columns <= 0) return ''
+  return footerStatusSegments(items, columns).map(segment => segment.text).join(' | ')
+}
+
+/**
+ * Resolve the visible footer item spans using the exact status-row width policy.
+ * Separator cells are intentionally excluded so a click between items does not
+ * activate either adjacent status item.
+ *
+ * @param items - visible footer items.
+ * @param columns - physical status-row budget.
+ * @returns rendered item text and cell spans.
+ */
+function footerStatusSegments(
+  items: readonly TuiFooterItemDescriptor[],
+  columns: number,
+): readonly { readonly itemId: TuiFooterItemId; readonly text: string; readonly width: number }[] {
+  if (items.length === 0 || columns <= 0) return []
   const separator = ' | '
   const separators = separator.length * Math.max(0, items.length - 1)
   const available = Math.max(items.length, columns - separators)
@@ -243,7 +309,46 @@ export function tuiFooterStatusLine(
     if (!grew) break
   }
   const rendered = texts.map((text, index) => truncateCells(text, budgets[index] ?? 1))
-  return truncateCells(rendered.join(separator), columns)
+  const clipped = truncateCells(rendered.join(separator), columns)
+  const clippedWidth = stringWidth(clipped)
+  const segments: { itemId: TuiFooterItemId; text: string; width: number }[] = []
+  let offset = 0
+  for (let index = 0; index < rendered.length; index += 1) {
+    if (offset >= clippedWidth) break
+    const width = Math.min(stringWidth(rendered[index] ?? ''), clippedWidth - offset)
+    if (width > 0) {
+      segments.push({
+        itemId: items[index]?.id ?? 'model',
+        text: truncateCells(rendered[index] ?? '', width),
+        width,
+      })
+    }
+    offset += stringWidth(rendered[index] ?? '') + (index === rendered.length - 1 ? 0 : stringWidth(separator))
+  }
+  return Object.freeze(segments.map(segment => Object.freeze(segment)))
+}
+
+/**
+ * Return clickable spans for the mounted footer status row.
+ * @param items - visible footer items.
+ * @param columns - physical status-row budget.
+ * @returns immutable zero-based content offsets.
+ */
+export function tuiFooterPointerTargets(
+  items: readonly TuiFooterItemDescriptor[],
+  columns: number,
+): readonly TuiFooterPointerTarget[] {
+  const targets: TuiFooterPointerTarget[] = []
+  let offset = 0
+  for (const segment of footerStatusSegments(items, columns)) {
+    targets.push(Object.freeze({
+      itemId: segment.itemId,
+      left: offset,
+      right: offset + segment.width - 1,
+    }))
+    offset += segment.width + 3
+  }
+  return Object.freeze(targets)
 }
 
 /**
@@ -251,18 +356,22 @@ export function tuiFooterStatusLine(
  * @param items - visible footer items.
  * @param selected - current item id, possibly stale after a width change.
  * @param columns - complete row budget in terminal cells.
+ * @param locale - active TUI locale; defaults to English for non-UI callers.
  * @returns one selected-item row no wider than the supplied budget.
  */
 export function tuiSelectedFooterLine(
   items: readonly TuiFooterItemDescriptor[],
   selected: TuiFooterItemId | undefined,
   columns: number,
+  locale: TuiLocale = 'en',
 ): string {
   if (items.length === 0) return ''
   const index = Math.max(0, items.findIndex(item => item.id === selected))
   const current = items[index] ?? items[0]
   if (current === undefined) return ''
-  return truncateCells(`Footer ${index + 1}/${items.length} | ${current.label} ${current.value}`, columns)
+  return truncateCells(tuiMessage(locale, 'footer.selected', {
+    position: index + 1, total: items.length, label: current.label, value: current.value,
+  }), columns)
 }
 
 function item(
@@ -287,6 +396,61 @@ function pathLabel(path: string): string {
 
 function formatTokens(tokens: number): string {
   return String(Math.round(tokens)).replace(/\B(?=(\d{3})+(?!\d))/gu, ',')
+}
+
+function contextBreakdownLines(
+  breakdown: ContextBreakdownProjection | undefined,
+  locale: TuiLocale,
+): readonly string[] {
+  if (breakdown === undefined) return []
+  return [
+    tuiMessage(locale, 'footer.context.composition', {
+      system: formatTokens(breakdown.systemTokens),
+      tools: formatTokens(breakdown.toolsTokens),
+      messages: formatTokens(breakdown.messageTokens),
+    }),
+    tuiMessage(locale, 'footer.context.heuristic'),
+  ]
+}
+
+function tokenUsageLines(usage: TokenUsageProjection | undefined, locale: TuiLocale): readonly string[] {
+  if (usage === undefined) return []
+  const promptTokens = usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
+  const totalTokens = promptTokens + usage.outputTokens
+  if (totalTokens <= 0) return []
+  const cacheLines = usage.cacheReadTokens > 0 && promptTokens > 0
+    ? [tuiMessage(locale, 'footer.usage.cacheHit', {
+      cached: formatTokens(usage.cacheReadTokens),
+      prompt: formatTokens(promptTokens),
+      percent: Math.round((usage.cacheReadTokens / promptTokens) * 100),
+    })]
+    : []
+  return [
+    tuiMessage(locale, 'footer.usage.inputOutput', {
+      input: formatTokens(usage.uncachedInputTokens), output: formatTokens(usage.outputTokens),
+    }),
+    ...usage.cacheWriteTokens > 0 ? [tuiMessage(locale, 'footer.usage.cacheWrite', {
+      tokens: formatTokens(usage.cacheWriteTokens),
+    })] : [],
+    ...cacheLines,
+  ]
+}
+
+function sessionTimingLines(stats: SessionStatsProjection | undefined, locale: TuiLocale): readonly string[] {
+  if (stats === undefined) return []
+  const lines: string[] = []
+  if (stats.ttftSteps > 0 && stats.ttftMs >= 0) {
+    lines.push(tuiMessage(locale, 'footer.timing.ttft', {
+      milliseconds: Math.round(stats.ttftMs / stats.ttftSteps), steps: stats.ttftSteps,
+    }))
+  }
+  if (stats.decodeTokens > 0 && stats.decodeMs > 0) {
+    const throughput = stats.decodeTokens * 1_000 / stats.decodeMs
+    lines.push(tuiMessage(locale, 'footer.timing.decode', {
+      throughput: throughput.toFixed(1), tokens: formatTokens(stats.decodeTokens),
+    }))
+  }
+  return lines
 }
 
 function truncateCells(text: string, columns: number): string {

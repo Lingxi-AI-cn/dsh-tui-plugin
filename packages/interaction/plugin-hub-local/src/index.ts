@@ -63,7 +63,7 @@ export interface Config {
   readonly registryUrl?: string
   /** Fixed profile label reserved for later mutation stages. */
   readonly profile?: 'tui'
-  /** Enable the optional in-process profile maintenance lifecycle for compatible hosts. */
+  /** Enable the downstream-only in-process profile maintenance lifecycle. */
   readonly profileMutations?: boolean
   /** Permit HTTP only for explicit loopback fixture servers. */
   readonly allowLoopbackHttp?: boolean

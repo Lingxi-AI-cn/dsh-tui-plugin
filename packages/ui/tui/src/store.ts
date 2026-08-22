@@ -174,7 +174,7 @@ export class InteractionStore extends ValueStore<TuiPendingInteraction | undefin
     if (entry.kind === 'approval') this.settle(entry, 'rejected')
     else {
       this.remove(entry)
-      entry.reject(new UserQuestionError('TUI user question was cancelled', 'ASK_ABORTED'))
+      entry.reject(new UserQuestionError('TUI user question was cancelled', 'ASK_CANCELLED'))
     }
   }
 
@@ -216,4 +216,9 @@ export class InteractionStore extends ValueStore<TuiPendingInteraction | undefin
     const entry = this.queue[0]
     this.set(entry === undefined ? undefined : { kind: entry.kind, request: entry.request } as TuiPendingInteraction)
   }
+}
+
+/** Identify an explicit human dismissal without conflating it with owner abort or teardown. */
+export function isTuiQuestionCancellation(error: unknown): error is UserQuestionError {
+  return error instanceof UserQuestionError && error.code === 'ASK_CANCELLED'
 }

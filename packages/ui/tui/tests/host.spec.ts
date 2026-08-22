@@ -6,8 +6,11 @@ import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   hostAuthentication,
+  hostCommandDescriptors,
   hostCompletePaths,
   hostLogin,
+  hostReadSessionPreview,
+  hostRegisterCommand,
   resolveSessionForkAnchor,
 } from '../src/host.ts'
 
@@ -42,6 +45,30 @@ describe('optional Host compatibility', () => {
       maxItems: 32,
       maxScannedEntries: 256,
     })).resolves.toEqual({ entries: [], truncated: false })
+  })
+
+  it('treats command completion metadata as an optional additive Host capability', () => {
+    const completion = { descriptions: { en: 'Configure' } }
+    const register = vi.fn(() => () => {})
+    const list = vi.fn(() => [{ name: 'config', description: 'Configure', completion }])
+    const commands = { register, list } as unknown as Parameters<typeof hostRegisterCommand>[0]
+    const definition = {
+      name: 'config', description: 'Configure', completion, handler: () => ({ kind: 'success' as const }),
+    }
+    hostRegisterCommand(commands, definition)
+    expect(register).toHaveBeenCalledWith(definition)
+    expect(hostCommandDescriptors(commands, {} as never)[0]?.completion).toBe(completion)
+  })
+
+  it('returns no Session preview when the older Host has no preview reader', async () => {
+    const legacy = {} as Parameters<typeof hostReadSessionPreview>[0]
+    await expect(hostReadSessionPreview(legacy, 'session-1' as never)).resolves.toBeUndefined()
+    const readPreview = vi.fn(() => Promise.resolve({ lines: [], truncated: false }))
+    const capable = { readPreview } as unknown as Parameters<typeof hostReadSessionPreview>[0]
+    await expect(hostReadSessionPreview(capable, 'session-1' as never)).resolves.toEqual({
+      lines: [], truncated: false,
+    })
+    expect(readPreview).toHaveBeenCalledWith('session-1', undefined)
   })
 
   it('retains a complete turn without requiring the newer Session helper export', () => {

@@ -2,13 +2,17 @@
 
 import React from 'react'
 import { Box, Text } from 'ink'
-import type { TranscriptNode, TranscriptTextNode } from './transcript.ts'
-import type { TranscriptWindowEntry } from './viewport.ts'
-import { ToolCard } from './tool-card.tsx'
-import { ToolGroup } from './tool-group.tsx'
+import { STRUCTURED_CHILD_LIMIT, type TranscriptNode, type TranscriptTextNode } from './transcript.ts'
+import { terminalWrappedLines, tuiTranscriptWindowEntryRows, type TranscriptWindowEntry } from './viewport.ts'
+import { toolCardHeadingText, ToolCard } from './tool-card.tsx'
+import { ToolGroup, toolGroupHeadingText } from './tool-group.tsx'
 import { TodoPanel } from './todo-panel.tsx'
 import { tuiTranscriptSearchSegments } from './transcript-search.ts'
 import { tuiTextStyle, useTuiTheme, type TuiTheme } from './theme.tsx'
+import type { TuiScreenMap, TuiScreenMapLine } from './screen-map.ts'
+import { tuiScreenTextSegments, type TuiScreenSelection } from './selection.ts'
+import { tuiOsc8Text } from './hyperlink.ts'
+import { tuiBidiVisualText } from './bidi.ts'
 
 function toneColor(theme: TuiTheme, tone: TranscriptTextNode['tone']): string | undefined {
   if (tone === 'user') return theme.tokens.accent
@@ -28,6 +32,13 @@ interface TuiTranscriptViewProps {
   rewindSelectedKey?: string | undefined
   searchSelectedKey?: string | undefined
   searchQuery?: string | undefined
+  selectionMap?: TuiScreenMap | undefined
+  selection?: TuiScreenSelection | undefined
+}
+
+function transcriptTextLabel(node: TranscriptTextNode): string {
+  return `${node.label}${node.tone === 'reasoning' && node.key.startsWith('event:') && node.durationMs !== undefined
+    ? ` · ${(node.durationMs / 1000).toFixed(1)}s` : ''}`
 }
 
 function compactionStateMark(state: 'running' | 'success' | 'failure'): string {
@@ -35,24 +46,138 @@ function compactionStateMark(state: 'running' | 'success' | 'failure'): string {
   return state === 'success' ? '✓' : '✕'
 }
 
+function compactionHeadingText(node: Extract<TranscriptNode, { kind: 'compaction' }>): string {
+  const status = node.state === 'running' ? 'Compacting' : node.state === 'success' ? 'Compacted' : 'Compaction failed'
+  return `${compactionStateMark(node.state)} ${status}${node.shadowedRange === undefined ? ''
+    : ` · ${node.shadowedItemCount} items · ~${node.shadowedTokenCount} tokens`}`
+}
+
+/**
+ * Project visible transcript rows into bounded selectable map lines.
+ * @param entries - visible transcript frame.
+ * @param width - available text-cell budget.
+ * @param workspace - optional Session workspace for tool headings.
+ * @returns map lines in rendered order; structural rows are non-selectable.
+ */
+export function tuiTranscriptScreenMapLines(
+  entries: readonly TranscriptWindowEntry[],
+  width: number,
+  workspace?: string,
+): readonly TuiScreenMapLine[] {
+  const lines: TuiScreenMapLine[] = []
+  const columns = Math.max(1, Math.floor(width))
+  for (const entry of entries) {
+    const key = entry.node.key
+    if (entry.node.kind === 'text') {
+      lines.push({ semanticBlockKey: key, gutter: ' '.repeat(3), text: transcriptTextLabel(entry.node), selectable: false })
+      lines.push({ semanticBlockKey: key, gutter: ' '.repeat(3), text: entry.text ?? '', selectable: true })
+      if (entry.node.tone === 'reasoning' && entry.node.key.startsWith('event:')) continue
+      lines.push({ semanticBlockKey: key, gutter: ' '.repeat(3), text: '', selectable: false })
+      continue
+    }
+    if (entry.node.kind === 'tool') {
+      lines.push({ semanticBlockKey: key, gutter: ' '.repeat(3), text: toolCardHeadingText(entry.node, workspace), selectable: true })
+      continue
+    }
+    if (entry.node.kind === 'tool-group') {
+      lines.push({ semanticBlockKey: key, gutter: ' '.repeat(3), text: toolGroupHeadingText(entry.node), selectable: true })
+      const visible = entry.node.tools.slice(-STRUCTURED_CHILD_LIMIT)
+      const omitted = entry.node.tools.length - visible.length
+      if (omitted > 0) lines.push({
+        semanticBlockKey: key,
+        gutter: ' '.repeat(3),
+        text: `  … ${omitted} earlier operations`,
+        selectable: false,
+      })
+      visible.forEach((tool, index) => lines.push({
+        semanticBlockKey: tool.key,
+        gutter: `    ${index === visible.length - 1 ? '└─ ' : '├─ '}`,
+        text: toolCardHeadingText(tool, workspace),
+        selectable: true,
+      }))
+      continue
+    }
+    if (entry.node.kind === 'compaction') {
+      lines.push({ semanticBlockKey: key, gutter: ' '.repeat(3), text: compactionHeadingText(entry.node), selectable: true })
+      if (entry.node.error !== undefined) lines.push({
+        semanticBlockKey: key, gutter: ' '.repeat(3), text: entry.node.error, selectable: true,
+      })
+      if (entry.node.summary !== undefined) lines.push({
+        semanticBlockKey: key, gutter: ' '.repeat(3), text: entry.node.summary.split('\n')[0] ?? '', selectable: true,
+      })
+      continue
+    }
+    const rows = tuiTranscriptWindowEntryRows(entry, columns)
+    for (let row = 0; row < rows; row += 1) {
+      lines.push({ semanticBlockKey: key, gutter: ' '.repeat(3), text: '', selectable: false })
+    }
+  }
+  return Object.freeze(lines)
+}
+
 function compactionStateColor(theme: TuiTheme, state: 'running' | 'success' | 'failure'): string | undefined {
   if (state === 'running') return theme.tokens.warning
   return state === 'success' ? theme.tokens.success : theme.tokens.error
 }
 
-function CompactionCard({ node }: { node: Extract<TranscriptNode, { kind: 'compaction' }> }): React.ReactElement {
+function selectionRow(
+  map: TuiScreenMap | undefined,
+  selection: TuiScreenSelection | undefined,
+  key: string,
+  occurrence: number,
+): number {
+  if (map === undefined || selection === undefined) return -1
+  let seen = 0
+  for (const row of map.rows) {
+    if (row.semanticBlockKey !== key || !row.cells.some(cell => cell.source === 'text' && cell.selectable)) continue
+    if (seen === occurrence) return row.row
+    seen += 1
+  }
+  return -1
+}
+
+function selectedLine(
+  text: string,
+  map: TuiScreenMap | undefined,
+  selection: TuiScreenSelection | undefined,
+  key: string,
+  occurrence: number,
+  color: string | undefined,
+  selectionColor: string | undefined,
+): React.ReactElement {
+  const row = selectionRow(map, selection, key, occurrence)
+  const segments = row < 0 || map === undefined || selection === undefined
+    ? undefined : tuiScreenTextSegments(map, row, selection)
+  if (segments === undefined || !segments.some(segment => segment.selected)) {
+    return <Text wrap="truncate-end" {...tuiTextStyle(color)}>{text}</Text>
+  }
+  return <Text wrap="truncate-end">{segments.map((segment, index) => <Text
+    key={`${row}:${index}:${segment.text}`}
+    {...tuiTextStyle(segment.selected ? selectionColor : color)}
+    inverse={segment.selected}
+  >{segment.text}</Text>)}</Text>
+}
+
+function CompactionCard({
+  node,
+  selectionMap,
+  selection,
+}: {
+  node: Extract<TranscriptNode, { kind: 'compaction' }>
+  selectionMap?: TuiScreenMap | undefined
+  selection?: TuiScreenSelection | undefined
+}): React.ReactElement {
   const theme = useTuiTheme()
-  const status = node.state === 'running' ? 'Compacting' : node.state === 'success' ? 'Compacted' : 'Compaction failed'
-  const hasShadowStats = node.shadowedRange !== undefined
   return <Box flexDirection="column" flexShrink={0}>
-    <Text bold {...tuiTextStyle(compactionStateColor(theme, node.state))} wrap="truncate-end">
-      {compactionStateMark(node.state)} {status}
-      {hasShadowStats && <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}>
-        {' · '}{node.shadowedItemCount} items · ~{node.shadowedTokenCount} tokens
-      </Text>}
-    </Text>
-    {node.error !== undefined && <Text {...tuiTextStyle(theme.tokens.error)} wrap="truncate-end">{node.error}</Text>}
-    {node.summary !== undefined && <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim} wrap="truncate-end">{node.summary.split('\n')[0]}</Text>}
+    {selectedLine(
+      compactionHeadingText(node), selectionMap, selection, node.key, 0,
+      compactionStateColor(theme, node.state), theme.tokens.selection,
+    )}
+    {node.error !== undefined && selectedLine(node.error, selectionMap, selection, node.key, 1, theme.tokens.error, theme.tokens.selection)}
+    {node.summary !== undefined && selectedLine(
+      node.summary.split('\n')[0] ?? '', selectionMap, selection, node.key,
+      node.error === undefined ? 1 : 2, theme.tokens.muted, theme.tokens.selection,
+    )}
   </Box>
 }
 
@@ -67,6 +192,36 @@ export function TuiTranscriptSearchText({ text, query }: { text: string; query: 
     key={`${index}:${segment.text}`}
     {...segment.match ? { ...tuiTextStyle(theme.tokens.selection), bold: true } : {}}
   >{segment.text}</Text>)}</>
+}
+
+function transcriptBodyView(
+  theme: TuiTheme,
+  entry: TranscriptWindowEntry,
+  selectionMap: TuiScreenMap | undefined,
+  selection: TuiScreenSelection | undefined,
+  searchSelectedKey: string | undefined,
+  searchQuery: string | undefined,
+): React.ReactElement | string | undefined {
+  if (entry.text === undefined || entry.text === '') return undefined
+  const visualText = tuiBidiVisualText(entry.text)
+  if (searchSelectedKey === entry.node.key && searchQuery !== undefined) {
+    return <TuiTranscriptSearchText text={visualText} query={searchQuery} />
+  }
+  if (selectionMap === undefined || selection === undefined || entry.node.kind !== 'text') return tuiOsc8Text(visualText)
+  const row = selectionMap.rows.findIndex(candidate => candidate.semanticBlockKey === entry.node.key
+    && candidate.cells.some(cell => cell.source === 'text' && cell.selectable))
+  if (row < 0) return entry.text
+  const lines = terminalWrappedLines(visualText, Math.max(1, selectionMap.columns - 3))
+  return <>{lines.map((line, index) => {
+    const segments = tuiScreenTextSegments(selectionMap, row + index, selection)
+    return <React.Fragment key={`${index}:${line}`}>
+      {index > 0 ? '\n' : ''}{segments.length === 0 ? line : segments.map((segment, segmentIndex) => <Text
+        key={`${row + index}:${segmentIndex}:${segment.text}`}
+        {...tuiTextStyle(segment.selected ? theme.tokens.selection : theme.tokens.text)}
+        inverse={segment.selected}
+      >{segment.text}</Text>)}
+    </React.Fragment>
+  })}</>
 }
 
 /**
@@ -84,6 +239,8 @@ export function TuiTranscriptView({
   rewindSelectedKey,
   searchSelectedKey,
   searchQuery,
+  selectionMap,
+  selection,
 }: TuiTranscriptViewProps): React.ReactElement {
   const theme = useTuiTheme()
   if (entries.length === 0) {
@@ -109,22 +266,26 @@ export function TuiTranscriptView({
       }</Text>
       <Box flexDirection="column" flexGrow={1}>
         {entry.node.kind === 'tool'
-          ? <ToolCard node={entry.node} expanded={false} workspace={workspace} />
+          ? <ToolCard
+            node={entry.node}
+            expanded={false}
+            workspace={workspace}
+            selectionMap={selectionMap}
+            selection={selection}
+          />
           : entry.node.kind === 'tool-group'
             ? <ToolGroup node={entry.node} workspace={workspace} {...focusedNode === entry.node
-              && focusedCallId !== undefined ? { focusedCallId } : {}} />
+              && focusedCallId !== undefined ? { focusedCallId } : {}} selectionMap={selectionMap} selection={selection} />
             : entry.node.kind === 'compaction'
-              ? <CompactionCard node={entry.node} />
+              ? <CompactionCard node={entry.node} selectionMap={selectionMap} selection={selection} />
               : entry.node.kind === 'todo'
                 ? <TodoPanel node={entry.node} />
                 : <>
                   <Text bold {...tuiTextStyle(toneColor(theme, entry.node.tone))}>{entry.node.label}{entry.node.tone === 'reasoning' && entry.node.key.startsWith('event:') && entry.node.durationMs !== undefined
                     ? ` · ${(entry.node.durationMs / 1000).toFixed(1)}s` : ''}</Text>
-                  {entry.text !== '' && <Text wrap="wrap">{
-                    searchSelectedKey === entry.node.key && searchQuery !== undefined
-                      ? <TuiTranscriptSearchText text={entry.text ?? ''} query={searchQuery} />
-                      : entry.text
-                  }</Text>}
+                  {entry.text !== '' && <Text wrap="wrap">{transcriptBodyView(
+                    theme, entry, selectionMap, selection, searchSelectedKey, searchQuery,
+                  )}</Text>}
                 </>}
       </Box>
     </Box>)}

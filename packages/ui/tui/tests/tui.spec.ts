@@ -1,12 +1,14 @@
 /** Pure transcript, interaction, terminal-safety, and startup-failure coverage. */
 
 import { resolve } from 'node:path'
+import { writeFile } from 'node:fs/promises'
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it } from 'vitest'
 import stringWidth from 'string-width'
 import { Context } from '@deepseek-ai/cordis'
 import { compactCheckpointSource, CompactionId } from '@deepseek-ai/dsh-compaction'
 import { CommandId } from '@deepseek-ai/dsh-commands'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { JobId, type JobSnapshot } from '@deepseek-ai/dsh-jobs'
 import {
   CallId, createAssistantMessage, createToolResultMessage, createUserMessage, ReasoningEffortId,
@@ -17,12 +19,14 @@ import { SubagentRunId } from '@deepseek-ai/dsh-subagent'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import {
   apply, cancelTuiHistorySearch, createComposerState, deleteComposerText, foldTranscript,
-  insertComposerPasteReference, insertComposerText, isLargeComposerPaste,
+  addComposerImageAttachment, insertComposerClipboard, insertComposerPasteReference, insertComposerText, isLargeComposerPaste,
   acceptTuiSuggestion, commandSuggestionState, layoutComposer, moveComposerCursor, moveTuiSuggestion,
   nextTuiHistorySearchMatch, pathSuggestionQuery, pathSuggestionState, startTuiHistorySearch,
   materializeComposerText, previousTranscriptPageAnchor, redoComposerEdit, replaceComposerText, selectTranscriptPage,
   selectTranscriptWindow, terminalMarkdownText, terminalSafe, terminalWrappedLines, toggleTuiComposerStash,
-  traverseComposerHistory, tuiComposerDraft, tuiHistorySearchResult, undoComposerEdit, updateTuiHistorySearchQuery,
+  removeComposerImageAttachment, removeLastComposerImageAttachment,
+  traverseComposerHistory, tuiComposerDraft, tuiHistorySearchResult, undoComposerEdit,
+  updateTuiHistorySearchQuery,
   visibleTuiSuggestions, effectiveTuiInteractionDescriptors, matchTuiInteractionAction,
   resolveTuiInteractionContext, resolveTuiInteractionRegistry,
   TUI_INTERACTION_CONTEXT_PRIORITY, TUI_INTERACTION_REGISTRY,
@@ -35,26 +39,35 @@ import {
   resolveTuiSessionExportDirectory,
   sortTuiResumeCandidates, summarizeTuiResumeCandidate,
   tuiRewindCandidates,
+  consumeTuiDoubleEscape, TUI_DOUBLE_ESCAPE_WINDOW_MS,
   formatTuiWorkElapsed, formatTuiWorkOwner, projectTuiWork,
-  applyTuiTerminalReply, TuiAgentViewStateCache, TuiTerminalInputDecoder,
-  resolveTuiTheme, TUI_SETTINGS_SCHEMA,
+  applyTuiTerminalReply, TuiAgentViewStateCache, TuiTerminalInputDecoder, tuiTerminalMouseReportKind,
+  resolveTuiTheme, TUI_MOUSE_PREFERENCES, TUI_SETTINGS_SCHEMA, TUI_THEME_PREFERENCES,
 } from '../src/index.ts'
 import {
   inputCursorTarget, tuiPluginHubDetailTextStyle, tuiStartupComposerFrame, tuiWorkingFrame,
 } from '../src/app.tsx'
 import {
-  resolveTuiStartupLogoVariant, TUI_ELECTRIC_STARTUP_LOGO_HEIGHT,
-  TUI_ELECTRIC_STARTUP_LOGO_ROWS, TUI_ELECTRIC_STARTUP_LOGO_WIDTH,
-  tuiElectricStartupLogoCellColor,
+  resolveTuiStartupLogoVariant, TUI_STARTUP_LOGO_HEIGHT,
+  TUI_STARTUP_LOGO_ROWS, TUI_STARTUP_LOGO_WIDTH,
+  tuiStartupLogoCellStyle,
 } from '../src/startup-logo.tsx'
-import { InteractionStore } from '../src/store.ts'
+import { InteractionStore, isTuiQuestionCancellation } from '../src/store.ts'
 import { toolDetailLines, toolStateMark, toolSummary } from '../src/tool-card.tsx'
 import { todoPanelRows } from '../src/todo-panel.tsx'
 import type { TranscriptNode, TranscriptTextNode, TranscriptTodoNode, TranscriptToolNode } from '../src/transcript.ts'
 import { TerminalSession, terminalInternals, type TuiStreams } from '../src/terminal-session.ts'
+import {
+  externalEditorInternals, parseTuiEditorCommand, resolveTuiEditorArgv, runTuiExternalEditor,
+  type TuiExternalEditorChild,
+} from '../src/external-editor.ts'
 
 const originalStreams = { ...terminalInternals }
-afterEach(() => { Object.assign(terminalInternals, originalStreams) })
+const originalEditorSpawn = externalEditorInternals.spawn
+afterEach(() => {
+  Object.assign(terminalInternals, originalStreams)
+  externalEditorInternals.spawn = originalEditorSpawn
+})
 
 function event<T extends SessionEvent['type']>(
   seq: number,
@@ -76,22 +89,45 @@ describe('terminalSafe', () => {
 describe('semantic terminal themes', () => {
   it('resolves dark and light palettes at negotiated precision', () => {
     const dark = resolveTuiTheme('dark', 'truecolor')
-    expect(dark).toMatchObject({ preference: 'dark', colorDepth: 'truecolor', dim: true })
+    expect(dark).toMatchObject({
+      preference: 'dark', resolvedPreference: 'dark', colorDepth: 'truecolor', dim: true,
+    })
     expect(dark.tokens).toMatchObject({
       accent: '#58a6ff', success: '#3fb950', warning: '#d29922', error: '#f85149',
       permission: '#d2a8ff', diffAdd: '#3fb950', diffDelete: '#f85149',
     })
 
     const light = resolveTuiTheme('light', 'ansi16')
-    expect(light).toMatchObject({ preference: 'light', colorDepth: 'ansi16', dim: true })
+    expect(light).toMatchObject({
+      preference: 'light', resolvedPreference: 'light', colorDepth: 'ansi16', dim: true,
+    })
     expect(light.tokens).toMatchObject({
       accent: 'blue', warning: 'magenta', error: 'red', selection: 'blue', border: 'blue',
     })
   })
 
+  it('uses the normalized terminal background for auto and falls back to dark', () => {
+    const autoLight = resolveTuiTheme('auto', 'truecolor', 'light')
+    expect(autoLight).toMatchObject({ preference: 'auto', resolvedPreference: 'light' })
+    expect(autoLight.tokens).toMatchObject({ accent: '#0969da', warning: '#9a6700' })
+
+    for (const background of ['dark', 'unknown'] as const) {
+      const automatic = resolveTuiTheme('auto', 'ansi16', background)
+      expect(automatic).toMatchObject({
+        preference: 'auto', resolvedPreference: 'dark', colorDepth: 'ansi16', dim: true,
+      })
+      expect(automatic.tokens).toMatchObject({ accent: 'cyan', warning: 'yellow' })
+    }
+    expect(resolveTuiTheme('light', 'truecolor', 'dark').resolvedPreference).toBe('light')
+  })
+
   it('suppresses every color and dim style for explicit or negotiated no-color output', () => {
-    for (const theme of [resolveTuiTheme('no-color', 'truecolor'), resolveTuiTheme('dark', 'none')]) {
+    for (const theme of [
+      resolveTuiTheme('no-color', 'truecolor', 'light'),
+      resolveTuiTheme('auto', 'none', 'light'),
+    ]) {
       expect(theme.colorDepth).toBe('none')
+      expect(theme.resolvedPreference).toBe('no-color')
       expect(theme.dim).toBe(false)
       expect(Object.values(theme.tokens).every(color => color === undefined)).toBe(true)
     }
@@ -106,8 +142,14 @@ describe('semantic terminal themes', () => {
   })
 
   it('defaults persisted settings and rejects invalid theme or keybinding values', () => {
-    expect(TUI_SETTINGS_SCHEMA({} as never)).toEqual({ theme: 'dark', keybindings: {} })
+    expect(TUI_THEME_PREFERENCES).toEqual(['auto', 'dark', 'light', 'no-color'])
+    expect(TUI_MOUSE_PREFERENCES).toEqual(['auto', 'off'])
+    expect(TUI_SETTINGS_SCHEMA({} as never)).toEqual({ theme: 'auto', locale: 'en', mouse: 'auto', keybindings: {} })
+    expect(TUI_SETTINGS_SCHEMA({ theme: 'dark', mouse: 'off' } as never))
+      .toEqual({ theme: 'dark', locale: 'en', mouse: 'off', keybindings: {} })
     expect(() => TUI_SETTINGS_SCHEMA({ theme: 'solarized' } as never)).toThrow()
+    expect(() => TUI_SETTINGS_SCHEMA({ locale: 'ja' } as never)).toThrow()
+    expect(() => TUI_SETTINGS_SCHEMA({ mouse: 'hover' } as never)).toThrow()
     expect(() => TUI_SETTINGS_SCHEMA({
       keybindings: { 'unknown.action': ['ctrl+p'] },
     } as never)).toThrow()
@@ -222,6 +264,23 @@ describe('foldTranscript', () => {
         output: '�[31mresult',
       }),
       expect.objectContaining({ label: 'Error', text: 'SERVER: down' }),
+    ])
+  })
+
+  it('applies a host-owned renderer only to known committed message events', () => {
+    const user = createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'user' } })
+    const assistant = createAssistantMessage({
+      content: [{ type: 'text', text: 'complete answer' }], source: { provider: 'p', model: 'm' },
+    })
+    const rendered = foldTranscript([
+      event(0, 'user/message', user),
+      event(1, 'assistant/message', { turn: 1, step: 1, message: assistant }),
+    ], undefined, input => input.type === 'assistant/message'
+      ? { label: 'Extension', text: `${input.text} · ${input.seq}`, tone: 'status' }
+      : undefined)
+    expect(rendered).toEqual([
+      expect.objectContaining({ label: 'You', text: 'hello' }),
+      expect.objectContaining({ label: 'Extension', tone: 'status', text: 'complete answer · 1' }),
     ])
   })
 
@@ -922,6 +981,10 @@ describe('TuiTerminalInputDecoder', () => {
     expect(decoder.push('line 2\u001b[201~')).toEqual([
       { kind: 'input', input: 'line 1\nline 2', key: { paste: true } },
     ])
+    expect(tuiTerminalMouseReportKind(0, false)).toBe('press')
+    expect(tuiTerminalMouseReportKind(0, true)).toBe('release')
+    expect(tuiTerminalMouseReportKind(32, false)).toBe('motion')
+    expect(tuiTerminalMouseReportKind(64, false)).toBe('wheel')
   })
 
   it.each([
@@ -929,8 +992,8 @@ describe('TuiTerminalInputDecoder', () => {
     ['focus out', '\u001b[O', { kind: 'focus', focused: false }],
     ['device attributes', '\u001b[>41;331;0c', { kind: 'reply', sequence: '\u001b[>41;331;0c' }],
     ['cursor position', '\u001b[12;40R', { kind: 'reply', sequence: '\u001b[12;40R' }],
-    ['OSC reply', '\u001b]10;rgb:ffff/ffff/ffff\u001b\\', {
-      kind: 'reply', sequence: '\u001b]10;rgb:ffff/ffff/ffff\u001b\\',
+    ['OSC reply', '\u001b]11;rgb:ffff/ffff/ffff\u001b\\', {
+      kind: 'reply', sequence: '\u001b]11;rgb:ffff/ffff/ffff\u001b\\',
     }],
   ])('retains %s semantics at every split position', (_name, sequence, expected) => {
     for (let split = 0; split <= sequence.length; split += 1) {
@@ -985,7 +1048,7 @@ describe('focused details', () => {
       .toEqual(['· a.ts', '· b.ts'])
     expect(toolDetailLines(toolNode({ card: 'diff', diffs: [
       { path: 'a.ts', oldText: 'old\nline', newText: 'new\nline' },
-    ] }))).toEqual(['a.ts', '- old', '- line', '+ new', '+ line'])
+    ] }))).toEqual(['a.ts', '- old', '+ new', '  line'])
     expect(toolDetailLines(toolNode({ card: 'search', shape: 'matches', files: [
       { path: 'a.ts', matches: [{ lineNumber: 3, line: 'const match = true' }] },
     ], total: 1, truncated: false }))).toEqual(['a.ts', '3 const match = true'])
@@ -1084,6 +1147,19 @@ describe('InteractionStore', () => {
     await expect(approval).resolves.toBe('cancelled')
     expect(store.getSnapshot()).toBeUndefined()
   })
+
+  it('distinguishes explicit human dismissal from owner abort', async () => {
+    const store = new InteractionStore()
+    const question = store.askQuestion({
+      agent: { id: 'session-a' } as never,
+      questions: [{ id: 'q', question: 'Q' }],
+    })
+    store.cancelCurrent()
+    const error = await question.catch((cause: unknown) => cause)
+    expect(error).toMatchObject({ code: 'ASK_CANCELLED' })
+    expect(isTuiQuestionCancellation(error)).toBe(true)
+    expect(store.getSnapshot()).toBeUndefined()
+  })
 })
 
 describe('TerminalSession', () => {
@@ -1100,7 +1176,9 @@ describe('TerminalSession', () => {
     terminal.restore()
     terminal.restore()
     expect(output).toContain('\u001b[?1049h')
+    expect(output).toContain('\u001b[?1007l\u001b[?1000h\u001b[?1006h')
     expect(output).toContain('\u001b[?1006h')
+    expect(output).toContain('\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1007h')
     expect(output.match(/\u001b\[\?1049l/g)).toHaveLength(1)
     expect(raw).toBe(false)
 
@@ -1109,6 +1187,71 @@ describe('TerminalSession', () => {
       stdout: { isTTY: false, write: () => true } as never,
     })
     expect(() => { notTty.enter() }).toThrow('requires interactive stdin and stdout TTYs')
+  })
+
+  it('enables only button-motion selection reports and restores them across handoff', () => {
+    let output = ''
+    const terminal = new TerminalSession({
+      stdin: { isTTY: true, isRaw: false, setRawMode: () => undefined },
+      stdout: { isTTY: true, write: (chunk: string) => { output += chunk; return true } },
+      stderr: { write: () => true },
+    } as unknown as TuiStreams)
+    terminal.enter()
+    expect(terminal.setSelectionMouseMode(true)).toBe(true)
+    expect(terminal.setSelectionMouseMode(true)).toBe(true)
+    expect(output.match(/\u001b\[\?1002h/gu)).toHaveLength(1)
+    expect(output).not.toContain('\u001b[?1003h')
+    const handoff = terminal.handoff()
+    handoff.resume()
+    expect(output.match(/\u001b\[\?1002h/gu)).toHaveLength(2)
+    expect(terminal.setSelectionMouseMode(false)).toBe(true)
+    expect(output.match(/\u001b\[\?1002l/gu)).toHaveLength(2)
+    terminal.restore()
+    expect(terminal.setSelectionMouseMode(true)).toBe(false)
+  })
+
+  it('returns pointer ownership to the terminal and preserves mouse off across handoff', () => {
+    let output = ''
+    const terminal = new TerminalSession({
+      stdin: { isTTY: true, isRaw: false, setRawMode: () => undefined },
+      stdout: { isTTY: true, write: (chunk: string) => { output += chunk; return true } },
+      stderr: { write: () => true },
+    } as unknown as TuiStreams)
+    terminal.enter()
+    expect(terminal.setSelectionMouseMode(true)).toBe(true)
+    expect(terminal.setMouseMode(false)).toBe(true)
+    expect(output).toContain('\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1007h')
+    expect(terminal.setSelectionMouseMode(true)).toBe(false)
+    const handoff = terminal.handoff()
+    handoff.resume()
+    expect(output.match(/\u001b\[\?1000h/gu)).toHaveLength(2)
+    expect(output.match(/\u001b\[\?1000l/gu)).toHaveLength(2)
+    expect(terminal.setMouseMode(true)).toBe(true)
+    expect(output).toContain('\u001b[?1007l\u001b[?1000h\u001b[?1006h')
+    expect(output.match(/\u001b\[\?1000h/gu)).toHaveLength(3)
+    terminal.restore()
+  })
+
+  it('releases and reacquires one terminal transaction through an idempotent handoff', () => {
+    let output = ''
+    const terminal = new TerminalSession({
+      stdin: { isTTY: true, isRaw: false, setRawMode: () => undefined },
+      stdout: { isTTY: true, write: (chunk: string) => { output += chunk; return true } },
+      stderr: { write: () => true },
+    } as unknown as TuiStreams)
+    terminal.enter()
+    const handoff = terminal.handoff()
+    handoff.resume()
+    handoff.resume()
+    handoff.cancel()
+    expect(output.match(/\u001b\[\?1049h/gu)).toHaveLength(2)
+    expect(output.match(/\u001b\[\?1049l/gu)).toHaveLength(1)
+
+    const cancelled = terminal.handoff()
+    cancelled.cancel()
+    cancelled.resume()
+    expect(output.match(/\u001b\[\?1049h/gu)).toHaveLength(2)
+    terminal.restore()
   })
 
   it('anchors the real cursor for IME preedit and suppresses Ink cursor hiding', () => {
@@ -1164,13 +1307,15 @@ describe('TerminalSession', () => {
     })
     input.emit('data', 'x\u001b[?1;')
     input.emit('data', '2c\u001b[?1u\u001b]10;rgb:ffff/ffff/ffff\u001b\\')
+    input.emit('data', '\u001b]11;rgb:ffff/ffff/ffff\u001b\\')
     const capabilities = await capabilitiesPromise
     expect(capabilities).toMatchObject({
-      colorDepth: 'truecolor', keyboardProtocol: 'kitty', mouse: 'sgr', focus: true,
+      colorDepth: 'truecolor', background: 'light', keyboardProtocol: 'kitty', mouse: 'sgr', focus: true,
       bracketedPaste: true, osc: true, outer: { tmux: true, ssh: true },
     })
     expect(terminal.takeBufferedInput()).toEqual([{ kind: 'input', input: 'x', key: {} }])
     terminal.enter(capabilities)
+    expect(output).toContain('\u001b[?1007l\u001b[?1000h\u001b[?1006h')
     expect(output).toContain('\u001b[?1000h\u001b[?1006h')
     expect(output).toContain('\u001b[?1004h')
     expect(output).toContain('\u001b[>1u')
@@ -1178,6 +1323,7 @@ describe('TerminalSession', () => {
     terminal.restore()
     expect(output.match(/\u001b\[\?1004l/g)).toHaveLength(1)
     expect(output.match(/\u001b\[<u/g)).toHaveLength(1)
+    expect(output).toContain('\u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1007h')
     expect(input.isRaw).toBe(false)
   })
 
@@ -1199,10 +1345,13 @@ describe('TerminalSession', () => {
     const started = Date.now()
     const capabilities = await terminal.negotiate({ timeoutMs: 5, environment: { TERM: 'xterm-kitty' } })
     expect(Date.now() - started).toBeLessThan(100)
-    expect(capabilities).toMatchObject({ keyboardProtocol: 'legacy', mouse: 'none', focus: false, bracketedPaste: false })
-    expect(output).toContain('\u001b[c\u001b[?u')
+    expect(capabilities).toMatchObject({
+      background: 'unknown', keyboardProtocol: 'legacy', mouse: 'none', focus: false, bracketedPaste: false,
+    })
+    expect(output).toContain('\u001b[c\u001b[?u\u001b]10;?\u0007\u001b]11;?\u0007')
     terminal.enter(capabilities)
     expect(output).not.toContain('\u001b[?1000h')
+    expect(output).not.toContain('\u001b[?1007l')
     expect(output).not.toContain('\u001b[?2004h')
     terminal.restore()
     expect(input.isRaw).toBe(false)
@@ -1211,6 +1360,7 @@ describe('TerminalSession', () => {
   it('carries color depth and reply semantics through pure capability folding', () => {
     const initial = {
       colorDepth: 'ansi16' as const,
+      background: 'unknown' as const,
       keyboardProtocol: 'legacy' as const,
       mouse: 'none' as const,
       focus: false,
@@ -1221,6 +1371,14 @@ describe('TerminalSession', () => {
     }
     expect(applyTuiTerminalReply(initial, '\u001b[?1;2c')).toMatchObject({ mouse: 'sgr', focus: true })
     expect(applyTuiTerminalReply(initial, '\u001b[?1u')).toMatchObject({ keyboardProtocol: 'kitty' })
+    expect(applyTuiTerminalReply(initial, '\u001b]11;rgb:0000/0000/0000\u0007'))
+      .toMatchObject({ osc: true, background: 'dark' })
+    expect(applyTuiTerminalReply(initial, '\u001b]11;#f5f5f5\u001b\\'))
+      .toMatchObject({ osc: true, background: 'light' })
+    expect(applyTuiTerminalReply(initial, '\u001b]11;rgb:not-a-color\u0007'))
+      .toMatchObject({ osc: true, background: 'unknown' })
+    expect(applyTuiTerminalReply(initial, '\u001b]10;rgb:ffff/ffff/ffff\u0007'))
+      .toMatchObject({ osc: true, background: 'unknown' })
     expect(applyTuiTerminalReply(initial, '\u001b[?2026h')).toEqual(initial)
   })
 
@@ -1232,7 +1390,7 @@ describe('TerminalSession', () => {
       stderr: { write: () => true },
     } as unknown as TuiStreams)
     terminal.enter({
-      colorDepth: 'ansi16', keyboardProtocol: 'legacy', mouse: 'none', focus: false,
+      colorDepth: 'ansi16', background: 'unknown', keyboardProtocol: 'legacy', mouse: 'none', focus: false,
       bracketedPaste: false, osc: true, synchronizedOutput: false,
       outer: { tmux: true, ssh: false },
     })
@@ -1248,11 +1406,97 @@ describe('TerminalSession', () => {
       stderr: { write: () => true },
     } as unknown as TuiStreams)
     unsupported.enter({
-      colorDepth: 'none', keyboardProtocol: 'legacy', mouse: 'none', focus: false,
+      colorDepth: 'none', background: 'unknown', keyboardProtocol: 'legacy', mouse: 'none', focus: false,
       bracketedPaste: false, osc: false, synchronizedOutput: false,
       outer: { tmux: false, ssh: true },
     })
     expect(unsupported.copyToClipboard('copy')).toMatchObject({ ok: false, reason: 'unsupported' })
+  })
+})
+
+describe('external editor handoff', () => {
+  it('resolves VISUAL before EDITOR and parses quoted argv without shell expansion', () => {
+    expect(parseTuiEditorCommand('"editor with spaces" --wait \'file name\' plain\\ value')).toEqual([
+      'editor with spaces', '--wait', 'file name', 'plain value',
+    ])
+    expect(resolveTuiEditorArgv({ VISUAL: 'visual --wait', EDITOR: 'editor' }, 'linux')).toEqual(['visual', '--wait'])
+    expect(resolveTuiEditorArgv({ EDITOR: 'editor' }, 'win32')).toEqual(['editor'])
+    expect(resolveTuiEditorArgv({}, 'win32')).toEqual(['notepad.exe'])
+    expect(resolveTuiEditorArgv({}, 'darwin')).toEqual(['open', '-W', '-t'])
+    expect(resolveTuiEditorArgv({}, 'linux')).toEqual(['vi'])
+    expect(() => { parseTuiEditorCommand('unterminated"') }).toThrow('unterminated quote')
+    expect(() => { parseTuiEditorCommand('') }).toThrow('must name an executable')
+  })
+
+  it('accepts bounded UTF-8 editor output and preserves the draft on failures', async () => {
+    const edited = new EventEmitter() as EventEmitter & TuiExternalEditorChild
+    externalEditorInternals.spawn = (argv) => {
+      void writeFile(argv.at(-1) as string, 'edited\r\n文本').then(() => { edited.emit('close', 0, null) })
+      return edited
+    }
+    await expect(runTuiExternalEditor({ draft: 'original', cwd: process.cwd(), environment: { EDITOR: 'stub' } }))
+      .resolves.toEqual({ ok: true, text: 'edited\n文本' })
+
+    const invalid = new EventEmitter() as EventEmitter & TuiExternalEditorChild
+    externalEditorInternals.spawn = (argv) => {
+      void writeFile(argv.at(-1) as string, Buffer.from([0xff])).then(() => { invalid.emit('close', 0, null) })
+      return invalid
+    }
+    const invalidResult = await runTuiExternalEditor({
+      draft: 'original', cwd: process.cwd(), environment: { EDITOR: 'stub' },
+    })
+    expect(invalidResult.ok).toBe(false)
+    if (!invalidResult.ok) expect(invalidResult.message).toContain('valid UTF-8')
+
+    const oversized = new EventEmitter() as EventEmitter & TuiExternalEditorChild
+    externalEditorInternals.spawn = (argv) => {
+      void writeFile(argv.at(-1) as string, Buffer.alloc(1_000_001, 0x61))
+        .then(() => { oversized.emit('close', 0, null) })
+      return oversized
+    }
+    const oversizedResult = await runTuiExternalEditor({
+      draft: 'original', cwd: process.cwd(), environment: { EDITOR: 'stub' },
+    })
+    expect(oversizedResult.ok).toBe(false)
+    if (!oversizedResult.ok) expect(oversizedResult.message).toContain('1 MB limit')
+
+    const failed = new EventEmitter() as EventEmitter & TuiExternalEditorChild
+    externalEditorInternals.spawn = () => {
+      queueMicrotask(() => { failed.emit('close', 9, null) })
+      return failed
+    }
+    const failedResult = await runTuiExternalEditor({
+      draft: 'original', cwd: process.cwd(), environment: { EDITOR: 'stub' },
+    })
+    expect(failedResult.ok).toBe(false)
+    if (!failedResult.ok) expect(failedResult.message).toContain('exit code 9')
+  })
+
+  it('reports spawn failure and aborts the exact child while retaining the draft', async () => {
+    externalEditorInternals.spawn = () => { throw new Error('missing editor') }
+    const spawnResult = await runTuiExternalEditor({
+      draft: 'original', cwd: process.cwd(), environment: { EDITOR: 'stub' },
+    })
+    expect(spawnResult.ok).toBe(false)
+    if (!spawnResult.ok) expect(spawnResult.message).toContain('missing editor')
+
+    const child = new EventEmitter() as EventEmitter & TuiExternalEditorChild
+    let killed: NodeJS.Signals | undefined
+    child.kill = (signal) => {
+      killed = signal
+      queueMicrotask(() => { child.emit('close', null, signal ?? 'SIGTERM') })
+      return true
+    }
+    externalEditorInternals.spawn = () => child
+    const controller = new AbortController()
+    const result = runTuiExternalEditor({
+      draft: 'original', cwd: process.cwd(), environment: { EDITOR: 'stub' }, signal: controller.signal,
+    })
+    controller.abort()
+    const cancelledResult = await result
+    expect(cancelledResult.ok).toBe(false)
+    if (!cancelledResult.ok) expect(cancelledResult.message).toContain('cancelled')
+    expect(killed).toBe('SIGTERM')
   })
 })
 
@@ -1263,6 +1507,22 @@ describe('inputCursorTarget', () => {
       row: 22,
       column: 16,
     })
+    expect(inputCursorTarget({ rows: 24, columns: 80 }, '输入 › ', layout)).toEqual({
+      row: 22,
+      column: 14,
+    })
+  })
+
+  it('keeps menu and attachment composers above their trailing frame rows', () => {
+    const layout = layoutComposer(createComposerState('answer'), 76)
+    expect(inputCursorTarget({ rows: 24, columns: 80 }, '> ', layout, undefined, 3)).toEqual({
+      row: 21,
+      column: 11,
+    })
+    expect(inputCursorTarget({ rows: 24, columns: 80 }, '> ', layout, undefined, 4)).toEqual({
+      row: 20,
+      column: 11,
+    })
   })
 
   it('centers the startup composer and preserves multiline CJK cursor cells', () => {
@@ -1270,24 +1530,34 @@ describe('inputCursorTarget', () => {
       rows: 24, columns: 80,
     }, 1).width - 4)
     const singleFrame = tuiStartupComposerFrame({ rows: 24, columns: 80 }, singleLine.lines.length)
-    expect(singleFrame).toEqual({ width: 57, leftColumn: 12, firstInputRow: 17, logo: 'electric' })
+    expect(singleFrame).toEqual({ width: 57, leftColumn: 12, firstInputRow: 16, logo: 'primary' })
     expect(inputCursorTarget({ rows: 24, columns: 80 }, 'prompt › ', singleLine, singleFrame)).toEqual({
-      row: 17,
+      row: 16,
       column: 28,
+    })
+    expect(inputCursorTarget({ rows: 24, columns: 80 }, '输入 › ', singleLine, singleFrame)).toEqual({
+      row: 16,
+      column: 26,
     })
 
     const multiline = layoutComposer(createComposerState('before\n你好'), singleFrame.width - 4)
     const suggestedFrame = tuiStartupComposerFrame({ rows: 24, columns: 80 }, multiline.lines.length, 3)
-    expect(suggestedFrame).toEqual({ width: 57, leftColumn: 12, firstInputRow: 18, logo: 'electric' })
+    expect(suggestedFrame).toEqual({ width: 57, leftColumn: 12, firstInputRow: 17, logo: 'primary' })
     expect(inputCursorTarget({ rows: 24, columns: 80 }, 'prompt › ', multiline, suggestedFrame)).toEqual({
-      row: 19,
+      row: 18,
       column: 19,
     })
     expect(tuiStartupComposerFrame({ rows: 25, columns: 80 }, 1)).toEqual({
       width: 57,
       leftColumn: 12,
-      firstInputRow: 18,
-      logo: 'electric',
+      firstInputRow: 17,
+      logo: 'primary',
+    })
+    expect(tuiStartupComposerFrame({ rows: 25, columns: 80 }, 1, 0, 1)).toEqual({
+      width: 57,
+      leftColumn: 12,
+      firstInputRow: 16,
+      logo: 'primary',
     })
     expect(tuiStartupComposerFrame({ rows: 18, columns: 40 }, 1)).toEqual({
       width: 33,
@@ -1316,34 +1586,31 @@ describe('inputCursorTarget', () => {
   })
 })
 
-describe('Electric startup logo', () => {
-  it('preserves the designed foreground-block geometry without embedded terminal controls', () => {
-    expect(TUI_ELECTRIC_STARTUP_LOGO_ROWS).toHaveLength(TUI_ELECTRIC_STARTUP_LOGO_HEIGHT)
-    expect(TUI_ELECTRIC_STARTUP_LOGO_ROWS.every(
-      row => stringWidth(row) === TUI_ELECTRIC_STARTUP_LOGO_WIDTH,
+describe('supplied ANSI startup logo', () => {
+  it('preserves the supplied geometry without embedded terminal controls', () => {
+    expect(TUI_STARTUP_LOGO_ROWS).toHaveLength(TUI_STARTUP_LOGO_HEIGHT)
+    expect(TUI_STARTUP_LOGO_ROWS.every(
+      row => stringWidth(row) === TUI_STARTUP_LOGO_WIDTH,
     )).toBe(true)
-    expect(TUI_ELECTRIC_STARTUP_LOGO_ROWS.join('\n')).not.toMatch(/\u001B/u)
+    expect(TUI_STARTUP_LOGO_ROWS.join('\n')).not.toMatch(/\u001B/u)
   })
 
-  it('uses designed extended colors, the ANSI accent, and no color when disabled', () => {
-    const theme = resolveTuiTheme('dark', 'truecolor')
-    expect([
-      tuiElectricStartupLogoCellColor(theme, 0, 0),
-      tuiElectricStartupLogoCellColor(theme, 16, 0),
-      tuiElectricStartupLogoCellColor(theme, 0, 4),
-      tuiElectricStartupLogoCellColor(theme, 29, 4),
-      tuiElectricStartupLogoCellColor(theme, 0, 8),
-    ]).toEqual(['#5a65db', '#a1dace', '#00f0a2', '#b2f0db', '#009aff'])
-    expect(tuiElectricStartupLogoCellColor(resolveTuiTheme('dark', 'ansi16'), 0, 0)).toBe('cyan')
-    expect(tuiElectricStartupLogoCellColor(resolveTuiTheme('dark', 'none'), 0, 0)).toBeUndefined()
-    expect(tuiElectricStartupLogoCellColor(resolveTuiTheme('dark', 'truecolor'), 7, 0)).toBeUndefined()
+  it('preserves the supplied palette in truecolor and maps it for ANSI16/no-color output', () => {
+    expect(tuiStartupLogoCellStyle(resolveTuiTheme('dark', 'truecolor'), 0)).toEqual({
+      color: '#ffffff', backgroundColor: '#0000aa',
+    })
+    expect(tuiStartupLogoCellStyle(resolveTuiTheme('dark', 'ansi16'), 0)).toEqual({
+      color: 'white', backgroundColor: 'blue',
+    })
+    expect(tuiStartupLogoCellStyle(resolveTuiTheme('dark', 'none'), 0)).toEqual({})
+    expect(tuiStartupLogoCellStyle(resolveTuiTheme('dark', 'truecolor'), 99)).toEqual({})
   })
 
   it('falls back when either dimension or mounted suggestions cannot fit the full workspace', () => {
-    expect(resolveTuiStartupLogoVariant({ rows: 16, columns: 60 }, 1)).toBe('electric')
-    expect(resolveTuiStartupLogoVariant({ rows: 24, columns: 59 }, 1)).toBe('compact')
-    expect(resolveTuiStartupLogoVariant({ rows: 15, columns: 80 }, 1)).toBe('compact')
-    expect(resolveTuiStartupLogoVariant({ rows: 18, columns: 80 }, 1, 3)).toBe('compact')
+    expect(resolveTuiStartupLogoVariant({ rows: 14, columns: 69 }, 1)).toBe('primary')
+    expect(resolveTuiStartupLogoVariant({ rows: 24, columns: 68 }, 1)).toBe('compact')
+    expect(resolveTuiStartupLogoVariant({ rows: 13, columns: 80 }, 1)).toBe('compact')
+    expect(resolveTuiStartupLogoVariant({ rows: 16, columns: 80 }, 1, 3)).toBe('compact')
   })
 })
 
@@ -1433,6 +1700,57 @@ describe('composer editor', () => {
       .toBe('draft')
   })
 
+  it('keeps typed image references durable, deduplicated, and draft-local', () => {
+    const first = {
+      attachmentId: AttachmentId('sha256:first'), mediaType: 'image/png' as const,
+      bytes: 128, width: 1, height: 1, name: 'red.png',
+    }
+    const second = {
+      attachmentId: AttachmentId('sha256:second'), mediaType: 'image/jpeg' as const,
+      bytes: 256, width: 2, height: 2,
+    }
+    let state = addComposerImageAttachment(createComposerState(), first, 1_000)
+    state = addComposerImageAttachment(state, first, 1_100)
+    expect(state.attachments).toHaveLength(1)
+    state = addComposerImageAttachment(state, second, 1_200)
+    expect(state.attachments?.map(item => item.ref.attachmentId)).toEqual([
+      'sha256:first', 'sha256:second',
+    ])
+    expect(undoComposerEdit(state).attachments?.map(item => item.ref.attachmentId)).toEqual(['sha256:first'])
+    expect(redoComposerEdit(undoComposerEdit(state)).attachments?.map(item => item.ref.attachmentId)).toEqual([
+      'sha256:first', 'sha256:second',
+    ])
+    const stashed = toggleTuiComposerStash(state, undefined)
+    expect(stashed.stash?.attachments).toHaveLength(2)
+    expect(toggleTuiComposerStash(stashed.composer, stashed.stash).composer.attachments).toHaveLength(2)
+    const recalled = traverseComposerHistory(createComposerState('draft'), [tuiComposerDraft(state)], 'older')
+    expect(recalled.attachments).toHaveLength(2)
+    expect(removeLastComposerImageAttachment(recalled).attachments).toHaveLength(1)
+    expect(removeComposerImageAttachment(recalled, AttachmentId('sha256:first')).attachments?.[0]?.ref.attachmentId)
+      .toBe('sha256:second')
+    const clipboard = insertComposerClipboard(createComposerState('draft'), ' pasted', [first], 1_300)
+    expect(clipboard.text).toBe('draft pasted')
+    expect(clipboard.attachments?.map(item => item.ref.attachmentId)).toEqual(['sha256:first'])
+    const undoneClipboard = undoComposerEdit(clipboard)
+    expect(undoneClipboard.text).toBe('draft')
+    expect(undoneClipboard.attachments).toBeUndefined()
+    expect(redoComposerEdit(undoneClipboard).attachments?.[0]?.ref.attachmentId).toBe('sha256:first')
+
+    const largeClipboard = insertComposerClipboard(
+      createComposerState(),
+      Array.from({ length: 8 }, (_, index) => `clipboard ${index + 1}`).join('\n'),
+      [first],
+      1_400,
+    )
+    expect(largeClipboard.text).toMatch(/^\[Pasted text #1: 8 lines, /u)
+    expect(materializeComposerText(largeClipboard)).toContain('clipboard 8')
+    const largeUndo = undoComposerEdit(largeClipboard)
+    expect(largeUndo.text).toBe('')
+    expect(largeUndo.attachments).toBeUndefined()
+    expect(materializeComposerText(redoComposerEdit(largeUndo))).toContain('clipboard 1')
+    expect(redoComposerEdit(largeUndo).attachments?.[0]?.ref.attachmentId).toBe('sha256:first')
+  })
+
   it('coalesces rapid grapheme typing and restores exact cursors through undo and redo', () => {
     let state = createComposerState()
     state = insertComposerText(state, 'A', 1_000)
@@ -1519,6 +1837,7 @@ describe('TUI suggestions', () => {
     expect(commandSuggestionState('/', 1, commands)?.items.map(item => item.label)).toEqual(['/help', '/mode', '/models'])
     expect(commandSuggestionState('/mo', 3, commands)?.items.map(item => item.label)).toEqual(['/mode', '/models'])
     expect(commandSuggestionState('/unknown', 8, commands)).toMatchObject({ status: 'empty', items: [] })
+    expect(commandSuggestionState('/help ', 6, commands)).toBeUndefined()
     expect(commandSuggestionState('/mo value', 9, commands)).toBeUndefined()
     expect(commandSuggestionState('prompt', 6, commands)).toBeUndefined()
     expect(commandSuggestionState('/mo', 2, commands)).toBeUndefined()
@@ -1550,6 +1869,39 @@ describe('TUI suggestions', () => {
     const selected = moveTuiSuggestion(state!, 'next', 6)
     expect(acceptTuiSuggestion('/mo', selected)).toEqual({ text: '/models ', cursor: 8 })
     expect(acceptTuiSuggestion('/unknown', commandSuggestionState('/unknown', 8, commands)!)).toBeUndefined()
+  })
+
+  it('completes canonical nested paths and aliases without creating a shadow executor', () => {
+    const nested = [
+      {
+        name: 'goal', description: 'Manage goals', completion: {
+          aliases: ['g'], descriptions: { zh: '管理目标' }, children: [
+            { name: 'edit', aliases: ['e'], description: 'Edit objective', input: { hint: '<text>' } },
+            { name: 'clear', description: 'Clear goal', disabledReason: 'No active goal' },
+          ],
+        }, input: { hint: '[objective]', images: true },
+      },
+    ]
+    expect(commandSuggestionState('/', 1, nested)?.items.map(item => item.label)).toEqual(['/goal'])
+    expect(commandSuggestionState('/g ', 3, nested, 'zh')?.items).toMatchObject([
+      { label: '/goal clear', description: 'Clear goal', disabledReason: 'No active goal' },
+      { label: '/goal edit', description: 'Edit objective', detail: '<text>' },
+    ])
+    const state = commandSuggestionState('/g e', 4, nested)
+    expect(state?.items[0]).toMatchObject({ label: '/goal edit', commandPath: ['goal', 'edit'] })
+    expect(acceptTuiSuggestion('/g e', state!)).toEqual({ text: '/goal edit ', cursor: 11 })
+  })
+
+  it('skips disabled completion rows and refuses to accept them', () => {
+    const state = commandSuggestionState('/goal ', 6, [{
+      name: 'goal', description: 'Manage goals', completion: { children: [
+        { name: 'clear', description: 'Clear', disabledReason: 'Unavailable' },
+        { name: 'edit', description: 'Edit' },
+      ] },
+    }])!
+    expect(state.selectedIndex).toBe(1)
+    expect(moveTuiSuggestion(state, 'previous', 4).selectedIndex).toBe(1)
+    expect(acceptTuiSuggestion('/goal ', { ...state, selectedIndex: 0 })).toBeUndefined()
   })
 
   it('recognizes only workspace path tokens at whitespace boundaries', () => {
@@ -1810,6 +2162,21 @@ describe('TUI Session rewind boundaries', () => {
   })
 })
 
+describe('TUI double Escape rewind gesture', () => {
+  it('arms once, fires inside the bounded interval, and rearms after expiry or clock reversal', () => {
+    expect(consumeTuiDoubleEscape(1_000, undefined)).toEqual({
+      triggered: false, lastEscapeAt: 1_000,
+    })
+    expect(consumeTuiDoubleEscape(1_000 + TUI_DOUBLE_ESCAPE_WINDOW_MS, 1_000)).toEqual({
+      triggered: true,
+    })
+    expect(consumeTuiDoubleEscape(1_000 + TUI_DOUBLE_ESCAPE_WINDOW_MS + 1, 1_000)).toEqual({
+      triggered: false, lastEscapeAt: 1_000 + TUI_DOUBLE_ESCAPE_WINDOW_MS + 1,
+    })
+    expect(consumeTuiDoubleEscape(900, 1_000)).toEqual({ triggered: false, lastEscapeAt: 900 })
+  })
+})
+
 describe('TUI Session resume picker', () => {
   const record = (
     id: string,
@@ -1852,6 +2219,19 @@ describe('TUI Session resume picker', () => {
       .toBe('session requires preset minimal')
     expect(summarize(record('no-cwd', 1, { live: false, persisted: true, omitCwd: true })).disabledReason)
       .toBe('session has no recorded workspace')
+    expect(summarizeTuiResumeCandidate(
+      record('preview', 1, { live: false, persisted: true }),
+      'Preview', 2, currentId, '/workspace/current',
+      [{ seq: 1, kind: 'human', text: 'hello' }], true, 'backend unavailable',
+    )).toMatchObject({
+      preview: [{ seq: 1, kind: 'human', text: 'hello' }],
+      previewTruncated: true,
+      previewError: 'backend unavailable',
+    })
+    expect(summarizeTuiResumeCandidate(
+      record('preview', 1, { live: false, persisted: true }),
+      'Preview', 2, currentId, '/workspace/current', [], false, 'backend unavailable',
+    ).disabledReason).toBeUndefined()
   })
 
   it('sorts by activity and filters normalized title, id, and visible workspace', () => {
@@ -1912,6 +2292,8 @@ describe('TUI interaction bindings', () => {
       'ctrl+_': { input: '\u001f', key: {} },
       'ctrl+shift+-': { input: '-', key: { ctrl: true, shift: true } },
       'ctrl+y': { input: '\u0019', key: {} },
+      'ctrl+x': { input: '\u0018', key: {} },
+      'ctrl+v': { input: '\u0016', key: {} },
       'ctrl+k': { input: 'k', key: { ctrl: true } },
       'ctrl+p': { input: 'p', key: { ctrl: true } },
       'ctrl+space': { input: ' ', key: { ctrl: true } },
@@ -2086,6 +2468,23 @@ describe('TUI actionable footer', () => {
       ],
     },
     context: { projectedTokens: 8_000, pressureTokens: 7_000, contextWindow: 32_000 },
+    tokenUsage: {
+      uncachedInputTokens: 5_000,
+      outputTokens: 2_000,
+      cacheReadTokens: 2_000,
+      cacheWriteTokens: 100,
+    },
+    contextBreakdown: { systemTokens: 1_000, toolsTokens: 500, messageTokens: 6_500 },
+    sessionStats: {
+      turns: 1,
+      steps: 2,
+      llmMs: 4_000,
+      toolMs: 500,
+      ttftMs: 800,
+      ttftSteps: 2,
+      decodeMs: 3_000,
+      decodeTokens: 60,
+    },
     workspace: '/workspace/DSH',
     transcript: { startIndex: 4, endIndex: 8, total: 12, hasOlder: true, hasNewer: true },
   }
@@ -2096,10 +2495,60 @@ describe('TUI actionable footer', () => {
     expect(items.find(item => item.id === 'model')?.detailLines).toContain('Selection: next request')
     expect(items.find(item => item.id === 'context')).toMatchObject({ value: '~25%', action: 'detail' })
     expect(items.find(item => item.id === 'context')?.detailLines).toContain('Approximate remaining: 24,000 tokens')
+    expect(items.find(item => item.id === 'context')?.detailLines).toContain(
+      'Approximate composition: system ~1,000 · tools ~500 · messages ~6,500',
+    )
+    expect(items.find(item => item.id === 'context')?.detailLines).toContain('Usage: input 5,000 · output 2,000')
+    expect(items.find(item => item.id === 'context')?.detailLines).toContain(
+      'Approximate cache hit: 2,000/7,100 prompt tokens (~28%)',
+    )
+    expect(items.find(item => item.id === 'context')?.detailLines).toContain(
+      'Settled TTFT: 400 ms average (2 steps)',
+    )
+    expect(items.find(item => item.id === 'context')?.detailLines).toContain(
+      'Decode throughput: 20.0 tokens/s (60 output tokens)',
+    )
     expect(items.find(item => item.id === 'transcript')?.value).toBe('↑5-9/12↓')
 
     const withoutSample = tuiFooterItems({ ...sources, context: { contextWindow: 32_000 } })
     expect(withoutSample.some(item => item.id === 'context')).toBe(false)
+
+    const chinese = tuiFooterItems(sources, 'zh')
+    expect(chinese.map(item => item.label)).toEqual(['模型', '权限', '上下文', '目录', '视图'])
+    expect(chinese.find(item => item.id === 'model')?.detailLines).toContain('选择：下次请求')
+    expect(chinese.find(item => item.id === 'context')?.detailLines).toContain(
+      '估算组成：系统 ~1,000 · 工具 ~500 · 消息 ~6,500',
+    )
+    expect(chinese.find(item => item.id === 'context')?.detailLines).toContain('用量：输入 5,000 · 输出 2,000')
+  })
+
+  it('does not invent cache percentages when the provider reports no prompt denominator', () => {
+    const items = tuiFooterItems({
+      ...sources,
+      tokenUsage: { uncachedInputTokens: 0, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    })
+    const context = items.find(item => item.id === 'context')
+    expect(context?.detailLines).toContain('Usage: input 0 · output 100')
+    expect(context?.detailLines.some(line => line.includes('cache hit'))).toBe(false)
+  })
+
+  it('hides timing detail until a valid token boundary or decode sample settles', () => {
+    const items = tuiFooterItems({
+      ...sources,
+      sessionStats: {
+        turns: 1,
+        steps: 1,
+        llmMs: 0,
+        toolMs: 0,
+        ttftMs: 0,
+        ttftSteps: 0,
+        decodeMs: 0,
+        decodeTokens: 0,
+      },
+    })
+    const detailLines = items.find(item => item.id === 'context')?.detailLines ?? []
+    expect(detailLines.some(line => line.includes('Settled TTFT'))).toBe(false)
+    expect(detailLines.some(line => line.includes('Decode throughput'))).toBe(false)
   })
 
   it('exposes non-empty work counters as a high-priority action', () => {

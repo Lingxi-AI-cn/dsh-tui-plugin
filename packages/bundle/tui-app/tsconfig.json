@@ -4,5 +4,11 @@
     "rootDir": "src",
     "outDir": "lib/types"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "references": [
+    { "path": "../../host/session-export" },
+    { "path": "../../interaction/plugin-hub" },
+    { "path": "../../interaction/plugin-hub-local" },
+    { "path": "../../ui/tui" }
+  ]
 }

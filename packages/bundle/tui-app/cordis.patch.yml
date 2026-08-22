@@ -36,6 +36,12 @@
         writeEveryEvents: 200
         writeIntervalMs: 5000
 
+    # Durable whole-log turn timing backs the TUI footer's settled TTFT and
+    # decode-throughput detail; the projection is inert until the Session log
+    # contains provider timing boundaries.
+    - id: session-stats
+      name: '@deepseek-ai/dsh-session-stats'
+
     # Native Session export writes the complete durable archive directly to a
     # user-selected host directory; no HTTP or browser transport is mounted.
     - id: session-log-export

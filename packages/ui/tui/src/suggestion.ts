@@ -1,6 +1,8 @@
 /** Pure completion state shared by command and workspace-path suggestions. */
 
-import type { CommandDescriptor, FsPathCompletionResult } from './host.ts'
+import type {
+  CommandCompletionNode, CommandDescriptor, FsPathCompletionResult,
+} from './host.ts'
 
 /** Origin of one TUI completion candidate. */
 export type TuiSuggestionKind = 'command' | 'path'
@@ -20,6 +22,10 @@ export interface TuiSuggestionItem {
   description: string
   /** Optional secondary information such as an argument hint. */
   detail?: string | undefined
+  /** Why this completion is unavailable; unavailable rows cannot be accepted. */
+  disabledReason?: string | undefined
+  /** Canonical command path represented by this row, without the slash. */
+  commandPath?: readonly string[] | undefined
   /** Source that produced this item. */
   source: TuiSuggestionKind
 }
@@ -68,33 +74,126 @@ function selectedWindow(index: number, start: number, itemCount: number, visible
   return Math.min(maximum, start)
 }
 
+function firstSelectable(items: readonly TuiSuggestionItem[]): number {
+  return items.findIndex(item => item.disabledReason === undefined)
+}
+
+function commandDescription(
+  description: string,
+  descriptions: Readonly<Record<string, string>> | undefined,
+  locale: string,
+): string {
+  return descriptions?.[locale] ?? descriptions?.en ?? description
+}
+
+function commandAliasMatches(
+  name: string,
+  aliases: readonly string[] | undefined,
+  token: string,
+): string | undefined {
+  const normalized = token.toLocaleLowerCase()
+  if (name.toLocaleLowerCase().startsWith(normalized)) return name
+  return aliases?.find(alias => alias.toLocaleLowerCase().startsWith(normalized))
+}
+
+function resolveCompletionNode(
+  candidates: readonly CommandCompletionNode[],
+  token: string,
+): CommandCompletionNode | undefined {
+  const normalized = token.toLocaleLowerCase()
+  return candidates.find(candidate => candidate.name.toLocaleLowerCase() === normalized
+    || candidate.aliases?.some(alias => alias.toLocaleLowerCase() === normalized))
+}
+
+function isRootCommand(
+  candidate: CommandDescriptor | CommandCompletionNode,
+): candidate is CommandDescriptor {
+  return 'completion' in candidate
+}
+
+function commandQuery(
+  text: string,
+  cursor: number,
+): { readonly tokens: readonly string[]; readonly prefix: string } | undefined {
+  if (cursor !== text.length || !text.startsWith('/') || /[\r\n]/u.test(text)) return undefined
+  const body = text.slice(1)
+  if (!/^[a-z0-9_-]*(?:[\t ]+[a-z0-9_-]*)*$/iu.test(body)) return undefined
+  const trailingSeparator = /[\t ]$/u.test(body)
+  const parts = body.split(/[\t ]+/u)
+  const prefix = trailingSeparator ? '' : (parts.pop() ?? '')
+  const tokens = parts.filter(token => token !== '')
+  return { tokens, prefix }
+}
+
 /**
  * Resolve slash-command candidates for a command-only draft.
  * @param text - complete composer text.
  * @param cursor - active UTF-16 insertion offset.
  * @param commands - effective Agent-scoped command descriptors.
+ * @param locale - locale key used for provider-owned description fallback.
  * @returns active suggestion state, or `undefined` outside a command query.
  */
 export function commandSuggestionState(
   text: string,
   cursor: number,
   commands: readonly CommandDescriptor[],
+  locale = 'en',
 ): TuiSuggestionState | undefined {
-  if (cursor !== text.length || !/^\/[a-z0-9_-]*$/u.test(text)) return undefined
-  const query = text.slice(1).toLocaleLowerCase()
-  const items = commands
-    .filter(command => command.name.toLocaleLowerCase().startsWith(query))
-    .toSorted((left, right) => left.name.localeCompare(right.name))
-    .map((command): TuiSuggestionItem => ({
-      id: `command:${command.name}`,
-      insertText: `/${command.name} `,
-      label: `/${command.name}`,
-      description: command.description,
-      ...command.input === undefined ? {} : { detail: command.input.hint },
-      source: 'command',
-    }))
+  const parsed = commandQuery(text, cursor)
+  if (parsed === undefined) return undefined
+  const { tokens, prefix } = parsed
+  const roots = commands.toSorted((left, right) => left.name.localeCompare(right.name))
+  let candidates: readonly CommandDescriptor[] | readonly CommandCompletionNode[] = roots
+  let canonicalTokens: readonly string[] = []
+  let root: CommandDescriptor | undefined
+  if (tokens.length > 0) {
+    root = roots.find(command => command.name.toLocaleLowerCase() === tokens[0]?.toLocaleLowerCase()
+      || command.completion?.aliases?.some(alias => alias.toLocaleLowerCase() === tokens[0]?.toLocaleLowerCase()))
+    if (root === undefined) return undefined
+    canonicalTokens = [root.name]
+    candidates = root.completion?.children ?? []
+    for (const token of tokens.slice(1)) {
+      if (!Array.isArray(candidates)) return undefined
+      const resolved = resolveCompletionNode(candidates, token)
+      if (resolved === undefined) return undefined
+      canonicalTokens = [...canonicalTokens, resolved.name]
+      candidates = resolved.children ?? []
+    }
+  }
+  const normalizedPrefix = prefix.toLocaleLowerCase()
+  const items = candidates
+    .flatMap((candidate): TuiSuggestionItem[] => {
+      const name = candidate.name
+      const rootCommand = isRootCommand(candidate)
+      const aliases = rootCommand ? candidate.completion?.aliases : candidate.aliases
+      const completionToken = commandAliasMatches(name, aliases, normalizedPrefix)
+      if (completionToken === undefined) return []
+      const path = !rootCommand && candidate.canonicalPath !== undefined
+        ? [...candidate.canonicalPath]
+        : [...canonicalTokens, completionToken]
+      const description = rootCommand
+        ? commandDescription(candidate.description, candidate.completion?.descriptions, locale)
+        : commandDescription(candidate.description, candidate.descriptions, locale)
+      const input = candidate.input
+      const node = rootCommand ? undefined : candidate
+      return [{
+        id: `command:${path.join(' ')}`,
+        insertText: `/${path.join(' ')} `,
+        label: `/${path.join(' ')}`,
+        description,
+        ...input === undefined ? {} : { detail: input.hint },
+        ...node?.disabledReason === undefined ? {} : { disabledReason: node.disabledReason },
+        commandPath: Object.freeze(path),
+        source: 'command',
+      }]
+    })
+    .toSorted((left, right) => left.label.localeCompare(right.label))
+  // Once a complete command has no children, leave suggestion mode so Enter
+  // submits the command instead of being consumed by an empty suggestion list.
+  if (items.length === 0 && (candidates.length === 0 || (tokens.length > 0 && prefix !== ''))) return undefined
+  const selectedIndex = firstSelectable(items)
   return {
-    kind: 'command', queryStart: 0, queryEnd: cursor, selectedIndex: 0, visibleStart: 0,
+    kind: 'command', queryStart: 0, queryEnd: cursor, selectedIndex: selectedIndex < 0 ? 0 : selectedIndex, visibleStart: 0,
     items, status: items.length === 0 ? 'empty' : 'ready',
   }
 }
@@ -156,9 +255,15 @@ export function moveTuiSuggestion(
   visibleLimit: number,
 ): TuiSuggestionState {
   if (state.items.length === 0) return state
-  const selectedIndex = direction === 'previous'
-    ? Math.max(0, state.selectedIndex - 1)
-    : Math.min(state.items.length - 1, state.selectedIndex + 1)
+  let selectedIndex = state.selectedIndex
+  let candidate = direction === 'previous' ? selectedIndex - 1 : selectedIndex + 1
+  while (candidate >= 0 && candidate < state.items.length) {
+    if (state.items[candidate]?.disabledReason === undefined) {
+      selectedIndex = candidate
+      break
+    }
+    candidate += direction === 'previous' ? -1 : 1
+  }
   return {
     ...state,
     selectedIndex,
@@ -177,7 +282,7 @@ export function acceptTuiSuggestion(
   state: TuiSuggestionState,
 ): TuiSuggestionAcceptance | undefined {
   const item = state.items[state.selectedIndex]
-  if (item === undefined) return undefined
+  if (item === undefined || item.disabledReason !== undefined) return undefined
   const value = text.slice(0, state.queryStart) + item.insertText + text.slice(state.queryEnd)
   return { text: value, cursor: state.queryStart + item.insertText.length }
 }

@@ -6,6 +6,9 @@ import type { ContentBlock } from './host.ts'
 import type { TranscriptToolNode } from './transcript.ts'
 import { tuiBorderStyle, tuiTextStyle, useTuiTheme } from './theme.tsx'
 import { terminalSafe } from './sanitize.ts'
+import { projectTuiDiffLines, type TuiDiffMode } from './diff.ts'
+import type { TuiScreenMap } from './screen-map.ts'
+import { tuiScreenTextSegments, type TuiScreenSelection } from './selection.ts'
 
 const DETAIL_LINES = 8
 
@@ -73,6 +76,19 @@ function todoSummary(args: unknown): string | undefined {
 function titleFor(node: TranscriptToolNode): string {
   if (node.delegation?.label !== undefined) return node.delegation.label
   return node.resultView?.title ?? node.callView.title
+}
+
+/**
+ * Project the one-line heading used by a collapsed tool card.
+ * @param node - paired semantic tool node.
+ * @param workspace - optional Session workspace used for relative paths.
+ * @returns terminal-safe heading text without color or layout wrappers.
+ */
+export function toolCardHeadingText(node: TranscriptToolNode, workspace?: string): string {
+  const summary = toolSummary(node, workspace)
+  return `${toolStateMark(node)} ${terminalSafe(pathFor(titleFor(node), workspace))}`
+    + (summary === '' ? '' : ` · ${terminalSafe(summary)}`)
+    + ' ▸'
 }
 
 /** Stable terminal symbol for one tool scheduler state. */
@@ -148,7 +164,12 @@ export function toolSummary(node: TranscriptToolNode, workspace?: string): strin
 }
 
 /** Return a terminal-safe logical detail listing for one tool lifecycle. */
-export function toolDetailLines(node: TranscriptToolNode): readonly string[] {
+export function toolDetailLines(node: TranscriptToolNode, options: {
+  /** Available terminal cells for adaptive diff rows. */
+  readonly width?: number | undefined
+  /** Explicit diff layout, defaulting to width-aware automatic selection. */
+  readonly diffMode?: TuiDiffMode | undefined
+} = {}): readonly string[] {
   if (node.delegation !== undefined) {
     const elapsed = Math.max(0, (node.delegation.endedAt ?? Date.now()) - node.delegation.startedAt)
     return [
@@ -165,11 +186,11 @@ export function toolDetailLines(node: TranscriptToolNode): readonly string[] {
     `$ ${titleFor(node)}`,
     ...(result.output ?? node.output ?? '').split('\n'),
   ].map(terminalSafe)
-  if (result?.card === 'diff') return result.diffs.flatMap(diff => [
-    diff.path,
-    ...(diff.oldText === null ? [] : terminalSafe(diff.oldText).split('\n').map(line => `- ${line}`)),
-    ...terminalSafe(diff.newText).split('\n').map(line => `+ ${line}`),
-  ])
+  if (result?.card === 'diff') return projectTuiDiffLines(
+    result.diffs,
+    options.width,
+    options.diffMode ?? (options.width === undefined ? 'unified' : 'auto'),
+  )
   if (result?.card === 'search') {
     if (result.shape === 'paths') return result.paths.map(path => terminalSafe(`· ${path}`))
     return result.files.flatMap(file => [file.path, ...file.matches.map(match => `${match.lineNumber} ${match.line}`)]).map(terminalSafe)
@@ -184,11 +205,11 @@ export function toolDetailLines(node: TranscriptToolNode): readonly string[] {
   if (node.callView.card === 'terminal') return [
     node.callView.cwd ?? 'workspace', `$ ${node.callView.title}`, node.callView.description ?? '', node.output ?? '',
   ].flatMap(line => line.split('\n')).map(terminalSafe)
-  if (node.callView.card === 'diff') return node.callView.diffs.flatMap(diff => [
-    diff.path,
-    ...(diff.oldText === null ? [] : terminalSafe(diff.oldText).split('\n').map(line => `- ${line}`)),
-    ...terminalSafe(diff.newText).split('\n').map(line => `+ ${line}`),
-  ])
+  if (node.callView.card === 'diff') return projectTuiDiffLines(
+    node.callView.diffs,
+    options.width,
+    options.diffMode ?? (options.width === undefined ? 'unified' : 'auto'),
+  )
   const body = result?.card === 'generic'
     ? contentText(result.content)
     : node.output ?? (contentText(node.callView.content) || safe(node.callView.rawInput))
@@ -196,12 +217,22 @@ export function toolDetailLines(node: TranscriptToolNode): readonly string[] {
 }
 
 /** Render one paired tool lifecycle as a compact or detailed terminal card. */
-export function ToolCard({ node, expanded, detailOffset = 0, detailRows = DETAIL_LINES, workspace }: {
+export function ToolCard({
+  node,
+  expanded,
+  detailOffset = 0,
+  detailRows = DETAIL_LINES,
+  workspace,
+  selectionMap,
+  selection,
+}: {
   node: TranscriptToolNode
   expanded: boolean
   detailOffset?: number
   detailRows?: number
   workspace?: string | undefined
+  selectionMap?: TuiScreenMap | undefined
+  selection?: TuiScreenSelection | undefined
 }): React.ReactElement {
   const theme = useTuiTheme()
   const state = toolDisplayState(node)
@@ -209,12 +240,28 @@ export function ToolCard({ node, expanded, detailOffset = 0, detailRows = DETAIL
     : state === 'running' ? theme.tokens.warning
       : state === 'success' ? theme.tokens.success
         : state === 'cancelled' ? theme.tokens.muted : theme.tokens.error
-  const stateMark = toolStateMark(node)
   const summary = toolSummary(node, workspace)
-  const heading = <Text wrap="truncate-end">
-    <Text bold {...tuiTextStyle(stateColor)}>{stateMark} {terminalSafe(pathFor(titleFor(node), workspace))}</Text>
+  const selectionRow = selectionMap === undefined || selection === undefined
+    ? -1
+    : selectionMap.rows.findIndex(row => row.semanticBlockKey === node.key
+      && row.cells.some(cell => cell.source === 'text' && cell.selectable))
+  const selectionSegments = selectionRow < 0 || selectionMap === undefined || selection === undefined
+    ? undefined
+    : tuiScreenTextSegments(selectionMap, selectionRow, selection)
+  const defaultHeading = <>
+    <Text bold {...tuiTextStyle(stateColor)}>{toolStateMark(node)} {terminalSafe(pathFor(titleFor(node), workspace))}</Text>
     {summary !== '' && <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}> · {terminalSafe(summary)}</Text>}
     <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}> {expanded ? '▾' : '▸'}</Text>
+  </>
+  const heading = <Text wrap="truncate-end">
+    {selectionSegments === undefined || !selectionSegments.some(segment => segment.selected)
+      ? defaultHeading
+      : selectionSegments.map((segment, index) => <Text
+        key={`${selectionRow}:${index}:${segment.text}`}
+        bold
+        {...tuiTextStyle(segment.selected ? theme.tokens.selection : stateColor)}
+        inverse={segment.selected}
+      >{segment.text}</Text>)}
   </Text>
   if (!expanded) return <Box flexGrow={1} flexShrink={1}>{heading}</Box>
   return <Box borderStyle="round" {...tuiBorderStyle(stateColor)} flexDirection="column" paddingX={1} flexShrink={0}>

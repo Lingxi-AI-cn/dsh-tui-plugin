@@ -8,7 +8,7 @@ import { terminalWrappedLines } from './viewport.ts'
 
 interface DetailCacheEntry {
   readonly target: TranscriptNode | TranscriptToolNode
-  readonly logicalLines: readonly string[]
+  readonly logicalLines: Map<number, readonly string[]>
   readonly physicalLines: Map<number, readonly string[]>
 }
 
@@ -16,9 +16,9 @@ function detailTitle(tool: TranscriptToolNode): string {
   return tool.resultView?.title ?? tool.callView.title
 }
 
-function logicalDetailLines(node: TranscriptNode, child?: TranscriptToolNode): readonly string[] {
-  if (child !== undefined) return toolDetailLines(child)
-  if (node.kind === 'tool') return toolDetailLines(node)
+function logicalDetailLines(node: TranscriptNode, child?: TranscriptToolNode, width?: number): readonly string[] {
+  if (child !== undefined) return toolDetailLines(child, { width })
+  if (node.kind === 'tool') return toolDetailLines(node, { width })
   if (node.kind === 'text') {
     const text = node.tone === 'assistant' || node.tone === 'reasoning'
       ? terminalMarkdownText(node.text)
@@ -70,15 +70,17 @@ export class TuiTranscriptDetailCache {
     if (entry?.target !== target) {
       entry = {
         target,
-        logicalLines: Object.freeze([...logicalDetailLines(node, child)]),
+        logicalLines: new Map(),
         physicalLines: new Map(),
       }
       this.entries.set(key, entry)
     }
     const columns = Math.max(1, width)
+    const logical = entry.logicalLines.get(columns) ?? Object.freeze([...logicalDetailLines(node, child, columns)])
+    entry.logicalLines.set(columns, logical)
     const cached = entry.physicalLines.get(columns)
     if (cached !== undefined) return cached
-    const physical = Object.freeze(entry.logicalLines.flatMap(line => terminalWrappedLines(line, columns)))
+    const physical = Object.freeze(logical.flatMap(line => terminalWrappedLines(line, columns)))
     entry.physicalLines.set(columns, physical)
     return physical
   }

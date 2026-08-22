@@ -7,11 +7,18 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import { internals, provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import { tuiHostDiagnosticsFromStartup } from '@lingxi-ai-cn/dsh-tui-runtime'
 import * as tuiApp from '../src/index.ts'
 import { apply as applyStartup, TUI_STARTUP_SERVICE, type TuiStartupValues } from '../src/startup.ts'
 
 const originalInternals = { ...internals }
 afterEach(() => { Object.assign(internals, originalInternals) })
+
+function isStartupValues(value: unknown): value is TuiStartupValues {
+  return typeof value === 'object' && value !== null
+    && tuiHostDiagnosticsFromStartup(value) !== undefined
+    && (!('resume' in value) || typeof value.resume === 'string')
+}
 
 async function parse(args: string[]): Promise<{ value?: TuiStartupValues; exits: number[]; output: string }> {
   const exits: number[] = []
@@ -22,16 +29,24 @@ async function parse(args: string[]): Promise<{ value?: TuiStartupValues; exits:
   const ctx = new Context()
   provideCmdline(ctx, { args, exit: (code) => { exits.push(code) } })
   applyStartup(ctx)
-  const value = ctx.get(TUI_STARTUP_SERVICE) as TuiStartupValues | undefined
+  const value: unknown = ctx.get(TUI_STARTUP_SERVICE)
   await ctx.fiber.dispose()
+  if (value !== undefined && !isStartupValues(value)) throw new Error('tuiStartup published an invalid test value')
   return { ...value === undefined ? {} : { value }, exits, output }
 }
 
 describe('TUI command-line provider', () => {
   it('provides a fresh or resumed startup value', async () => {
-    await expect(parse([])).resolves.toMatchObject({ value: {}, exits: [] })
+    await expect(parse([])).resolves.toMatchObject({
+      value: { diagnostics: { compatibility: 'compatible', profile: 'tui' } },
+      exits: [],
+    })
     await expect(parse(['--resume', 'session-a'])).resolves.toMatchObject({
-      value: { resume: 'session-a' }, exits: [],
+      value: {
+        diagnostics: { compatibility: 'compatible', profile: 'tui' },
+        resume: 'session-a',
+      },
+      exits: [],
     })
   })
 

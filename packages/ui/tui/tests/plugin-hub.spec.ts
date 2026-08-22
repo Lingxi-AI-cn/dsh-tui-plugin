@@ -8,7 +8,7 @@ import {
   formatTuiPluginHubRelativeTime, formatTuiPluginHubStars, tuiPluginHubCardHeight,
   tuiPluginHubCardLayout, tuiPluginHubCatalogLine, tuiPluginHubCategoryLabel, tuiPluginHubDetailLines,
   tuiPluginHubInstalledRows, tuiPluginHubNextCategory, tuiPluginHubNextSort, tuiPluginHubPlanLines,
-  tuiPluginHubQueryCursor, tuiPluginHubRows, tuiPluginHubSortLabel,
+  tuiPluginHubQueryCursor, tuiPluginHubRows, tuiPluginHubSortLabel, tuiPluginHubViewportRows,
 } from '../src/plugin-hub.ts'
 
 function physicalText(lines: readonly { readonly text: string }[]): string {
@@ -25,6 +25,12 @@ const summary = {
 }
 
 describe('Plugin Hub TUI projection', () => {
+  it('reserves exact page chrome for searchable and non-searchable views', () => {
+    expect(tuiPluginHubViewportRows(24, true)).toBe(15)
+    expect(tuiPluginHubViewportRows(24, false)).toBe(18)
+    expect(tuiPluginHubViewportRows(Number.NaN, true)).toBe(15)
+  })
+
   it('cycles provider-neutral catalog sort labels', () => {
     expect(tuiPluginHubSortLabel('relevance')).toBe('Relevance')
     expect(tuiPluginHubNextSort('relevance')).toBe('stars')
@@ -103,6 +109,7 @@ describe('Plugin Hub TUI projection', () => {
     const now = Date.parse('2026-08-19T12:00:00.000Z')
     expect(formatTuiPluginHubRelativeTime('2026-08-19T00:00:00.000Z', now)).toBe('today')
     expect(formatTuiPluginHubRelativeTime('2026-08-16T12:00:00.000Z', now)).toBe('3d ago')
+    expect(formatTuiPluginHubRelativeTime('2026-08-16T12:00:00.000Z', now, 'zh')).toBe('3 天前')
     expect(formatTuiPluginHubRelativeTime('invalid', now)).toBeUndefined()
     expect(formatTuiPluginHubRelativeTime('2026-08-20T00:00:00.000Z', now)).toBeUndefined()
   })
@@ -139,6 +146,8 @@ describe('Plugin Hub TUI projection', () => {
     expect(rows[1]?.selected).toBe(true)
     expect(rows[1]?.summary).toContain('unmanaged · dependency only')
     expect(rows.every(row => tuiPluginHubCardLayout(row, 40).physicalLines.every(line => stringWidth(line) <= 36))).toBe(true)
+    expect(tuiPluginHubInstalledRows(installed, 0, 80, 'zh')[0]?.summary)
+      .toContain('由 Hub 管理 · 活动 bundle · ok')
   })
 
   it('shows exact signed install facts and runtime risk before confirmation', () => {
@@ -183,6 +192,10 @@ describe('Plugin Hub TUI projection', () => {
     expect(lines.filter(line => line.kind === 'section').map(line => line.text)).toEqual([
       'Install target', 'Compatibility and trust', 'Risks and advisories', 'Profile changes',
     ])
+    const chinese = physicalText(tuiPluginHubPlanLines(plan, undefined, 80, 'zh'))
+    expect(chinese).toContain('安装 @example/dsh-fixture')
+    expect(chinese).toContain('兼容性与信任')
+    expect(chinese).toContain('重启：必需')
   })
 
   it('neutralizes README terminal controls before rendering detail', () => {
@@ -255,6 +268,12 @@ describe('Plugin Hub TUI projection', () => {
     expect(lines.some(line => line.text.includes('[LOW]') && line.tone === 'muted')).toBe(true)
     expect(lines.every(line => stringWidth(line.text) <= 76)).toBe(true)
     expect(text.indexOf('Versions')).toBeLessThan(text.indexOf('README'))
+    const chinese = physicalText(tuiPluginHubDetailLines(
+      detail, 80, Date.parse('2026-08-19T00:00:00.000Z'), 'zh',
+    ))
+    expect(chinese).toContain('概览')
+    expect(chinese).toContain('更新时间：2026-08-18 · 1 天前')
+    expect(chinese).toContain('风险与安全建议')
   })
 
   it('keeps Versions before a long README and marks the README truncation', () => {

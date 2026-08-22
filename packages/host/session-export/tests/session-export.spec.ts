@@ -5,13 +5,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import { CallId, createMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { strFromU8, unzipSync } from 'fflate'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionLineageNode } from '@deepseek-ai/dsh-session-query'
-import type { SessionRawArtifact } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionInspection, SessionRawArtifact } from '@deepseek-ai/dsh-session-persistence'
 import SessionLogExporter, {
   prepareSessionLogExport,
+  renderSessionMarkdown,
+  sessionMarkdownExportDeps,
   SessionLogExportError,
 } from '../src/index.ts'
 
@@ -47,6 +51,7 @@ function lineageNode(id: string): SessionLineageNode {
 interface Services {
   readonly root?: SessionRawArtifact | undefined
   readonly readRaw?: (id: SessionId, signal?: AbortSignal) => Promise<SessionRawArtifact | undefined>
+  readonly inspect?: (id: SessionId, signal?: AbortSignal) => Promise<SessionInspection>
   readonly traceSession?: (id: SessionId, signal?: AbortSignal) => Promise<{
     target: { header: SessionHeader; live: boolean; persisted: boolean }
     ancestors: readonly SessionLineageNode[]
@@ -69,6 +74,7 @@ function contextWithServices(services: Services = {}): Context {
     readRaw: services.readRaw ?? (async (id: SessionId) => id === sid('root')
       ? services.root ?? artifact('root')
       : undefined),
+    inspect: services.inspect ?? (async (id: SessionId) => ({ meta: header(String(id)), events: [] })),
   } as never)
   ctx.provide('sessionQuery', {
     traceSession: services.traceSession ?? (async () => ({
@@ -86,6 +92,59 @@ function contextWithServices(services: Services = {}): Context {
     readImage: async (ref: ImageAttachmentRef) => ({ ref, data: new Uint8Array([1]) }),
   } as never)
   return ctx
+}
+
+const attachment = {
+  attachmentId: AttachmentId('sha256:' + 'a'.repeat(64)),
+  mediaType: 'image/png',
+  bytes: 3,
+  width: 1,
+  height: 1,
+} satisfies ImageAttachmentRef
+
+function markdownEvents(id: string): SessionEvent[] {
+  const callId = CallId(`${id}-call`)
+  return [
+    {
+      type: 'user/message', seq: 0, time: 100,
+      data: createUserMessage({
+        content: [
+          { type: 'text', text: 'Please inspect the workspace.' },
+          { type: 'image', attachment },
+        ],
+        source: { kind: 'user' },
+      }),
+      surfaceOp: 'append',
+    },
+    {
+      type: 'assistant/message', seq: 1, time: 110,
+      data: {
+        turn: 1, step: 1,
+        message: createMessage({
+          role: 'assistant',
+          content: [{ type: 'text', text: 'I will inspect the files now.' }],
+          source: { kind: 'model', provider: 'fixture', model: 'fixture' },
+        }),
+      },
+      surfaceOp: 'append',
+    },
+    {
+      type: 'tool/call', seq: 2, time: 120,
+      data: { turn: 1, step: 1, callId, name: 'read_file', arguments: '{"path":"/private/secret.txt","token":"DO_NOT_EXPORT"}' },
+    },
+    {
+      type: 'tool/result', seq: 3, time: 130,
+      data: {
+        turn: 1, step: 1,
+        message: createToolResultMessage({
+          callId,
+          content: [{ type: 'text', text: 'README.md contains the expected heading.' }],
+          isError: false,
+        }),
+      },
+      surfaceOp: 'append',
+    },
+  ]
 }
 
 describe('prepareSessionLogExport', () => {
@@ -240,5 +299,99 @@ describe('SessionLogExporter.writeToDirectory', () => {
       new AbortController().signal,
     )).rejects.toEqual(expect.objectContaining<Partial<SessionLogExportError>>({ code: 'write-failed' }))
     expect(await readdir(directory)).toEqual([])
+  })
+})
+
+describe('Session Markdown export', () => {
+  it('renders human-visible messages and tool summaries without arguments or attachment bytes', async () => {
+    const ctx = contextWithServices({
+      inspect: async id => ({ meta: header(String(id)), events: markdownEvents(String(id)) }),
+    })
+    const markdown = await renderSessionMarkdown(
+      sessionMarkdownExportDeps(ctx),
+      { sessionId: sid('root'), includeDescendants: false, attachmentPolicy: 'reference' },
+      new AbortController().signal,
+    )
+
+    expect(markdown).toContain('Please inspect the workspace.')
+    expect(markdown).toContain('I will inspect the files now.')
+    expect(markdown).toContain('### Tool: read_file')
+    expect(markdown).toContain('README.md contains the expected heading.')
+    expect(markdown).toContain('Arguments: omitted in summary export.')
+    expect(markdown).toContain('attachment:sha256:')
+    expect(markdown).toContain('Time: 1970-01-01T00:00:00.100Z')
+    expect(markdown).not.toContain('DO_NOT_EXPORT')
+    expect(markdown).not.toContain('/private/secret.txt')
+  })
+
+  it('projects recursive descendants and publishes collision-safe owner-only Markdown', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-session-markdown-'))
+    roots.push(directory)
+    await writeFile(join(directory, 'dsh-session-root.md'), 'existing')
+    const childId = sid('child')
+    const ctx = contextWithServices({
+      inspect: async id => ({ meta: header(String(id), id === childId ? sid('root') : undefined), events: markdownEvents(String(id)) }),
+      traceSession: async () => ({
+        target: { header: header('root'), live: true, persisted: true },
+        ancestors: [], complete: true,
+        root: { header: header('root'), live: true, persisted: true },
+        descendants: [lineageNode('child')],
+      }),
+    })
+    const exporter = new SessionLogExporter(ctx, {})
+    const result = await exporter.writeMarkdownToDirectory(
+      { sessionId: sid('root'), includeDescendants: true, attachmentPolicy: 'reference' },
+      directory,
+      new AbortController().signal,
+    )
+
+    expect(result.filename).toBe('dsh-session-root-2.md')
+    const markdown = await readFile(result.path, 'utf8')
+    expect(markdown.match(/^## Session /gmu)).toHaveLength(2)
+    expect(markdown).toContain('Session `child`')
+    expect((await stat(result.path)).mode & 0o777).toBe(0o600)
+    expect(await readdir(directory)).toEqual(['dsh-session-root-2.md', 'dsh-session-root.md'])
+  })
+
+  it('preserves cancellation and removes a partial Markdown publication', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-session-markdown-cancel-'))
+    roots.push(directory)
+    let reportStarted!: (signal: AbortSignal) => void
+    const started = new Promise<AbortSignal>((resolve) => { reportStarted = resolve })
+    const ctx = contextWithServices({
+      inspect: async (_id, signal) => new Promise<SessionInspection>((_resolve, reject) => {
+        if (signal === undefined) throw new Error('missing inspection signal')
+        reportStarted(signal)
+        signal.addEventListener('abort', () => { reject(signal.reason as Error) }, { once: true })
+      }),
+    })
+    const exporter = new SessionLogExporter(ctx, {})
+    const controller = new AbortController()
+    const operation = exporter.writeMarkdownToDirectory(
+      { sessionId: sid('root'), includeDescendants: false },
+      directory,
+      controller.signal,
+    )
+    const producerSignal = await started
+    const cancellation = new Error('operator cancelled Markdown export')
+    controller.abort(cancellation)
+
+    await expect(operation).rejects.toBe(cancellation)
+    expect(producerSignal.reason).toBe(cancellation)
+    expect(await readdir(directory)).toEqual([])
+  })
+
+  it('sanitizes persistence failures before exposing them to the TUI', async () => {
+    const exporter = new SessionLogExporter(contextWithServices({
+      inspect: async () => { throw new Error('/private/session.sqlite') },
+    }), {})
+    await expect(exporter.writeMarkdownToDirectory(
+      { sessionId: sid('root'), includeDescendants: false },
+      '/tmp',
+      new AbortController().signal,
+    )).rejects.toEqual(expect.objectContaining({
+      code: 'prepare-failed',
+      message: 'Session Markdown export failed to prepare the projection',
+    }))
   })
 })

@@ -7,14 +7,18 @@ const EXIT_ALT_SCREEN = '\u001B[?1049l'
 const SHOW_CURSOR = '\u001B[?25h'
 const HIDE_CURSOR = '\u001B[?25l'
 const ENABLE_MOUSE = '\u001B[?1000h\u001B[?1006h'
+const ENABLE_SELECTION_MOUSE = '\u001B[?1002h'
+const DISABLE_SELECTION_MOUSE = '\u001B[?1002l'
 const DISABLE_MOUSE = '\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l'
+const ENABLE_ALTERNATE_SCROLL = '\u001B[?1007h'
+const DISABLE_ALTERNATE_SCROLL = '\u001B[?1007l'
 const ENABLE_FOCUS = '\u001B[?1004h'
 const DISABLE_FOCUS = '\u001B[?1004l'
 const ENABLE_BRACKETED_PASTE = '\u001B[?2004h'
 const DISABLE_BRACKETED_PASTE = '\u001B[?2004l'
 const ENABLE_KITTY_KEYBOARD = '\u001B[>1u'
 const DISABLE_KITTY_KEYBOARD = '\u001B[<u'
-const CAPABILITY_QUERY = '\u001B[c\u001B[?u\u001B]10;?\u0007'
+const CAPABILITY_QUERY = '\u001B[c\u001B[?u\u001B]10;?\u0007\u001B]11;?\u0007'
 const DEFAULT_NEGOTIATION_TIMEOUT_MS = 75
 const MAX_OSC52_BYTES = 100_000
 
@@ -36,8 +40,19 @@ export interface InputCursorTarget {
   column: number
 }
 
+/** Idempotent release/reacquire handle for a child process that owns the TTY temporarily. */
+export interface TuiTerminalHandoff {
+  /** Re-enter the prior terminal transaction after the child exits. */
+  resume(): void
+  /** Prevent a later resume when application shutdown owns the terminal teardown. */
+  cancel(): void
+}
+
 /** Terminal color precision used by semantic renderers. */
 export type TuiTerminalColorDepth = 'none' | 'ansi16' | 'ansi256' | 'truecolor'
+
+/** Terminal background classification derived from a validated OSC 11 reply. */
+export type TuiTerminalBackground = 'light' | 'dark' | 'unknown'
 
 /** Keyboard protocol that the terminal agreed to receive. */
 export type TuiTerminalKeyboardProtocol = 'legacy' | 'kitty'
@@ -46,6 +61,8 @@ export type TuiTerminalKeyboardProtocol = 'legacy' | 'kitty'
 export interface TuiTerminalCapabilities {
   /** Color precision reported by the output stream or `NO_COLOR`. */
   readonly colorDepth: TuiTerminalColorDepth
+  /** Normalized background class; unknown when OSC 11 is absent or malformed. */
+  readonly background: TuiTerminalBackground
   /** Enhanced keyboard protocol enabled for this transaction. */
   readonly keyboardProtocol: TuiTerminalKeyboardProtocol
   /** Whether SGR mouse reports may be enabled. */
@@ -80,6 +97,7 @@ export type TuiClipboardResult =
 /** Capabilities used by the compatibility `enter()` call in isolated tests. */
 export const DEFAULT_TUI_TERMINAL_CAPABILITIES: TuiTerminalCapabilities = Object.freeze({
   colorDepth: 'ansi16',
+  background: 'unknown',
   keyboardProtocol: 'legacy',
   mouse: 'sgr',
   focus: false,
@@ -93,6 +111,7 @@ export const DEFAULT_TUI_TERMINAL_CAPABILITIES: TuiTerminalCapabilities = Object
 export class TerminalSession {
   private active = false
   private rawModeHeld = false
+  private selectionMouseMode = false
   private cursorTarget: InputCursorTarget | undefined
   private activeModes: { mouse: boolean; focus: boolean; paste: boolean; kitty: boolean } = {
     mouse: false, focus: false, paste: false, kitty: false,
@@ -183,6 +202,47 @@ export class TerminalSession {
   }
 
   /**
+   * Enable or disable button-motion reports for a process-local text-selection owner.
+   * All-motion hover (`1003`) is never enabled. Unsupported or inactive sessions
+   * return `false` without writing a terminal mode sequence.
+   * @param enabled - whether selection drag motion should be reported.
+   * @returns whether the requested state is active in this transaction.
+   */
+  setSelectionMouseMode(enabled: boolean): boolean {
+    if (!this.active || !this.activeModes.mouse || this.capabilitiesSnapshot?.mouse !== 'sgr') return false
+    if (this.selectionMouseMode === enabled) return true
+    try {
+      this.streams.stdout.write(enabled ? ENABLE_SELECTION_MOUSE : DISABLE_SELECTION_MOUSE)
+    } catch {
+      return false
+    }
+    this.selectionMouseMode = enabled
+    return true
+  }
+
+  /**
+   * Transfer pointer ownership between the TUI and the outer terminal.
+   * Disabling clears click, button-motion, all-motion, and SGR reporting;
+   * enabling restores click plus SGR coordinates only after capability confirmation.
+   * @param enabled - whether the TUI should receive negotiated mouse reports.
+   * @returns whether the requested mode is active in this transaction.
+   */
+  setMouseMode(enabled: boolean): boolean {
+    if (!this.active || this.capabilitiesSnapshot?.mouse !== 'sgr') return false
+    if (this.activeModes.mouse === enabled) return true
+    try {
+      this.streams.stdout.write(enabled
+        ? DISABLE_ALTERNATE_SCROLL + ENABLE_MOUSE
+        : DISABLE_MOUSE + ENABLE_ALTERNATE_SCROLL)
+    } catch {
+      return false
+    }
+    this.activeModes.mouse = enabled
+    if (!enabled) this.selectionMouseMode = false
+    return true
+  }
+
+  /**
    * Enter the alternate screen exactly once after TTY validation.
    * @param capabilities - negotiated capabilities controlling enabled terminal modes.
    */
@@ -190,6 +250,7 @@ export class TerminalSession {
     this.assertInteractive()
     if (this.active) return
     this.active = true
+    this.selectionMouseMode = false
     this.capabilitiesSnapshot = capabilities
     this.activeModes = {
       mouse: capabilities.mouse === 'sgr',
@@ -198,10 +259,37 @@ export class TerminalSession {
       kitty: capabilities.keyboardProtocol === 'kitty',
     }
     this.streams.stdout.write(ENTER_ALT_SCREEN
-      + (this.activeModes.mouse ? ENABLE_MOUSE : '')
+      + (this.activeModes.mouse ? DISABLE_ALTERNATE_SCROLL + ENABLE_MOUSE : '')
       + (this.activeModes.focus ? ENABLE_FOCUS : '')
       + (this.activeModes.paste ? ENABLE_BRACKETED_PASTE : '')
       + (this.activeModes.kitty ? ENABLE_KITTY_KEYBOARD : ''))
+  }
+
+  /**
+   * Release the current terminal transaction for an external interactive child.
+   * @returns an idempotent handle that either reacquires the same capabilities or cancels reacquisition.
+   */
+  handoff(): TuiTerminalHandoff {
+    const wasActive = this.active
+    const capabilities = this.capabilitiesSnapshot ?? DEFAULT_TUI_TERMINAL_CAPABILITIES
+    const wasMouseMode = this.activeModes.mouse
+    const wasSelectionMouseMode = this.selectionMouseMode
+    this.restore()
+    let state: 'suspended' | 'resumed' | 'cancelled' = 'suspended'
+    return {
+      resume: (): void => {
+        if (state !== 'suspended') return
+        state = 'resumed'
+        if (wasActive) {
+          this.enter(capabilities)
+          if (!wasMouseMode) this.setMouseMode(false)
+          if (wasSelectionMouseMode) this.setSelectionMouseMode(true)
+        }
+      },
+      cancel: (): void => {
+        if (state === 'suspended') state = 'cancelled'
+      },
+    }
   }
 
   /** Restore every terminal mode this application may have enabled, idempotently. */
@@ -212,6 +300,7 @@ export class TerminalSession {
     const wasActive = this.active
     this.active = false
     this.cursorTarget = undefined
+    this.selectionMouseMode = false
     const modes = this.activeModes
     this.activeModes = { mouse: false, focus: false, paste: false, kitty: false }
     try {
@@ -226,7 +315,7 @@ export class TerminalSession {
       if (wasActive || modes.mouse || modes.focus || modes.paste || modes.kitty) {
         this.streams.stdout.write((modes.kitty ? DISABLE_KITTY_KEYBOARD : '')
           + (modes.focus ? DISABLE_FOCUS : '')
-          + (modes.mouse ? DISABLE_MOUSE : '')
+          + (modes.mouse ? DISABLE_MOUSE + ENABLE_ALTERNATE_SCROLL : '')
           + (modes.paste ? DISABLE_BRACKETED_PASTE : '')
           + SHOW_CURSOR + (wasActive ? EXIT_ALT_SCREEN : ''))
       }
@@ -348,6 +437,7 @@ function createInitialCapabilities(stdout: NodeJS.WriteStream, environment: Node
   const ssh = environment.SSH_CONNECTION !== undefined || environment.SSH_TTY !== undefined
   return Object.freeze({
     colorDepth: resolveColorDepth(stdout, environment),
+    background: 'unknown' as const,
     keyboardProtocol: 'legacy' as const,
     mouse: 'none' as const,
     focus: false,
@@ -371,12 +461,42 @@ export function applyTuiTerminalReply(
   const identified = /^\u001B\[(?:\?|>)[^\s]*c$/u.test(sequence)
   const kitty = /^\u001B\[\?\d+u$/u.test(sequence)
   const osc = sequence.startsWith('\u001B]10;') || sequence.startsWith('\u001B]11;')
+  const background = terminalBackgroundFromOsc11(sequence)
   return Object.freeze({
     ...current,
     ...(identified ? { mouse: 'sgr' as const, focus: true, bracketedPaste: true } : {}),
     ...(kitty ? { keyboardProtocol: 'kitty' as const } : {}),
     ...(osc ? { osc: true } : {}),
+    ...(background === 'unknown' ? {} : { background }),
     outer: Object.freeze({ ...current.outer }),
+  })
+}
+
+function terminalBackgroundFromOsc11(sequence: string): TuiTerminalBackground {
+  const reply = /^\u001B\]11;([^\u0007\u001B]*)(?:\u0007|\u001B\\)$/u.exec(sequence)
+  if (reply === null) return 'unknown'
+  const color = parseOscColor(reply[1] as string)
+  if (color === undefined) return 'unknown'
+  const luma = 0.299 * color.red + 0.587 * color.green + 0.114 * color.blue
+  return luma > 140 ? 'light' : 'dark'
+}
+
+function parseOscColor(specification: string): Readonly<{ red: number; green: number; blue: number }> | undefined {
+  const hex = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/iu.exec(specification)
+  if (hex !== null) return Object.freeze({
+    red: Number.parseInt(hex[1] as string, 16),
+    green: Number.parseInt(hex[2] as string, 16),
+    blue: Number.parseInt(hex[3] as string, 16),
+  })
+  const rgb = /^rgb:([\da-f]{1,4})\/([\da-f]{1,4})\/([\da-f]{1,4})$/iu.exec(specification)
+  if (rgb === null) return undefined
+  const scale = (component: string): number => Math.round(
+    Number.parseInt(component, 16) / (16 ** component.length - 1) * 255,
+  )
+  return Object.freeze({
+    red: scale(rgb[1] as string),
+    green: scale(rgb[2] as string),
+    blue: scale(rgb[3] as string),
   })
 }
 

@@ -1,6 +1,8 @@
 /** Native-TUI interaction actions, contexts, defaults, and settings overrides. */
 
 import { z } from './host.ts'
+import { tuiInteractionContextLabel, type TuiLocale } from './locale.ts'
+import { terminalWrappedLines } from './viewport.ts'
 
 /** Input ownership contexts supported by the native TUI. */
 export type TuiInteractionContext =
@@ -30,6 +32,8 @@ export type TuiInteractionActionId =
   | 'composer.stash'
   | 'composer.undo'
   | 'composer.redo'
+  | 'composer.externalEditor'
+  | 'composer.clipboardPaste'
   | 'composer.openModels'
   | 'composer.openResume'
   | 'composer.openFooter'
@@ -245,6 +249,8 @@ export const TUI_INTERACTION_REGISTRY: readonly TuiInteractionDescriptor[] = Obj
     key('ctrl+_', 'Ctrl+_'), key('ctrl+shift+-', 'Ctrl+Shift+-'),
   ]),
   descriptor('composer.redo', 'Composer', 'Redo composer edit', [key('ctrl+y', 'Ctrl+Y')]),
+  descriptor('composer.externalEditor', 'Composer', 'Open draft in external editor', [key('ctrl+x', 'Ctrl+X')]),
+  descriptor('composer.clipboardPaste', 'Composer', 'Paste from system clipboard', [key('ctrl+v', 'Ctrl+V')]),
   descriptor('composer.openModels', 'Composer', 'Open model picker', [
     key('meta+p', 'Alt+P'), command('/models'),
   ], 'modelPicker'),
@@ -337,6 +343,97 @@ export const TUI_INTERACTION_REGISTRY: readonly TuiInteractionDescriptor[] = Obj
   ], 'approval'),
 ])
 
+const TUI_INTERACTION_DESCRIPTIONS_ZH: Readonly<Record<TuiInteractionActionId, string>> = Object.freeze({
+  'app.interrupt': '中断、取消或退出',
+  'view.root': '返回根 Agent',
+  'help.open': '打开交互帮助',
+  'transcript.open': '浏览 Transcript 块',
+  'composer.submit': '发送提示词',
+  'composer.newline': '插入换行',
+  'composer.historyPrevious': '上一条已提交提示词',
+  'composer.historyNext': '下一条已提交提示词',
+  'composer.historySearch': '搜索已提交提示词',
+  'composer.transcriptSearch': '搜索完整 Transcript',
+  'composer.stash': '暂存、恢复或交换草稿',
+  'composer.undo': '撤销输入编辑',
+  'composer.redo': '重做输入编辑',
+  'composer.externalEditor': '在外部编辑器中打开草稿',
+  'composer.clipboardPaste': '从系统剪贴板粘贴',
+  'composer.openModels': '打开模型选择器',
+  'composer.openResume': '打开 Session 选择器',
+  'composer.openFooter': '聚焦状态栏',
+  'composer.transcriptPreviousPage': '上一页 Transcript',
+  'composer.transcriptNextPage': '下一页 Transcript',
+  'composer.transcriptOldest': '输入为空时跳到最早 Transcript 块',
+  'composer.transcriptLatest': '输入为空时跳到最新 Transcript 块',
+  'composer.cancel': '取消运行中的 Agent',
+  'suggestion.previous': '上一条建议',
+  'suggestion.next': '下一条建议',
+  'suggestion.accept': '接受当前建议',
+  'suggestion.dismiss': '关闭建议',
+  'historySearch.next': '选择更早的匹配项',
+  'historySearch.accept': '接受当前匹配项',
+  'historySearch.cancel': '恢复原始草稿',
+  'transcriptSearch.next': '选择下一个 Transcript 匹配项',
+  'transcriptSearch.previous': '选择上一个 Transcript 匹配项',
+  'transcriptSearch.accept': '保留当前 Transcript 位置',
+  'transcriptSearch.cancel': '恢复之前的 Transcript 位置',
+  'transcript.previous': '上一个 Transcript 块',
+  'transcript.next': '下一个 Transcript 块',
+  'transcript.inspect': '打开聚焦项详情',
+  'transcript.copy': '复制聚焦的 Transcript 块',
+  'transcript.close': '返回输入框',
+  'detail.previousPage': '详情上一页',
+  'detail.nextPage': '详情下一页',
+  'detail.copy': '复制完整详情',
+  'detail.close': '关闭详情',
+  'pluginHub.close': '关闭 Plugin Hub',
+  'pluginHub.previous': '上一个插件',
+  'pluginHub.next': '下一个插件',
+  'pluginHub.previousPage': '插件列表上一页',
+  'pluginHub.nextPage': '插件列表下一页',
+  'pluginHub.accept': '打开或确认所选插件操作',
+  'pluginHub.toggleView': '切换发现和已安装视图',
+  'pluginHub.search': '搜索 Plugin Hub',
+  'pluginHub.refresh': '刷新 Plugin Hub',
+  'pluginHub.sort': '切换目录排序',
+  'pluginHub.category': '切换目录分类',
+  'dialog.previous': '上一个选项或帮助行',
+  'dialog.next': '下一个选项或帮助行',
+  'dialog.previousPage': '帮助上一页',
+  'dialog.nextPage': '帮助下一页',
+  'dialog.accept': '接受当前选项',
+  'dialog.cancel': '关闭或取消对话框',
+  'work.previous': '选择上一个工作项',
+  'work.next': '选择下一个工作项',
+  'work.cancel': '停止所选运行中工作',
+  'work.inspect': '打开所选 Agent Transcript',
+  'work.close': '关闭工作面板',
+  'footer.previous': '上一个状态项',
+  'footer.next': '下一个状态项',
+  'footer.activate': '打开所选状态项',
+  'footer.close': '返回输入框',
+  'approval.previous': '向上滚动审批详情',
+  'approval.next': '向下滚动审批详情',
+  'approval.previousPage': '审批详情上一页',
+  'approval.nextPage': '审批详情下一页',
+  'approval.allowOnce': '仅允许本次请求',
+  'approval.reject': '拒绝本次请求',
+})
+
+/**
+ * Resolve one built-in interaction description in the active TUI locale.
+ * @param action - built-in or effective interaction descriptor.
+ * @param locale - active TUI locale.
+ * @returns localized first-party description with the descriptor text as the English source.
+ */
+export function tuiInteractionDescription(
+  action: Pick<TuiInteractionDescriptor, 'id' | 'description'>,
+  locale: TuiLocale,
+): string {
+  return locale === 'zh' ? TUI_INTERACTION_DESCRIPTIONS_ZH[action.id] : action.description
+}
+
 /** Per-action key replacements; command gestures remain attached to their action. */
 export type TuiKeybindingOverrides = Readonly<Partial<Record<TuiInteractionActionId, readonly string[]>>>
 
@@ -421,21 +518,6 @@ const helpContextOrder: readonly TuiInteractionContext[] = Object.freeze([
   'Global', 'Composer', 'Suggestion', 'HistorySearch', 'TranscriptSearch', 'Transcript', 'Detail', 'PluginHub', 'Dialog', 'Work', 'Footer', 'Approval',
 ])
 
-const contextLabels: Readonly<Record<TuiInteractionContext, string>> = Object.freeze({
-  Global: 'Global',
-  Composer: 'Composer',
-  Suggestion: 'Suggestions',
-  HistorySearch: 'History search',
-  TranscriptSearch: 'Transcript search',
-  Transcript: 'Transcript browse',
-  Detail: 'Detail',
-  PluginHub: 'Plugin Hub',
-  Dialog: 'Dialogs',
-  Work: 'Background work',
-  Footer: 'Status footer',
-  Approval: 'Approval',
-})
-
 const controlSequences: Readonly<Record<string, string>> = Object.freeze({
   '\u0003': 'ctrl+c',
   '\u0006': 'ctrl+f',
@@ -444,6 +526,8 @@ const controlSequences: Readonly<Record<string, string>> = Object.freeze({
   '\u0012': 'ctrl+r',
   '\u0013': 'ctrl+s',
   '\u0019': 'ctrl+y',
+  '\u0018': 'ctrl+x',
+  '\u0016': 'ctrl+v',
   '\u001f': 'ctrl+_',
 })
 
@@ -519,32 +603,45 @@ export function effectiveTuiInteractionDescriptors(
  * Project effective descriptors into fixed physical rows for a bounded panel.
  * @param descriptors - effective immutable action descriptors.
  * @param columns - available panel columns.
+ * @param locale - target locale for interaction headings.
  * @returns stable heading, binding, and description rows.
  */
 export function tuiInteractionHelpLines(
   descriptors: readonly TuiInteractionDescriptor[],
   columns: number,
+  locale: TuiLocale = 'en',
 ): readonly TuiInteractionHelpLine[] {
   const wide = columns >= 72
   const lines: TuiInteractionHelpLine[] = []
   for (const context of helpContextOrder) {
     const actions = descriptors.filter(candidate => candidate.context === context)
     if (actions.length === 0) continue
-    lines.push({ key: `heading:${context}`, text: contextLabels[context], kind: 'heading' })
+    lines.push({
+      key: `heading:${context}`,
+      text: tuiInteractionContextLabel(context, locale),
+      kind: 'heading',
+    })
     const bindingWidth = wide
       ? Math.max(...actions.map(action => bindingLabel(action).length))
       : 0
     for (const action of actions) {
       const bindings = bindingLabel(action)
+      const description = tuiInteractionDescription(action, locale)
       if (wide) {
         lines.push({
           key: `action:${action.id}`,
-          text: `  ${bindings.padEnd(bindingWidth)}  ${action.description}`,
+          text: `  ${bindings.padEnd(bindingWidth)}  ${description}`,
           kind: 'binding',
         })
       } else {
         lines.push({ key: `binding:${action.id}`, text: `  ${bindings}`, kind: 'binding' })
-        lines.push({ key: `description:${action.id}`, text: `    ${action.description}`, kind: 'description' })
+        for (const [index, wrappedDescription] of terminalWrappedLines(description, Math.max(1, columns - 4)).entries()) {
+          lines.push({
+            key: `description:${action.id}:${index}`,
+            text: `    ${wrappedDescription}`,
+            kind: 'description',
+          })
+        }
       }
     }
   }

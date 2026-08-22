@@ -1,7 +1,7 @@
 /** Pure session-resume candidate projection and picker helpers for the native TUI. */
 
 import {
-  SESSION_FORMAT_VERSION, type SessionIdType as SessionId, type SessionRecord,
+  SESSION_FORMAT_VERSION, type SessionIdType as SessionId, type SessionPreviewLine, type SessionRecord,
 } from './host.ts'
 
 /** One detached row shown by the native TUI Session picker. */
@@ -16,6 +16,12 @@ export interface TuiResumeCandidate {
   currentWorkspace: boolean
   /** Display label for the row's own workspace. */
   workspaceLabel: string
+  /** Bounded current-surface summaries used by the picker preview. */
+  preview: readonly SessionPreviewLine[]
+  /** Whether older preview summaries or bytes were omitted. */
+  previewTruncated: boolean
+  /** Preview-only failure; the row remains resumable when this is set. */
+  previewError?: string
   /** Why the row cannot be resumed by this process-wide TUI composition. */
   disabledReason?: string
 }
@@ -46,6 +52,9 @@ export interface TuiResumeDialogSnapshot {
  * @param updatedAt - live last-event time or persisted artifact mtime.
  * @param currentId - Session currently owned by the TUI.
  * @param currentCwd - current Session workspace used by the default scope.
+ * @param preview - bounded current-surface summaries, when available.
+ * @param previewTruncated - whether older preview content was omitted.
+ * @param previewError - preview-only failure text, when the Session could not be read.
  * @returns a detached picker row with compatibility status.
  */
 export function summarizeTuiResumeCandidate(
@@ -54,6 +63,9 @@ export function summarizeTuiResumeCandidate(
   updatedAt: number | undefined,
   currentId: SessionId,
   currentCwd: string | undefined,
+  preview: readonly SessionPreviewLine[] = [],
+  previewTruncated = false,
+  previewError?: string,
 ): TuiResumeCandidate {
   let disabledReason: string | undefined
   if (record.header.id === currentId) disabledReason = 'current session'
@@ -69,6 +81,9 @@ export function summarizeTuiResumeCandidate(
     updatedAt: updatedAt ?? record.header.createdAt,
     currentWorkspace: record.header.cwd === currentCwd,
     workspaceLabel: record.header.cwd ?? '(no workspace)',
+    preview,
+    previewTruncated,
+    ...previewError === undefined ? {} : { previewError },
     ...disabledReason === undefined ? {} : { disabledReason },
   }
 }

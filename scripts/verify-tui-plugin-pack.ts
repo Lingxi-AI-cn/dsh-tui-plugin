@@ -7,7 +7,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const VERSION = '0.1.0-rc.8'
+const TUI_VERSION = '0.1.0-rc.9'
+const DSH_VERSION = '0.1.0-rc.8'
 const PACKAGE_DIRS = Object.freeze([
   'packages/boot/profile-plugin-manager',
   'packages/interaction/plugin-hub',
@@ -36,8 +37,13 @@ function fail(message: string): never {
 function assertExactSpecs(manifest: PackedManifest): void {
   for (const [name, spec] of Object.entries({ ...manifest.dependencies, ...manifest.peerDependencies })) {
     if (/^(?:workspace|file|link):/u.test(spec)) fail(`${manifest.name} retains local protocol ${name}@${spec}`)
-    if ((name.startsWith('@lingxi-ai-cn/dsh-') || name.startsWith('@deepseek-ai/dsh-')) && spec !== VERSION) {
-      fail(`${manifest.name} must pin ${name} exactly to ${VERSION}, got ${spec}`)
+    const expected = name.startsWith('@lingxi-ai-cn/dsh-')
+      ? TUI_VERSION
+      : name.startsWith('@deepseek-ai/dsh-')
+        ? DSH_VERSION
+        : undefined
+    if (expected !== undefined && spec !== expected) {
+      fail(`${manifest.name} must pin ${name} exactly to ${expected}, got ${spec}`)
     }
     if (name.startsWith('@deepseek-ai/') && !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(spec)) {
       fail(`${manifest.name} must pin Host peer ${name} to one exact version, got ${spec}`)
@@ -72,7 +78,7 @@ try {
     })
     const packageRoot = join(extracted, 'package')
     const packed = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as PackedManifest
-    if (packed.version !== VERSION) fail(`${packed.name} has version ${packed.version}`)
+    if (packed.version !== TUI_VERSION) fail(`${packed.name} has version ${packed.version}`)
     if (!packed.name.startsWith('@lingxi-ai-cn/dsh-')) fail(`${packed.name} is outside the public TUI scope`)
     if (packed.bin !== undefined || packed.scripts !== undefined) fail(`${packed.name} exposes a bin or lifecycle scripts`)
     assertExactSpecs(packed)

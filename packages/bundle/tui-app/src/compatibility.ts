@@ -4,6 +4,10 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import type {
+  TuiHostDiagnosticSnapshot,
+  TuiHostPackageDiagnostic,
+} from '@lingxi-ai-cn/dsh-tui-runtime'
 
 const PACKAGE_MANIFEST = new URL('../package.json', import.meta.url)
 const PROFILE_NAME = 'tui'
@@ -15,26 +19,10 @@ interface PackageManifest {
 }
 
 /** One resolved official package used by the TUI bundle. */
-export interface TuiHostPackageResolution {
-  /** Exact npm package name. */
-  readonly name: string
-  /** Installed package version. */
-  readonly version: string
-  /** Canonical package.json path. */
-  readonly manifestPath: string
-}
+export type TuiHostPackageResolution = TuiHostPackageDiagnostic
 
 /** Complete result retained by startup diagnostics and tests. */
-export interface TuiHostCompatibilityReport {
-  /** Installed DSH release, represented by the app-boot package. */
-  readonly dshVersion: string
-  /** TUI bundle release. */
-  readonly tuiVersion: string
-  /** Fixed profile identity required by this bundle. */
-  readonly profile: typeof PROFILE_NAME
-  /** Official packages resolved outside the profile installation. */
-  readonly packages: readonly TuiHostPackageResolution[]
-}
+export type TuiHostCompatibilityReport = TuiHostDiagnosticSnapshot
 
 /** Typed startup failure whose message is safe before terminal entry. */
 export class TuiHostCompatibilityError extends Error {
@@ -78,11 +66,11 @@ function packageManifestPath(packageName: string): string {
 function resolvedPackage(packageName: string): TuiHostPackageResolution {
   const manifestPath = packageManifestPath(packageName)
   const manifest = readManifest(manifestPath)
-  return {
+  return Object.freeze({
     name: requiredString(manifest.name, `${packageName} name`),
     version: requiredString(manifest.version, `${packageName} version`),
     manifestPath,
-  }
+  })
 }
 
 function compatibilityMessage(
@@ -152,12 +140,18 @@ export function validateTuiHostCompatibility(
     }
   }
 
-  return {
+  return Object.freeze({
+    compatibility: 'compatible',
     dshVersion: installedDsh,
+    supportedDshVersion: supportedDshText,
     tuiVersion,
     profile: PROFILE_NAME,
-    packages: Object.freeze([...packages]),
-  }
+    nodeVersion: process.versions.node,
+    platform: process.platform,
+    architecture: process.arch,
+    packages: Object.freeze(packages.map(entry => Object.freeze({ ...entry }))),
+    recoveryCommand: `dsh plugin --profile ${PROFILE_NAME} add --save-exact @lingxi-ai-cn/dsh-tui@${tuiVersion}`,
+  })
 }
 
 /**
@@ -172,6 +166,6 @@ function inspectTuiHostCompatibility(): TuiHostCompatibilityReport {
 }
 
 /** Fail startup before command parsing or terminal negotiation on an unsupported Host. */
-export function assertTuiHostCompatibility(): void {
-  inspectTuiHostCompatibility()
+export function assertTuiHostCompatibility(): TuiHostCompatibilityReport {
+  return inspectTuiHostCompatibility()
 }

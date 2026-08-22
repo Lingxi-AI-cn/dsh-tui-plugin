@@ -6,6 +6,9 @@ import type { SessionIdType as SessionId } from './host.ts'
 /** Lifecycle shown by the native Session export dialog. */
 export type TuiSessionExportPhase = 'opening' | 'selecting' | 'exporting'
 
+/** Human-readable or source-of-truth Session export format. */
+export type TuiSessionExportFormat = 'zip' | 'markdown'
+
 /** Process-local Session export dialog state; no field enters the Session log. */
 export interface TuiSessionExportDialogSnapshot {
   /** Monotonic identity preventing stale export settlement from changing a newer dialog. */
@@ -14,6 +17,8 @@ export interface TuiSessionExportDialogSnapshot {
   readonly phase: TuiSessionExportPhase
   /** Exact Session selected before the command lifecycle settled. */
   readonly sessionId: SessionId
+  /** Format selected by the command (`/export` defaults to ZIP). */
+  readonly format: TuiSessionExportFormat
   /** Absolute workspace used to resolve a relative directory entry. */
   readonly workspaceLabel: string
   /** Resolved absolute destination while bytes are being written. */

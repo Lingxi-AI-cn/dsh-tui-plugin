@@ -1,10 +1,15 @@
 /** Supported DeepSeek Harness imports and optional-host compatibility adapters. */
 
 import type { FileSystem, FsTarget } from '@deepseek-ai/dsh-fs'
-import type { CallId, ContentBlock as HostContentBlock, LlmRuntime } from '@deepseek-ai/dsh-llm'
+import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import type { ApprovalRequest as HostApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 import type { SessionEvent, SessionId as HostSessionId } from '@deepseek-ai/dsh-session'
-import type { SubagentRunId, SubagentStopReason } from '@deepseek-ai/dsh-subagent'
+import type {
+  CommandDefinition as HostCommandDefinition,
+  CommandDescriptor as HostCommandDescriptor,
+  CommandRuntime,
+} from '@deepseek-ai/dsh-commands'
+import type { SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
 import { settingsNamespace as hostSettingsNamespace } from '@deepseek-ai/dsh-settings'
 
 import type {} from '@deepseek-ai/dsh-agent-default-model'
@@ -18,42 +23,15 @@ import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-user-questions'
 
-/**
- * Additive event shapes emitted by newer compatible Hosts. Official rc.8 can
- * replay logs without them, while the TUI remains ready to project them when
- * a Host provides the enhanced scheduler and delegation lifecycle.
- */
-declare module '@deepseek-ai/dsh-session/types' {
-  interface SessionEventMap {
-    'tool/execution-group': {
-      turn: number
-      step: number
-      group: number
-      mode: 'parallel' | 'exclusive'
-      members: { callId: CallId; name: string; arguments: string }[]
-      closed: boolean
-    }
-    'subagent/delegation-start': {
-      runId: SubagentRunId
-      callId: CallId
-      childId: HostSessionId
-      provider: string
-      label?: string
-      local: boolean
-    }
-    'subagent/delegation-end': {
-      runId: SubagentRunId
-      stopReason: SubagentStopReason
-      lastAssistantMessage?: HostContentBlock[]
-    }
-  }
-}
-
 export type { Context } from '@deepseek-ai/cordis'
+export { AttachmentError } from '@deepseek-ai/dsh-attachment'
+export type { EncodedImageAttachment, ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
+export { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+export { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 export type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 export { default as z } from '@deepseek-ai/schemastery'
 export {
-  installModelSelection,
+  assembleContextFor, installModelSelection,
 } from '@deepseek-ai/dsh-agent'
 export type {
   Agent,
@@ -63,11 +41,11 @@ export type {
   ModelSelectionRef,
 } from '@deepseek-ai/dsh-agent'
 export { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
-export type { CommandDescriptor, CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
+export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { JobId } from '@deepseek-ai/dsh-jobs'
 export type { JobSnapshot, JobStatus } from '@deepseek-ai/dsh-jobs'
 export { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
-export type { ContentBlock, StreamChunk } from '@deepseek-ai/dsh-llm'
+export type { ContentBlock, StreamChunk, UserMessage } from '@deepseek-ai/dsh-llm'
 export { runNativeCommand } from '@deepseek-ai/dsh-native-command'
 export type { PermissionSelect } from '@deepseek-ai/dsh-permission-presets'
 export {
@@ -89,7 +67,14 @@ export type {
   SubagentRunInfo,
   SubagentTimingProjection,
 } from '@deepseek-ai/dsh-subagent'
-export type { ContextPressureProjection } from '@deepseek-ai/dsh-token-meter'
+export type {
+  ContextBreakdownProjection,
+  ContextPressureProjection,
+  TokenUsageProjection,
+} from '@deepseek-ai/dsh-token-meter'
+export type { SessionStatsProjection } from '@deepseek-ai/dsh-session-stats'
+export { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+export type { SubprocessHandle, SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 export type { ToolCallView, ToolDefinition, ToolResultView } from '@deepseek-ai/dsh-tools'
 export { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
 export type {
@@ -99,6 +84,86 @@ export type {
   AskUserQuestionRequest,
 } from '@deepseek-ai/dsh-user-questions'
 export type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
+
+/** Localized descriptions accepted by newer command registries and ignored by older ones. */
+export type CommandLocalizedDescriptions = Readonly<Record<string, string>>
+
+/** One optional nested command path projected by the TUI completion surface. */
+export interface CommandCompletionNode {
+  readonly name: string
+  readonly canonicalPath?: readonly string[]
+  readonly aliases?: readonly string[]
+  readonly description: string
+  readonly descriptions?: CommandLocalizedDescriptions
+  readonly input?: { readonly hint: string }
+  readonly disabledReason?: string
+  readonly children?: readonly CommandCompletionNode[]
+}
+
+/** Additive command metadata available only when the Host preserves it. */
+export interface CommandCompletionDescriptor {
+  readonly aliases?: readonly string[]
+  readonly descriptions?: CommandLocalizedDescriptions
+  readonly children?: readonly CommandCompletionNode[]
+}
+
+/** Command discovery view shared by legacy and completion-capable Hosts. */
+export type CommandDescriptor = HostCommandDescriptor & {
+  readonly completion?: CommandCompletionDescriptor
+}
+
+/** Command registration accepted by both legacy and completion-capable Hosts. */
+export type TuiCommandDefinition = HostCommandDefinition & {
+  readonly completion?: CommandCompletionDescriptor
+}
+
+/** Register additive TUI metadata while retaining the legacy Host registration contract. */
+export function hostRegisterCommand(
+  commands: CommandRuntime,
+  definition: TuiCommandDefinition,
+): ReturnType<CommandRuntime['register']> {
+  return commands.register(definition)
+}
+
+/** Read command descriptors while treating completion metadata as optional Host capability. */
+export function hostCommandDescriptors(
+  commands: CommandRuntime,
+  agent: Parameters<CommandRuntime['list']>[0],
+): readonly CommandDescriptor[] {
+  return commands.list(agent)
+}
+
+/** Terminal-safe semantic category for one bounded Session preview line. */
+export type SessionPreviewLineKind = 'human' | 'assistant' | 'tool'
+
+/** One optional newer-Host Session preview row. */
+export interface SessionPreviewLine {
+  readonly seq: number
+  readonly kind: SessionPreviewLineKind
+  readonly text: string
+}
+
+/** Bounded preview projection returned only by preview-capable Hosts. */
+export interface SessionPreviewSnapshot {
+  readonly lines: readonly SessionPreviewLine[]
+  readonly truncated: boolean
+}
+
+interface PreviewCapableSessionQuery {
+  readPreview(sessionId: HostSessionId, signal?: AbortSignal): Promise<SessionPreviewSnapshot>
+}
+
+/** Read a bounded Session preview when supported; legacy Hosts return no preview rows. */
+export function hostReadSessionPreview(
+  sessionQuery: SessionQueryEngine,
+  sessionId: HostSessionId,
+  signal?: AbortSignal,
+): Promise<SessionPreviewSnapshot | undefined> {
+  const candidate = sessionQuery as SessionQueryEngine & Partial<PreviewCapableSessionQuery>
+  return typeof candidate.readPreview === 'function'
+    ? candidate.readPreview(sessionId, signal)
+    : Promise.resolve(undefined)
+}
 
 /** Why a fresh TUI Agent exists; older supported Hosts ignore this additive field. */
 export type AgentCreateSource = 'startup' | 'clear' | 'compact' | 'rewind'

@@ -79,7 +79,7 @@ The current public release is deliberately pinned to the matching official Harne
 
 | DSH TUI | DeepSeek Harness | Node.js | Platforms |
 | --- | --- | --- | --- |
-| `0.1.0-rc.8` | exactly `0.1.0-rc.8` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
+| `0.1.0-rc.9` | exactly `0.1.0-rc.8` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
 
 Support for a newer Harness version is added only after exact-package clean-room installation, profile composition, PTY startup/exit, and terminal-restoration verification.
 
@@ -89,7 +89,7 @@ Install the exact supported official Harness, then add DSH TUI to a dedicated `t
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.0-rc.8
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.9
 dsh --profile tui
 ```
 
@@ -111,7 +111,7 @@ The canonical profile contains exactly `@deepseek-ai/dsh-base` followed by `@lin
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.9
 ```
 
 Sessions and credentials live outside the profile directory. Reapply only reviewed custom patches; do not copy the old profile back wholesale.
@@ -127,10 +127,10 @@ Sessions and credentials live outside the profile directory. Reapply only review
 
 ## Upgrade or reinstall
 
-Install the exact TUI version that matches the installed official Harness version:
+Install the exact TUI version that declares compatibility with the installed official Harness version:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.9
 ```
 
 Release tags and npm versions are immutable. Do not mix package versions from different release candidates.

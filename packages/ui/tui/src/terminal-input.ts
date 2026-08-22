@@ -23,6 +23,7 @@ export type TuiTerminalInputEvent =
     /** Whether an oversized bracketed paste was bounded before dispatch. */
     readonly truncated?: boolean
   }
+
   | {
     readonly kind: 'mouse'
     /** SGR button and modifier bit field. */
@@ -44,6 +45,21 @@ export type TuiTerminalInputEvent =
     /** Complete terminal capability or status reply, retained for negotiation. */
     readonly sequence: string
   }
+
+/** SGR mouse report category after wheel, motion, and release bits are decoded. */
+export type TuiTerminalMouseReportKind = 'press' | 'release' | 'motion' | 'wheel'
+
+/**
+ * Classify a decoded SGR mouse report without assigning it to an interaction owner.
+ * @param button - SGR button/modifier bit field.
+ * @param release - whether the SGR final byte was `m`.
+ * @returns report category; wheel takes precedence over motion and release.
+ */
+export function tuiTerminalMouseReportKind(button: number, release: boolean): TuiTerminalMouseReportKind {
+  if ((button & 64) !== 0) return 'wheel'
+  if ((button & 32) !== 0) return 'motion'
+  return release ? 'release' : 'press'
+}
 
 /** Why a decoder is retaining an incomplete terminal sequence. */
 export type TuiTerminalInputWait = 'escape' | 'sequence' | 'paste'
@@ -201,6 +217,7 @@ export class TuiTerminalInputDecoder {
 export function useTuiTerminalInput(
   handler: (event: TuiTerminalInputEvent) => void,
   initialEvents: readonly TuiTerminalInputEvent[] = [],
+  enabled = true,
 ): void {
   const { internal_eventEmitter: inputEvents, setRawMode } = useStdin()
   const handlerRef = useRef(handler)
@@ -211,6 +228,10 @@ export function useTuiTerminalInput(
   if (initialEventsRef.current === undefined) initialEventsRef.current = initialEvents
 
   useEffect(() => {
+    if (!enabled) {
+      setRawMode(false)
+      return () => undefined
+    }
     const decoder = decoderRef.current as TuiTerminalInputDecoder
     let timeout: ReturnType<typeof setTimeout> | undefined
     const dispatch = (events: readonly TuiTerminalInputEvent[]): void => {
@@ -244,7 +265,7 @@ export function useTuiTerminalInput(
       decoder.reset()
       setRawMode(false)
     }
-  }, [inputEvents, setRawMode])
+  }, [enabled, inputEvents, setRawMode])
 }
 
 function parseEscape(value: string): ParseResult {

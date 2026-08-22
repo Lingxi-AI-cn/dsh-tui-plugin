@@ -50,7 +50,7 @@ describe('post-install TUI package surface', () => {
   const top = manifests[0]!
 
   it('publishes one same-version Lingxi package family without install hooks or source exports', () => {
-    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.0-rc.8']))
+    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.0-rc.9']))
     for (const entry of manifests) {
       expect(entry.name).toMatch(/^@lingxi-ai-cn\/dsh-/u)
       expect(entry.repository?.url).toBe(REPOSITORY)
@@ -75,9 +75,10 @@ describe('post-install TUI package surface', () => {
     }
   })
 
-  it('centralizes official imports in the two reviewed Host adapters', () => {
+  it('centralizes official imports in the reviewed Host adapters', () => {
     for (const directory of ['packages/bundle/tui-app', 'packages/ui/tui']) {
-      const violations = sourceFiles(directory).filter(path => !path.endsWith('/host.ts')).flatMap((path) => {
+      const violations = sourceFiles(directory).filter(path => !path.endsWith('/host.ts')
+        && !path.endsWith('/extensions.ts')).flatMap((path) => {
         const source = readFileSync(path, 'utf8')
         return /(?:from|import)\s+['"]@deepseek-ai\//u.test(source) ? [path] : []
       })

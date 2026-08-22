@@ -11,6 +11,7 @@ import {
   type ToolResultView,
 } from './host.ts'
 import { terminalSafe } from './sanitize.ts'
+import type { TuiKnownSessionEvent, TuiKnownSessionEventRenderResult } from './extensions.ts'
 
 /** Maximum child rows mounted inside one compact structured transcript block. */
 export const STRUCTURED_CHILD_LIMIT = 6
@@ -145,8 +146,49 @@ export type TranscriptNode =
   | TranscriptToolGroupNode
   | TranscriptCompactionNode
 
+interface OptionalTranscriptEventMap {
+  'tool/execution-group': {
+    turn: number
+    step: number
+    group: number
+    mode: 'parallel' | 'exclusive'
+    members: { callId: string; name: string; arguments: string }[]
+    closed: boolean
+  }
+  'subagent/delegation-start': {
+    runId: string
+    callId: string
+    childId: string
+    provider: string
+    label?: string
+    local: boolean
+  }
+  'subagent/delegation-end': {
+    runId: string
+    stopReason: string
+    lastAssistantMessage?: ContentBlock[]
+  }
+}
+
+type OptionalTranscriptEvent = {
+  [Type in keyof OptionalTranscriptEventMap]: {
+    readonly type: Type
+    readonly seq: number
+    readonly time: number
+    readonly data: OptionalTranscriptEventMap[Type]
+  }
+}[keyof OptionalTranscriptEventMap]
+
+/** Session events plus additive log-only facts emitted by newer compatible Hosts. */
+type TuiTranscriptEvent = SessionEvent | OptionalTranscriptEvent
+
 /** Resolve the definition visible to this TUI-owned Agent. */
 export type ToolDefinitionResolver = (name: string) => ToolDefinition | undefined
+
+/** Host-owned replacement resolver for known committed user and assistant events. */
+export type TuiKnownSessionEventRenderer = (event: TuiKnownSessionEvent) => TuiKnownSessionEventRenderResult | undefined
+
+const MAX_KNOWN_EVENT_TEXT = 4096
 
 function contentText(content: readonly ContentBlock[]): string {
   const parts: string[] = []
@@ -158,6 +200,25 @@ function contentText(content: readonly ContentBlock[]): string {
     else parts.push(contentText(block.content))
   }
   return terminalSafe(parts.filter(Boolean).join('\n'))
+}
+
+function knownEventText(content: readonly ContentBlock[]): string {
+  const text = contentText(content)
+  return text.length <= MAX_KNOWN_EVENT_TEXT ? text : `${text.slice(0, MAX_KNOWN_EVENT_TEXT - 1)}…`
+}
+
+function knownSessionEvent(event: SessionEvent): TuiKnownSessionEvent | undefined {
+  if (event.type === 'user/message') {
+    if (!isAppendSurfaceEvent(event) || event.data.source.kind !== 'user') return undefined
+    return { type: 'user/message', seq: event.seq, text: knownEventText(event.data.content) }
+  }
+  if (event.type !== 'assistant/message' || !isAppendSurfaceEvent(event)) return undefined
+  return {
+    type: 'assistant/message',
+    seq: event.seq,
+    text: knownEventText(event.data.message.content.filter(block => block.type === 'text' || block.type === 'image')),
+    ...event.data.interrupted === undefined ? {} : { interrupted: event.data.interrupted },
+  }
 }
 
 function chunkText(chunk: StreamChunk): { tone: TranscriptTone; text: string } | undefined {
@@ -280,13 +341,15 @@ function suppressCompletedTodoCalls(
  * `callId`-paired tool node instead of appending a second log row.
  * @param events - ordered durable Session-event prefix.
  * @param resolveTool - optional Agent-scoped tool-definition lookup for render intents.
+ * @param renderKnownEvent - optional host-owned renderer for known committed events.
  * @returns immutable terminal nodes in display order.
  */
 export function foldTranscript(
   events: readonly SessionEvent[],
   resolveTool?: ToolDefinitionResolver,
+  renderKnownEvent?: TuiKnownSessionEventRenderer,
 ): readonly TranscriptNode[] {
-  const state = new TranscriptFoldState(resolveTool)
+  const state = new TranscriptFoldState(resolveTool, renderKnownEvent)
   for (const event of events) state.append(event)
   return state.snapshot()
 }
@@ -309,7 +372,10 @@ class TranscriptFoldState {
   private projected: readonly TranscriptNode[] = Object.freeze([])
   private dirty = false
 
-  constructor(private readonly resolveTool?: ToolDefinitionResolver) {}
+  constructor(
+    private readonly resolveTool?: ToolDefinitionResolver,
+    private readonly renderKnownEvent?: TuiKnownSessionEventRenderer,
+  ) {}
 
   private pushRaw(node: TranscriptNode): void {
     this.nodeIndexByKey.set(node.key, this.nodes.length)
@@ -406,7 +472,7 @@ class TranscriptFoldState {
     return next
   }
 
-  append(event: SessionEvent): void {
+  append(event: TuiTranscriptEvent): void {
     this.dirty = true
     if (event.type === 'turn/start') {
       if (this.todoNode !== undefined) this.removeRaw(this.todoNode)
@@ -469,7 +535,12 @@ class TranscriptFoldState {
     }
     if (event.type === 'user/message') {
       if (!isAppendSurfaceEvent(event) || event.data.source.kind !== 'user') return
-      this.pushRaw({ kind: 'text', key: `event:${event.seq}`, tone: 'user', label: 'You', text: contentText(event.data.content) })
+      const rendered = this.renderKnownEvent?.(knownSessionEvent(event) ?? {
+        type: 'user/message', seq: event.seq, text: '',
+      })
+      this.pushRaw(rendered === undefined
+        ? { kind: 'text', key: `event:${event.seq}`, tone: 'user', label: 'You', text: contentText(event.data.content) }
+        : { kind: 'text', key: `event:${event.seq}`, ...rendered })
       return
     }
     if (event.type === 'assistant/chunk') {
@@ -504,9 +575,12 @@ class TranscriptFoldState {
       const reasoning = event.data.message.content.filter(block => block.type === 'reasoning')
       const assistantKey = `${event.data.turn}:${event.data.step}:assistant`
       const reasoningKey = `${event.data.turn}:${event.data.step}:reasoning`
-      const assistantNode: TranscriptTextNode = {
-        kind: 'text', key: `event:${event.seq}:assistant`, tone: 'assistant', label: 'Assistant', text: contentText(visible),
-      }
+      const rendered = this.renderKnownEvent?.(knownSessionEvent(event) ?? {
+        type: 'assistant/message', seq: event.seq, text: '',
+      })
+      const assistantNode: TranscriptTextNode = rendered === undefined
+        ? { kind: 'text', key: `event:${event.seq}:assistant`, tone: 'assistant', label: 'Assistant', text: contentText(visible) }
+        : { kind: 'text', key: `event:${event.seq}:assistant`, ...rendered }
       const streamedAssistant = this.streamNodes.get(assistantKey)
       const streamedAssistantIndex = streamedAssistant === undefined
         ? -1
@@ -672,6 +746,7 @@ class TranscriptFoldState {
 export class TuiTranscriptProjectionCache {
   private state: TranscriptFoldState | undefined
   private resolver: ToolDefinitionResolver | undefined
+  private renderer: TuiKnownSessionEventRenderer | undefined
   private eventCount = 0
   private lastEvent: SessionEvent | undefined
 
@@ -679,6 +754,7 @@ export class TuiTranscriptProjectionCache {
   reset(): void {
     this.state = undefined
     this.resolver = undefined
+    this.renderer = undefined
     this.eventCount = 0
     this.lastEvent = undefined
   }
@@ -687,15 +763,17 @@ export class TuiTranscriptProjectionCache {
    * Project an ordered durable event prefix, processing only a verified append suffix when possible.
    * @param events - complete current Session-event prefix.
    * @param resolveTool - exact Agent-scoped tool-definition lookup.
+   * @param renderKnownEvent - optional host-owned renderer for known committed events.
    * @returns immutable semantic nodes in durable display order.
    */
   update(
     events: readonly SessionEvent[],
     resolveTool?: ToolDefinitionResolver,
+    renderKnownEvent?: TuiKnownSessionEventRenderer,
   ): readonly TranscriptNode[] {
     const prefixMatches = this.eventCount === 0 || events.length >= this.eventCount
       && events[this.eventCount - 1] === this.lastEvent
-    let reset = this.state === undefined || resolveTool !== this.resolver || !prefixMatches
+    let reset = this.state === undefined || resolveTool !== this.resolver || renderKnownEvent !== this.renderer || !prefixMatches
     if (!reset) {
       for (let index = this.eventCount; index < events.length; index += 1) {
         if (events[index]?.type === 'compaction/start') {
@@ -705,8 +783,9 @@ export class TuiTranscriptProjectionCache {
       }
     }
     if (reset) {
-      this.state = new TranscriptFoldState(resolveTool)
+      this.state = new TranscriptFoldState(resolveTool, renderKnownEvent)
       this.resolver = resolveTool
+      this.renderer = renderKnownEvent
       this.eventCount = 0
       this.lastEvent = undefined
     }

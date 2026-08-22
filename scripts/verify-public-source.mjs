@@ -3,7 +3,8 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const version = '0.1.0-rc.8'
+const tuiVersion = '0.1.0-rc.9'
+const dshVersion = '0.1.0-rc.8'
 const repository = 'git+https://github.com/Lingxi-AI-cn/dsh-tui-plugin.git'
 const packages = [
   'packages/boot/profile-plugin-manager',
@@ -61,7 +62,7 @@ visit(root)
 for (const directory of packages) {
   const path = join(root, directory, 'package.json')
   const manifest = JSON.parse(readFileSync(path, 'utf8'))
-  if (manifest.version !== version) violations.push(`${directory}: version must be ${version}`)
+  if (manifest.version !== tuiVersion) violations.push(`${directory}: version must be ${tuiVersion}`)
   if (!manifest.name?.startsWith('@lingxi-ai-cn/dsh-')) violations.push(`${directory}: package is outside @lingxi-ai-cn`)
   if (manifest.publishConfig?.access !== 'public') violations.push(`${directory}: package must publish publicly`)
   if (manifest.repository?.url !== repository) violations.push(`${directory}: repository URL is not the public repository`)
@@ -74,7 +75,7 @@ for (const directory of packages) {
       violations.push(`${directory}: ${name} must use workspace:* in public source`)
     }
     if (name.startsWith('@deepseek-ai/')) {
-      const expected = externalVersions.get(name) ?? version
+      const expected = externalVersions.get(name) ?? dshVersion
       if (spec !== expected) violations.push(`${directory}: ${name} must be pinned to ${expected}`)
     }
   }

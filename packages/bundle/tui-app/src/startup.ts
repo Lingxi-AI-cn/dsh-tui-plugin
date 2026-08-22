@@ -1,6 +1,7 @@
 /** Command-line provider for the post-install `tui` profile application. */
 
 import { Command } from 'commander'
+import type { TuiHostDiagnosticSnapshot } from '@lingxi-ai-cn/dsh-tui-runtime'
 import { parseCmdline, type Context } from './host.ts'
 import { assertTuiHostCompatibility } from './compatibility.ts'
 
@@ -11,6 +12,8 @@ export const TUI_STARTUP_SERVICE = 'tuiStartup'
 
 /** Immutable values published after successful TUI flag parsing. */
 export interface TuiStartupValues {
+  /** Successful post-install Host compatibility snapshot. */
+  diagnostics: TuiHostDiagnosticSnapshot
   /** Persisted TUI-owned Session selected by `--resume`. */
   resume?: string
 }
@@ -29,12 +32,13 @@ Examples:
 }
 
 export function apply(ctx: Context): void {
-  assertTuiHostCompatibility()
+  const diagnostics = assertTuiHostCompatibility()
   const program = tuiCommand()
   program.action(() => {
     const options = program.opts<{ resume?: string }>()
     if (options.resume === '') program.error('error: --resume needs a Session id')
     ctx.provide(TUI_STARTUP_SERVICE, {
+      diagnostics,
       ...options.resume === undefined ? {} : { resume: options.resume },
     } satisfies TuiStartupValues)
   })

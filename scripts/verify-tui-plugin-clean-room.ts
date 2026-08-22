@@ -12,7 +12,8 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const VERSION = '0.1.0-rc.8'
+const TUI_VERSION = '0.1.0-rc.9'
+const DSH_VERSION = '0.1.0-rc.8'
 const TOP_PACKAGE = '@lingxi-ai-cn/dsh-tui'
 const PACKAGE_DIRS = Object.freeze([
   'packages/boot/profile-plugin-manager',
@@ -24,6 +25,8 @@ const PACKAGE_DIRS = Object.freeze([
 ])
 const TERMINAL_CAPABILITY_QUERY = '\u001b[c'
 const TERMINAL_CAPABILITY_REPLY = '\u001b[?1;2c'
+const TERMINAL_BACKGROUND_QUERY = '\u001b]11;?\u0007'
+const TERMINAL_BACKGROUND_REPLY = '\u001b]11;rgb:0c0c/0c0c/0c0c\u001b\\'
 
 interface PackedRelease {
   readonly name: string
@@ -152,8 +155,8 @@ function registry(releases: readonly PackedRelease[]): Promise<{ readonly server
     response.setHeader('content-type', 'application/json')
     response.end(JSON.stringify({
       name: release.name,
-      'dist-tags': { latest: VERSION },
-      versions: { [VERSION]: manifest },
+      'dist-tags': { latest: TUI_VERSION },
+      versions: { [TUI_VERSION]: manifest },
     }))
   })
   return new Promise((resolve, reject) => {
@@ -222,13 +225,37 @@ async function bootPty(official: string, dshScript: string, home: string, env: R
       child.write(TERMINAL_CAPABILITY_REPLY)
       probe = probe.slice(probe.indexOf(TERMINAL_CAPABILITY_QUERY) + TERMINAL_CAPABILITY_QUERY.length)
     }
-    probe = probe.slice(-(TERMINAL_CAPABILITY_QUERY.length - 1))
+    while (probe.includes(TERMINAL_BACKGROUND_QUERY)) {
+      child.write(TERMINAL_BACKGROUND_REPLY)
+      probe = probe.slice(probe.indexOf(TERMINAL_BACKGROUND_QUERY) + TERMINAL_BACKGROUND_QUERY.length)
+    }
+    const retainedProbeLength = Math.max(TERMINAL_CAPABILITY_QUERY.length, TERMINAL_BACKGROUND_QUERY.length) - 1
+    probe = probe.slice(-retainedProbeLength)
   })
   try {
     await waitFor(() => output, 'Start a conversation')
+    await waitFor(() => output, '/models change model · /plugins browse · /help commands')
     // The banner can render one tick before the input loop has entered raw
     // mode; wait briefly so the first command cannot be consumed by startup.
     await new Promise(resolve => setTimeout(resolve, 50))
+    child.write('/doctor')
+    await waitFor(() => output, 'prompt › /doctor')
+    child.write('\r')
+    await new Promise(resolve => setTimeout(resolve, 100))
+    child.write('\r')
+    await waitFor(() => output, 'Runtime diagnostics')
+    await waitFor(() => output, 'background dark')
+    const beforeClose = output.length
+    child.write('\u001b')
+    await waitFor(() => output.slice(beforeClose), 'Ready')
+    child.write('/plugins')
+    await waitFor(() => output, 'prompt › /plugins')
+    child.write('\r')
+    await new Promise(resolve => setTimeout(resolve, 100))
+    child.write('\r')
+    await waitFor(() => output, 'Plugin Hub')
+    child.write('\u001b')
+    await new Promise(resolve => setTimeout(resolve, 100))
     child.write('/quit')
     await waitFor(() => output, 'prompt › /quit')
     child.write('\r')
@@ -286,15 +313,15 @@ try {
     DSH_TELEMETRY_DISABLED: '1',
     DEEPSEEK_API_KEY: '',
   })
-  run('pnpm', ['add', '--save-exact', `@deepseek-ai/dsh@${VERSION}`], official, environment, 300_000)
-  process.stdout.write(`verify-tui-plugin-clean-room: installed official DSH ${VERSION}\n`)
+  run('pnpm', ['add', '--save-exact', `@deepseek-ai/dsh@${DSH_VERSION}`], official, environment, 300_000)
+  process.stdout.write(`verify-tui-plugin-clean-room: installed official DSH ${DSH_VERSION}\n`)
   const officialManifest = JSON.parse(readFileSync(join(official, 'node_modules/@deepseek-ai/dsh/package.json'), 'utf8')) as { version?: unknown }
-  if (officialManifest.version !== VERSION) fail(`official DSH resolved ${String(officialManifest.version)}`)
+  if (officialManifest.version !== DSH_VERSION) fail(`official DSH resolved ${String(officialManifest.version)}`)
   const dshHome = environment.DSH_HOME
   if (dshHome === undefined) fail('clean-room DSH_HOME is missing')
   const before = treeDigest(official)
   const dsh = join(official, 'node_modules/.bin/dsh')
-  await runAsync(dsh, ['plugin', '--profile', 'tui', 'add', '--save-exact', `${TOP_PACKAGE}@${VERSION}`], official, environment, 300_000)
+  await runAsync(dsh, ['plugin', '--profile', 'tui', 'add', '--save-exact', `${TOP_PACKAGE}@${TUI_VERSION}`], official, environment, 300_000)
   process.stdout.write('verify-tui-plugin-clean-room: installed the top-level TUI through dsh plugin\n')
 
   const profile = join(dshHome, 'profiles/tui')
@@ -302,7 +329,7 @@ try {
     dependencies?: Readonly<Record<string, string>>
     dsh?: { profile?: { bundles?: readonly string[] } }
   }
-  if (profileManifest.dependencies?.[TOP_PACKAGE] !== VERSION) fail('profile does not pin only the exact top-level TUI release')
+  if (profileManifest.dependencies?.[TOP_PACKAGE] !== TUI_VERSION) fail('profile does not pin only the exact top-level TUI release')
   if (Object.keys(profileManifest.dependencies ?? {}).some(name => name !== TOP_PACKAGE)) {
     fail(`profile exposes internal TUI packages as direct dependencies: ${Object.keys(profileManifest.dependencies ?? {}).join(', ')}`)
   }
@@ -332,7 +359,7 @@ try {
   await bootPty(official, join(official, 'node_modules/@deepseek-ai/dsh/lib/bin.js'), dshHome, environment)
   const after = treeDigest(official)
   if (before !== after) fail('TUI installation or boot mutated the official DSH installation tree')
-  process.stdout.write(`verify-tui-plugin-clean-room: official DSH ${VERSION}, exact install, composition, and PTY passed\n`)
+  process.stdout.write(`verify-tui-plugin-clean-room: official DSH ${DSH_VERSION} with TUI ${TUI_VERSION}, exact install, composition, and PTY passed\n`)
 } finally {
   const activeServer = server
   if (activeServer !== undefined) {

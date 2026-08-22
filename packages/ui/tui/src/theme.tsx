@@ -5,13 +5,27 @@ import { settingsNamespace, z } from './host.ts'
 import {
   TUI_KEYBINDING_OVERRIDES_SCHEMA, validateTuiKeybindingOverrides, type TuiKeybindingOverrides,
 } from './keybindings.ts'
-import type { TuiTerminalColorDepth } from './terminal-session.ts'
+import { TUI_LOCALES, type TuiLocale } from './locale.ts'
+import type { TuiTerminalBackground, TuiTerminalColorDepth } from './terminal-session.ts'
 
 /** Persisted built-in terminal theme names. */
-export const TUI_THEME_PREFERENCES = ['dark', 'light', 'no-color'] as const
+export const TUI_THEME_PREFERENCES = ['auto', 'dark', 'light', 'no-color'] as const
 
 /** One persisted built-in terminal theme name. */
 export type TuiThemePreference = typeof TUI_THEME_PREFERENCES[number]
+
+/** Persisted terminal pointer ownership preferences. */
+export const TUI_MOUSE_PREFERENCES = ['auto', 'off'] as const
+
+/** One persisted terminal pointer ownership preference. */
+export type TuiMousePreference = typeof TUI_MOUSE_PREFERENCES[number]
+
+/** Supported runtime language preferences. */
+export { TUI_LOCALES }
+export type { TuiLocale }
+
+/** Concrete palette selected after automatic terminal-background resolution. */
+export type TuiResolvedThemePreference = Exclude<TuiThemePreference, 'auto'>
 
 /** Settings namespace owned by the native TUI. */
 export const TUI_SETTINGS_NAMESPACE = settingsNamespace('tui')
@@ -20,18 +34,26 @@ export const TUI_SETTINGS_NAMESPACE = settingsNamespace('tui')
 export interface TuiSettings {
   /** Built-in semantic terminal theme. */
   theme: TuiThemePreference
+  /** Runtime catalog selected for first-party TUI messages. */
+  locale: TuiLocale
+  /** Whether the TUI or the outer terminal owns pointer reports. */
+  mouse: TuiMousePreference
   /** Per-action replacements for built-in key gestures. */
   keybindings: TuiKeybindingOverrides
 }
 
 /** Defaults used without a settings provider and below its user layer. */
 export const DEFAULT_TUI_SETTINGS: TuiSettings = Object.freeze({
-  theme: 'dark',
+  theme: 'auto',
+  locale: 'en',
+  mouse: 'auto',
   keybindings: Object.freeze({}),
 })
 
 const TUI_SETTINGS_FIELDS = z.object({
   theme: z.union([...TUI_THEME_PREFERENCES]).default(DEFAULT_TUI_SETTINGS.theme),
+  locale: z.union([...TUI_LOCALES]).default(DEFAULT_TUI_SETTINGS.locale),
+  mouse: z.union([...TUI_MOUSE_PREFERENCES]).default(DEFAULT_TUI_SETTINGS.mouse),
   keybindings: TUI_KEYBINDING_OVERRIDES_SCHEMA.default(DEFAULT_TUI_SETTINGS.keybindings),
 })
 
@@ -41,6 +63,8 @@ export const TUI_SETTINGS_SCHEMA = z.transform(TUI_SETTINGS_FIELDS, (settings) =
   validateTuiKeybindingOverrides(keybindings)
   return {
     theme: settings.theme ?? DEFAULT_TUI_SETTINGS.theme,
+    locale: settings.locale ?? DEFAULT_TUI_SETTINGS.locale,
+    mouse: settings.mouse ?? DEFAULT_TUI_SETTINGS.mouse,
     keybindings,
   }
 }, true) as unknown as z<TuiSettings>
@@ -64,6 +88,7 @@ export interface TuiSemanticThemeTokens {
 /** Resolved theme for one negotiated terminal color depth. */
 export interface TuiTheme {
   readonly preference: TuiThemePreference
+  readonly resolvedPreference: TuiResolvedThemePreference
   readonly colorDepth: TuiTerminalColorDepth
   readonly tokens: TuiSemanticThemeTokens
   /** Whether secondary text may use ANSI dim styling. */
@@ -166,23 +191,28 @@ const LIGHT_EXTENDED_TOKENS: TuiSemanticThemeTokens = Object.freeze({
 })
 
 /**
- * Resolve semantic colors for one persisted preference and terminal precision.
+ * Resolve semantic colors for one persisted preference and terminal snapshot.
  * @param preference - selected built-in theme.
  * @param colorDepth - color precision negotiated for the active output stream.
+ * @param background - normalized OSC 11 background class; unknown falls back to dark.
  * @returns immutable tokens that never emit colors when either input requires no color.
  */
 export function resolveTuiTheme(
   preference: TuiThemePreference,
   colorDepth: TuiTerminalColorDepth,
+  background: TuiTerminalBackground = 'unknown',
 ): TuiTheme {
   if (preference === 'no-color' || colorDepth === 'none') {
-    return Object.freeze({ preference, colorDepth: 'none', tokens: NO_COLOR_TOKENS, dim: false })
+    return Object.freeze({
+      preference, resolvedPreference: 'no-color', colorDepth: 'none', tokens: NO_COLOR_TOKENS, dim: false,
+    })
   }
+  const resolvedPreference = preference === 'auto' ? background === 'light' ? 'light' : 'dark' : preference
   const ansi16 = colorDepth === 'ansi16'
-  const tokens = preference === 'light'
+  const tokens = resolvedPreference === 'light'
     ? ansi16 ? LIGHT_ANSI16_TOKENS : LIGHT_EXTENDED_TOKENS
     : ansi16 ? DARK_ANSI16_TOKENS : DARK_EXTENDED_TOKENS
-  return Object.freeze({ preference, colorDepth, tokens, dim: true })
+  return Object.freeze({ preference, resolvedPreference, colorDepth, tokens, dim: true })
 }
 
 const DEFAULT_TUI_THEME = resolveTuiTheme(DEFAULT_TUI_SETTINGS.theme, 'ansi16')
