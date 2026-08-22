@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.3-rc.8
+
+- Resolves Codex image prompts through the Host-owned durable attachment service.
+- Restores bounded workspace `@` completion on the exact official DSH rc.8 Host.
+- Localizes official rc.8 command descriptions in globally installed Chinese profiles.
+- Keeps structured-question Enter handling isolated from running-Agent steer, follow-up, and interrupt delivery.
+
+## 0.1.2-rc.8
+
+- Adds Standard, PTC, Minimal, Creator, and healthy user Agent Preset selection through `/mode`.
+- Preserves preset identity across Session resume, creation, clear, and rewind workflows.
+- Applies mode changes atomically in a blank Session and creates a confirmed new Session after work has started.
+
 ## 0.1.1-rc.8
 
 - Bundles the OpenAI Codex adapter with provider-owned ChatGPT OAuth and dynamic account model discovery.

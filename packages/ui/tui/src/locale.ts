@@ -5,7 +5,7 @@ import type { CommandDescriptor, CommandCompletionNode } from './host.ts'
 import { terminalSafe } from './sanitize.ts'
 
 /** Catalog version persisted in source and included in generated release evidence. */
-export const TUI_LOCALE_CATALOG_VERSION = 2 as const
+export const TUI_LOCALE_CATALOG_VERSION = 3 as const
 
 /** Runtime locales shipped by the native TUI. */
 export const TUI_LOCALES = ['en', 'zh'] as const
@@ -35,6 +35,11 @@ const EN_MESSAGES = Object.freeze({
   'command.lang': 'Change the TUI language',
   'command.quit': 'Exit the TUI',
   'command.exit': 'Exit the TUI',
+  'command.compact': 'Compact older conversation history',
+  'command.feedback': 'Record feedback about this Session',
+  'command.goal': 'Set or view the goal for a long-running task',
+  'command.permission': 'Switch the permission preset',
+  'command.plan': 'Enter or leave plan mode',
   'language.english': 'English',
   'language.chinese': 'Chinese',
   'language.usage': 'Usage: /lang [en|zh]',
@@ -644,6 +649,11 @@ const ZH_MESSAGES: Record<TuiMessageKey, string> = Object.freeze({
   'command.lang': '切换 TUI 语言',
   'command.quit': '退出 TUI',
   'command.exit': '退出 TUI',
+  'command.compact': '压缩较早的对话历史',
+  'command.feedback': '记录对当前 Session 的反馈',
+  'command.goal': '设置或查看长期任务目标',
+  'command.permission': '切换权限预设',
+  'command.plan': '进入或退出计划模式',
   'language.english': '英语',
   'language.chinese': '中文',
   'language.usage': '用法：/lang [en|zh]',
@@ -1279,6 +1289,20 @@ export function tuiInteractionContextLabel(context: string, locale: TuiLocale): 
   return Object.hasOwn(TUI_LOCALE_CATALOG.en, key) ? tuiMessage(locale, key) : context
 }
 
+const HOST_COMMAND_DESCRIPTION_FALLBACKS: Readonly<Record<string, {
+  readonly description: string
+  readonly key: Extract<TuiMessageKey, `command.${string}`>
+}>> = Object.freeze({
+  compact: { description: 'Compact older conversation history', key: 'command.compact' },
+  feedback: { description: 'record feedback about this session', key: 'command.feedback' },
+  goal: { description: 'set or view the goal for a long-running task', key: 'command.goal' },
+  permission: {
+    description: 'Switch the permission preset (sandbox mode + approval policy)',
+    key: 'command.permission',
+  },
+  plan: { description: 'Enter or leave plan mode', key: 'command.plan' },
+})
+
 /**
  * Resolve a command summary with the command owner's stable English fallback.
  * @param command - command descriptor or completion node.
@@ -1290,12 +1314,17 @@ export function tuiCommandDescription(
   locale: TuiLocale,
 ): string {
   const metadata = command as unknown as {
+    readonly name: string
     readonly completion?: { readonly descriptions?: Readonly<Record<string, string>> }
     readonly descriptions?: Readonly<Record<string, string>>
     readonly description: string
   }
   const descriptions = metadata.completion?.descriptions ?? metadata.descriptions
-  return descriptions?.[locale] ?? descriptions?.en ?? metadata.description
+  const localized = descriptions?.[locale]
+  if (localized !== undefined) return localized
+  const fallback = HOST_COMMAND_DESCRIPTION_FALLBACKS[metadata.name]
+  if (locale !== 'en' && fallback?.description === metadata.description) return tuiMessage(locale, fallback.key)
+  return descriptions?.en ?? metadata.description
 }
 
 /**

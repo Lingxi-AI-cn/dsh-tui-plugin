@@ -3,6 +3,7 @@
 import type {
   CommandCompletionNode, CommandDescriptor, FsPathCompletionResult,
 } from './host.ts'
+import { tuiCommandDescription, type TuiLocale } from './locale.ts'
 
 /** Origin of one TUI completion candidate. */
 export type TuiSuggestionKind = 'command' | 'path'
@@ -105,12 +106,6 @@ function resolveCompletionNode(
     || candidate.aliases?.some(alias => alias.toLocaleLowerCase() === normalized))
 }
 
-function isRootCommand(
-  candidate: CommandDescriptor | CommandCompletionNode,
-): candidate is CommandDescriptor {
-  return 'completion' in candidate
-}
-
 function commandQuery(
   text: string,
   cursor: number,
@@ -137,7 +132,7 @@ export function commandSuggestionState(
   text: string,
   cursor: number,
   commands: readonly CommandDescriptor[],
-  locale = 'en',
+  locale: TuiLocale = 'en',
 ): TuiSuggestionState | undefined {
   const parsed = commandQuery(text, cursor)
   if (parsed === undefined) return undefined
@@ -164,25 +159,25 @@ export function commandSuggestionState(
   const items = candidates
     .flatMap((candidate): TuiSuggestionItem[] => {
       const name = candidate.name
-      const rootCommand = isRootCommand(candidate)
-      const aliases = rootCommand ? candidate.completion?.aliases : candidate.aliases
+      const rootCommand = root === undefined ? candidate as CommandDescriptor : undefined
+      const completionNode = rootCommand === undefined ? candidate as CommandCompletionNode : undefined
+      const aliases = rootCommand?.completion?.aliases ?? completionNode?.aliases
       const completionToken = commandAliasMatches(name, aliases, normalizedPrefix)
       if (completionToken === undefined) return []
-      const path = !rootCommand && candidate.canonicalPath !== undefined
-        ? [...candidate.canonicalPath]
+      const path = completionNode?.canonicalPath !== undefined
+        ? [...completionNode.canonicalPath]
         : [...canonicalTokens, completionToken]
-      const description = rootCommand
-        ? commandDescription(candidate.description, candidate.completion?.descriptions, locale)
-        : commandDescription(candidate.description, candidate.descriptions, locale)
+      const description = rootCommand !== undefined
+        ? tuiCommandDescription(rootCommand, locale)
+        : commandDescription(candidate.description, (candidate as CommandCompletionNode).descriptions, locale)
       const input = candidate.input
-      const node = rootCommand ? undefined : candidate
       return [{
         id: `command:${path.join(' ')}`,
         insertText: `/${path.join(' ')} `,
         label: `/${path.join(' ')}`,
         description,
         ...input === undefined ? {} : { detail: input.hint },
-        ...node?.disabledReason === undefined ? {} : { disabledReason: node.disabledReason },
+        ...completionNode?.disabledReason === undefined ? {} : { disabledReason: completionNode.disabledReason },
         commandPath: Object.freeze(path),
         source: 'command',
       }]

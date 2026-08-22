@@ -12,7 +12,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.2-rc.8'
+const TUI_VERSION = '0.1.3-rc.8'
 const DSH_VERSION = '0.1.0-rc.8'
 const TOP_PACKAGE = '@lingxi-ai-cn/dsh-tui'
 const PACKAGE_DIRS = Object.freeze([
@@ -213,6 +213,7 @@ async function bootPty(official: string, dshScript: string, home: string, env: R
   const nodePtyRoot = join(store, nodePtyEntry, 'node_modules/node-pty')
   const requireFromOfficial = createRequire(join(nodePtyRoot, 'package.json'))
   const pty = requireFromOfficial(nodePtyRoot) as NodePty
+  writeFileSync(join(home, 'clean-room-path.txt'), 'official rc8 workspace fixture\n')
   // Ink intentionally withholds live frames when CI=true. The PTY is the
   // interactive user boundary under test, so make only its child environment
   // advertise an ordinary terminal while the surrounding workflow stays CI.
@@ -242,6 +243,22 @@ async function bootPty(official: string, dshScript: string, home: string, env: R
     // The banner can render one tick before the input loop has entered raw
     // mode; wait briefly so the first command cannot be consumed by startup.
     await new Promise(resolve => setTimeout(resolve, 50))
+    child.write('@clean')
+    await waitFor(() => output, '@clean-room-path.txt')
+    child.write('\u001b')
+    child.write('\u007f'.repeat('@clean'.length))
+    child.write('/lang zh')
+    await waitFor(() => output, 'prompt › /lang zh')
+    child.write('\r')
+    await waitFor(() => output, '语言已切换为中文。')
+    child.write('/comp')
+    await waitFor(() => output, '压缩较早的对话历史')
+    child.write('\u001b')
+    child.write('\u007f'.repeat('/comp'.length))
+    child.write('/lang en')
+    await waitFor(() => output, '输入 › /lang en')
+    child.write('\r')
+    await waitFor(() => output, 'Language set to English.')
     child.write('/models')
     await waitFor(() => output, 'prompt › /models')
     child.write('\r')

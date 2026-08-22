@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.2-rc.8'
+const TUI_VERSION = '0.1.3-rc.8'
 const DSH_VERSION = '0.1.0-rc.8'
 const PACKAGE_DIRS = Object.freeze([
   'packages/boot/profile-plugin-manager',

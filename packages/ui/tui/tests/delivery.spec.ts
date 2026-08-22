@@ -5,19 +5,28 @@ const key = (value: Record<string, boolean>) => value
 
 describe('running composer delivery', () => {
   it('keeps Enter as steer and selects queued follow-up with Tab', () => {
-    const base = { rootView: true, running: true, hasDraft: true, suggestionVisible: false }
+    const base = {
+      composerOwnsInput: true, rootView: true, running: true, hasDraft: true, suggestionVisible: false,
+    }
     expect(resolveTuiComposerDelivery({ ...base, key: key({ return: true }) })).toBe('steer')
     expect(resolveTuiComposerDelivery({ ...base, key: key({ tab: true }) })).toBe('followup')
   })
 
   it('selects interrupt-and-send only for Ctrl+Enter', () => {
-    const base = { rootView: true, running: true, hasDraft: true, suggestionVisible: false }
+    const base = {
+      composerOwnsInput: true, rootView: true, running: true, hasDraft: true, suggestionVisible: false,
+    }
     expect(resolveTuiComposerDelivery({ ...base, key: key({ ctrl: true, return: true }) })).toBe('interrupt')
     expect(resolveTuiComposerDelivery({ ...base, key: key({ ctrl: true, tab: true }) })).toBeUndefined()
   })
 
-  it('leaves suggestion, footer, idle, and child ownership unchanged', () => {
-    const base = { rootView: true, running: true, hasDraft: true, suggestionVisible: false, key: key({ tab: true }) }
+  it('leaves dialog, suggestion, idle, empty, and child ownership unchanged', () => {
+    const base = {
+      composerOwnsInput: true, rootView: true, running: true, hasDraft: true,
+      suggestionVisible: false, key: key({ tab: true }),
+    }
+    expect(resolveTuiComposerDelivery({ ...base, composerOwnsInput: false, key: key({ return: true }) }))
+      .toBeUndefined()
     expect(resolveTuiComposerDelivery({ ...base, suggestionVisible: true })).toBeUndefined()
     expect(resolveTuiComposerDelivery({ ...base, hasDraft: false })).toBeUndefined()
     expect(resolveTuiComposerDelivery({ ...base, running: false })).toBeUndefined()
