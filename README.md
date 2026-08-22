@@ -41,6 +41,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 ### Models, permissions, and human decisions
 
 - `/models` discovers configured providers and models, supports provider-owned authentication flows, and selects the exact reasoning effort when available.
+- The bundled OpenAI Codex adapter offers **Sign in with ChatGPT**, stores refreshable OAuth credentials under `$DSH_HOME/oauth/openai-codex.json`, and discovers the signed-in account's current model catalog dynamically.
 - Approval requests and structured user questions are presented as bounded native dialogs instead of leaking into ordinary transcript state.
 - The actionable footer opens model, permission, work, context, workspace, and transcript details without leaving the current Session.
 
@@ -75,13 +76,15 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 
 ## Compatibility
 
-The current public release is deliberately pinned to the matching official Harness release.
+The next public source candidate is deliberately pinned to the matching official Harness release. The currently published npm version remains `0.1.0-rc.9` until this candidate is tagged and released.
 
 | DSH TUI | DeepSeek Harness | Node.js | Platforms |
 | --- | --- | --- | --- |
-| `0.1.0-rc.9` | exactly `0.1.0-rc.8` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
+| `0.1.1-rc.8` | exactly `0.1.0-rc.8` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
 
 Support for a newer Harness version is added only after exact-package clean-room installation, profile composition, PTY startup/exit, and terminal-restoration verification.
+
+The TUI core version advances independently (`0.1.1` here), while the final prerelease suffix (`rc.8`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
 
 ## Install
 
@@ -89,7 +92,7 @@ Install the exact supported official Harness, then add DSH TUI to a dedicated `t
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.0-rc.8
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.9
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
 dsh --profile tui
 ```
 
@@ -111,7 +114,7 @@ The canonical profile contains exactly `@deepseek-ai/dsh-base` followed by `@lin
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.9
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
 ```
 
 Sessions and credentials live outside the profile directory. Reapply only reviewed custom patches; do not copy the old profile back wholesale.
@@ -120,7 +123,7 @@ Sessions and credentials live outside the profile directory. Reapply only review
 <summary>Installation notes</summary>
 
 - pnpm may print missing-peer warnings while installing the profile. Official DSH supplies those exact Host packages; installing the suggested `@deepseek-ai/*` peers into the profile can create a duplicate Host graph.
-- The bootstrap release uses model adapters supplied by official DSH and does not bundle `openai-codex`. Select an available provider through `/models`.
+- The TUI bundle includes its Codex adapter, but installation does not start OAuth or modify existing provider credentials. Choose **Sign in with ChatGPT** through `/models` when you want to connect an account.
 - npm may ask whether to allow install scripts for official DSH native helpers. Follow npm's printed guidance for the official installation; do not add those packages to the TUI profile.
 
 </details>
@@ -130,7 +133,7 @@ Sessions and credentials live outside the profile directory. Reapply only review
 Install the exact TUI version that declares compatibility with the installed official Harness version:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.9
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
 ```
 
 Release tags and npm versions are immutable. Do not mix package versions from different release candidates.
@@ -154,7 +157,7 @@ pnpm run verify
 pnpm run verify:clean-room
 ```
 
-The verification pipeline checks public-source hygiene, tests, build output, the exact six-package tarball closure, official-DSH clean-room composition, PTY startup and `/quit`, and terminal restoration. See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before changing package behavior.
+The verification pipeline checks public-source hygiene, tests, build output, the exact seven-package tarball closure, official-DSH clean-room composition, the Codex sign-in row, PTY startup and `/quit`, and terminal restoration. See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before changing package behavior.
 
 ## Security
 

@@ -3,11 +3,12 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const tuiVersion = '0.1.0-rc.9'
+const tuiVersion = '0.1.1-rc.8'
 const dshVersion = '0.1.0-rc.8'
 const repository = 'git+https://github.com/Lingxi-AI-cn/dsh-tui-plugin.git'
 const packages = [
   'packages/boot/profile-plugin-manager',
+  'packages/llm/llm-openai-codex',
   'packages/interaction/plugin-hub',
   'packages/host/session-export',
   'packages/interaction/plugin-hub-local',
@@ -18,8 +19,15 @@ const externalVersions = new Map([
   ['@deepseek-ai/cordis', '4.0.1'],
   ['@deepseek-ai/cordis-plugin-loader', '1.0.2'],
   ['@deepseek-ai/schemastery', '3.18.1'],
+  ['@earendil-works/pi-ai', '0.82.1'],
 ])
 const violations = []
+
+const dshPrerelease = dshVersion.split('-', 2)[1]
+const tuiPrerelease = tuiVersion.split('-', 2)[1]
+if (dshPrerelease !== tuiPrerelease) {
+  violations.push(`TUI version ${tuiVersion} must end with official DSH suffix ${dshPrerelease ?? '(none)'}`)
+}
 
 function visit(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -77,6 +85,9 @@ for (const directory of packages) {
     if (name.startsWith('@deepseek-ai/')) {
       const expected = externalVersions.get(name) ?? dshVersion
       if (spec !== expected) violations.push(`${directory}: ${name} must be pinned to ${expected}`)
+    }
+    if (externalVersions.has(name) && spec !== externalVersions.get(name)) {
+      violations.push(`${directory}: ${name} must be pinned to ${externalVersions.get(name)}`)
     }
   }
 }

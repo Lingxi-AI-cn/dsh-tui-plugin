@@ -7,10 +7,11 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.0-rc.9'
+const TUI_VERSION = '0.1.1-rc.8'
 const DSH_VERSION = '0.1.0-rc.8'
 const PACKAGE_DIRS = Object.freeze([
   'packages/boot/profile-plugin-manager',
+  'packages/llm/llm-openai-codex',
   'packages/interaction/plugin-hub',
   'packages/host/session-export',
   'packages/interaction/plugin-hub-local',
@@ -41,7 +42,9 @@ function assertExactSpecs(manifest: PackedManifest): void {
       ? TUI_VERSION
       : name.startsWith('@deepseek-ai/dsh-')
         ? DSH_VERSION
-        : undefined
+        : name === '@earendil-works/pi-ai'
+          ? '0.82.1'
+          : undefined
     if (expected !== undefined && spec !== expected) {
       fail(`${manifest.name} must pin ${name} exactly to ${expected}, got ${spec}`)
     }

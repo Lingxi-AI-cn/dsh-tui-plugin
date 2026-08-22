@@ -8,6 +8,7 @@ import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 const ROOT = new URL('../../../..', import.meta.url)
 const PACKAGE_DIRS = Object.freeze([
   'packages/bundle/tui-app',
+  'packages/llm/llm-openai-codex',
   'packages/ui/tui',
   'packages/host/session-export',
   'packages/interaction/plugin-hub',
@@ -50,7 +51,7 @@ describe('post-install TUI package surface', () => {
   const top = manifests[0]!
 
   it('publishes one same-version Lingxi package family without install hooks or source exports', () => {
-    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.0-rc.9']))
+    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.1-rc.8']))
     for (const entry of manifests) {
       expect(entry.name).toMatch(/^@lingxi-ai-cn\/dsh-/u)
       expect(entry.repository?.url).toBe(REPOSITORY)

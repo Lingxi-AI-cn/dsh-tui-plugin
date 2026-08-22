@@ -42,6 +42,14 @@
     - id: session-stats
       name: '@deepseek-ai/dsh-session-stats'
 
+    # ChatGPT OAuth credentials and the account model catalog remain owned by
+    # the independently installed adapter. The official base supplies only its
+    # Host LLM and pi-ai service packages.
+    - id: llm-openai-codex
+      name: '@lingxi-ai-cn/dsh-llm-openai-codex'
+      config:
+        clientVersion: '0.146.0'
+
     # Native Session export writes the complete durable archive directly to a
     # user-selected host directory; no HTTP or browser transport is mounted.
     - id: session-log-export

@@ -4,8 +4,8 @@ This repository is the sanitized public source and release surface for the indep
 
 ## Current release contract
 
-- The current TUI release is `0.1.0-rc.9` and supports exactly official `@deepseek-ai/dsh@0.1.0-rc.8`.
-- `@lingxi-ai-cn/dsh-tui` is the only user-facing install package. The five internal packages `dsh-tui-runtime`, `dsh-session-export`, `dsh-plugin-hub`, `dsh-plugin-hub-local`, and `dsh-profile-plugin-manager` use the same npm scope and exact release version.
+- The next TUI release candidate source is `0.1.1-rc.8` and supports exactly official `@deepseek-ai/dsh@0.1.0-rc.8`; the previously published `0.1.0-rc.9` remains immutable until this candidate is tagged and published.
+- `@lingxi-ai-cn/dsh-tui` is the only user-facing install package. The six internal packages `dsh-tui-runtime`, `dsh-llm-openai-codex`, `dsh-session-export`, `dsh-plugin-hub`, `dsh-plugin-hub-local`, and `dsh-profile-plugin-manager` use the same npm scope and exact release version.
 - The public default branch is `main`. Public release tags and npm versions are immutable; never move an existing `v*` tag or attempt to republish an existing npm version.
 
 ## Source and repository boundaries
@@ -17,10 +17,10 @@ This repository is the sanitized public source and release surface for the indep
 
 ## Compatibility and versioning
 
-- Keep the root version and all six TUI package versions aligned at `0.1.0-rc.9`. Keep official DSH peers, compatibility guards, clean-room fixtures, pack/release scripts, source-manifest metadata, and the dependency catalog aligned separately at the supported DSH version `0.1.0-rc.8`.
+- Keep the root version and all seven TUI package versions aligned at `0.1.1-rc.8`. The core `0.1.1` identifies TUI iteration while the final `rc.8` suffix must equal the supported official DSH prerelease suffix. Keep official DSH peers, compatibility guards, clean-room fixtures, pack/release scripts, source-manifest metadata, and the dependency catalog aligned separately at the supported DSH version `0.1.0-rc.8`.
 - The canonical post-install `tui` profile bundle list is exactly `@deepseek-ai/dsh-base` followed by `@lingxi-ai-cn/dsh-tui`. Treat legacy `@deepseek-ai/dsh-tui-app` entries as an explicit backup-and-recreate migration; never compose both bundles or install the reported upstream peers into the profile.
 - Support for a new DSH release is explicit and evidence-based. Do not widen peer ranges or dist-tags merely because a build compiles; require an official-package clean-room install, composition, PTY startup/exit, and terminal restoration on the exact target.
-- The bootstrap release uses only adapters supplied by the official base and does not include `openai-codex`. Keep provider migration guidance explicit; do not rewrite persisted settings or provider credentials during package installation.
+- The TUI bundle includes `@lingxi-ai-cn/dsh-llm-openai-codex` and exposes provider-owned ChatGPT OAuth through `/models`. Keep provider migration explicit and reversible; package installation must not sign a user in, rewrite settings, or modify provider-owned credentials.
 - Do not restore `dsh tui` as a required alias, modify the official DSH installation, install profile-local copies of upstream Service Definition packages, or add npm lifecycle scripts to the released package family.
 - Keep Plugin Hub profile mutation on the official external `dsh plugin` path until a generic official pre-composition recovery contract is available. Do not infer recovery safety from the TUI being able to start.
 
@@ -43,6 +43,6 @@ pnpm run pack:release
 node scripts/publish-release.mjs
 ```
 
-Require the Ubuntu 24.04/macOS 14 CI matrix to pass. Publication is performed by `.github/workflows/release.yml` with npm trusted-publishing permissions; never add a long-lived npm token to the repository. After publication, audit all six registry payloads and dist-tags against the release manifest before updating release documentation.
+Require the Ubuntu 24.04/macOS 14 CI matrix to pass. Publication is performed by `.github/workflows/release.yml` with npm trusted-publishing permissions; never add a long-lived npm token to the repository. Configure the same Trusted Publisher for the new Codex package before its first publication. After publication, audit all seven registry payloads and dist-tags against the release manifest before updating release documentation.
 
 Real OAuth, native macOS IME preedit, SSH/tmux combinations, and additional terminal emulators remain manual checks. Report them only when directly observed.

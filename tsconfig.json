@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "packages/boot/profile-plugin-manager" },
+    { "path": "packages/llm/llm-openai-codex" },
     { "path": "packages/interaction/plugin-hub" },
     { "path": "packages/host/session-export" },
     { "path": "packages/interaction/plugin-hub-local" },

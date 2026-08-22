@@ -7,6 +7,7 @@ const root = resolve(import.meta.dirname, '..')
 const artifacts = join(root, 'artifacts')
 const packageDirectories = [
   'packages/boot/profile-plugin-manager',
+  'packages/llm/llm-openai-codex',
   'packages/interaction/plugin-hub',
   'packages/host/session-export',
   'packages/interaction/plugin-hub-local',

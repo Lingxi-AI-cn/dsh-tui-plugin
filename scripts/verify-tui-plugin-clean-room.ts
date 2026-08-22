@@ -12,11 +12,12 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.0-rc.9'
+const TUI_VERSION = '0.1.1-rc.8'
 const DSH_VERSION = '0.1.0-rc.8'
 const TOP_PACKAGE = '@lingxi-ai-cn/dsh-tui'
 const PACKAGE_DIRS = Object.freeze([
   'packages/boot/profile-plugin-manager',
+  'packages/llm/llm-openai-codex',
   'packages/interaction/plugin-hub',
   'packages/host/session-export',
   'packages/interaction/plugin-hub-local',
@@ -238,6 +239,14 @@ async function bootPty(official: string, dshScript: string, home: string, env: R
     // The banner can render one tick before the input loop has entered raw
     // mode; wait briefly so the first command cannot be consumed by startup.
     await new Promise(resolve => setTimeout(resolve, 50))
+    child.write('/models')
+    await waitFor(() => output, 'prompt › /models')
+    child.write('\r')
+    await new Promise(resolve => setTimeout(resolve, 100))
+    child.write('\r')
+    await waitFor(() => output, 'Sign in with ChatGPT')
+    child.write('\u001b')
+    await new Promise(resolve => setTimeout(resolve, 100))
     child.write('/doctor')
     await waitFor(() => output, 'prompt › /doctor')
     child.write('\r')
@@ -344,12 +353,16 @@ try {
   const profileLock = readFileSync(join(profile, 'pnpm-lock.yaml'), 'utf8')
   if (/\b(?:workspace|file|link):/u.test(profileLock)) fail('profile lockfile retains a local dependency protocol')
   if (existsSync(join(profile, 'node_modules/@deepseek-ai'))) fail('profile materialized duplicate official Host packages')
+  if (existsSync(join(profile, 'node_modules/@earendil-works/pi-ai'))) fail('profile materialized a duplicate pi-ai Host library')
   for (const release of releases) {
     if (!existsSync(join(profile, 'node_modules', release.name, 'package.json'))) fail(`${release.name} is absent from the profile graph`)
   }
 
   const dumped = run(dsh, ['--profile', 'tui', '--dump-default-config'], official, environment)
-  if (!dumped.includes('@lingxi-ai-cn/dsh-tui-runtime') || !dumped.includes('profileMutations: false')) {
+  if (!existsSync(join(dshHome, 'profiles/node_modules/@earendil-works/pi-ai'))) fail('official DSH fallback omits pi-ai')
+  if (!dumped.includes('@lingxi-ai-cn/dsh-tui-runtime')
+    || !dumped.includes('@lingxi-ai-cn/dsh-llm-openai-codex')
+    || !dumped.includes('profileMutations: false')) {
     fail('official DSH did not compose the packed TUI patch')
   }
   const help = run(dsh, ['--profile', 'tui', '--help'], official, environment)
@@ -367,5 +380,9 @@ try {
       activeServer.close(() => { resolve() })
     })
   }
-  rmSync(temporary, { recursive: true, force: true })
+  if (process.env.DSH_TUI_KEEP_CLEAN_ROOM === '1') {
+    process.stderr.write(`verify-tui-plugin-clean-room: retained ${temporary}\n`)
+  } else {
+    rmSync(temporary, { recursive: true, force: true })
+  }
 }

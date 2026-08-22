@@ -41,6 +41,7 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 ### 模型、权限与人类决策
 
 - `/models` 发现已配置的提供方和模型，支持提供方拥有的认证流程，并在模型允许时选择精确推理强度。
+- 随包提供的 OpenAI Codex adapter 会显示 **使用 ChatGPT 登录**，把可刷新的 OAuth 凭据存到 `$DSH_HOME/oauth/openai-codex.json`，并动态发现当前登录账户可用的模型目录。
 - 审批请求和结构化用户问题通过有界原生对话框呈现，不混入普通 Transcript 状态。
 - 可操作 Footer 可直接打开模型、权限、后台工作、上下文、工作区和 Transcript 详情，无需离开当前 Session。
 
@@ -75,13 +76,15 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 
 ## 兼容性
 
-当前公开版本有意与对应的官方 Harness 版本精确绑定。
+下一个公开源码候选有意与对应的官方 Harness 版本精确绑定。在该候选被打 tag 并发布以前，npm 当前已发布版本仍是 `0.1.0-rc.9`。
 
 | DSH TUI | DeepSeek Harness | Node.js | 平台 |
 | --- | --- | --- | --- |
-| `0.1.0-rc.9` | 精确匹配 `0.1.0-rc.8` | `^22.19.0` 或 `>=24` | macOS 14 与 Ubuntu 24.04 CI |
+| `0.1.1-rc.8` | 精确匹配 `0.1.0-rc.8` | `^22.19.0` 或 `>=24` | macOS 14 与 Ubuntu 24.04 CI |
 
 只有在精确官方包 clean-room 安装、profile 组合、PTY 启动/退出和终端恢复验证完成后，才会增加对新 Harness 版本的支持。
+
+TUI 核心版本独立递增（这里是 `0.1.1`），最后的预发布后缀（`rc.8`）则始终表示兼容的官方 Harness 预发布版本。这样不会让用户把一次 TUI 迭代误认为上游 DSH 已升级。
 
 ## 安装
 
@@ -89,7 +92,7 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.0-rc.8
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.9
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
 dsh --profile tui
 ```
 
@@ -111,7 +114,7 @@ dsh --profile tui
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.9
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
 ```
 
 Session 和凭据位于 profile 目录之外。只重新应用经过审查的自定义 patch，不要把旧 profile 整体复制回来。
@@ -120,7 +123,7 @@ Session 和凭据位于 profile 目录之外。只重新应用经过审查的自
 <summary>安装说明</summary>
 
 - pnpm 在安装 profile 时可能打印 missing-peer 警告。官方 DSH 会提供这些精确 Host package；把建议的 `@deepseek-ai/*` peer 安装到 profile 中反而可能创建重复 Host 图。
-- bootstrap 版本只使用官方 DSH 提供的模型 adapter，不捆绑 `openai-codex`。请通过 `/models` 选择当前可用的提供方。
+- TUI bundle 已包含 Codex adapter，但安装过程不会启动 OAuth，也不会修改现有提供方凭据。需要连接账户时，请在 `/models` 中选择 **使用 ChatGPT 登录**。
 - npm 可能询问是否允许官方 DSH 原生 helper 的安装脚本。请按 npm 针对官方安装打印的提示处理，不要把这些 package 加入 TUI profile。
 
 </details>
@@ -130,7 +133,7 @@ Session 和凭据位于 profile 目录之外。只重新应用经过审查的自
 安装声明兼容当前官方 Harness 版本的精确 TUI 版本：
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.0-rc.9
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
 ```
 
 Release tag 和 npm 版本不可覆盖或移动。不要混用不同 release candidate 的 package。
@@ -154,7 +157,7 @@ pnpm run verify
 pnpm run verify:clean-room
 ```
 
-验证流程会检查公开源码卫生、测试、构建产物、精确六包 tarball 闭包、官方 DSH clean-room 组合、PTY 启动与 `/quit`，以及终端状态恢复。修改 package 行为前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [AGENTS.md](AGENTS.md)。
+验证流程会检查公开源码卫生、测试、构建产物、精确七包 tarball 闭包、官方 DSH clean-room 组合、Codex 登录行、PTY 启动与 `/quit`，以及终端状态恢复。修改 package 行为前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [AGENTS.md](AGENTS.md)。
 
 ## 安全提示
 

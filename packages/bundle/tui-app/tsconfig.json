@@ -6,6 +6,7 @@
   },
   "include": ["src"],
   "references": [
+    { "path": "../../llm/llm-openai-codex" },
     { "path": "../../host/session-export" },
     { "path": "../../interaction/plugin-hub" },
     { "path": "../../interaction/plugin-hub-local" },

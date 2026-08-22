@@ -23,6 +23,8 @@
     "types": ["node"],
     "paths": {
       "@lingxi-ai-cn/dsh-profile-plugin-manager": ["./packages/boot/profile-plugin-manager/src"],
+      "@lingxi-ai-cn/dsh-llm-openai-codex": ["./packages/llm/llm-openai-codex/src"],
+      "@lingxi-ai-cn/dsh-llm-openai-codex/*": ["./packages/llm/llm-openai-codex/src/*"],
       "@lingxi-ai-cn/dsh-plugin-hub": ["./packages/interaction/plugin-hub/src"],
       "@lingxi-ai-cn/dsh-plugin-hub-local": ["./packages/interaction/plugin-hub-local/src"],
       "@lingxi-ai-cn/dsh-session-export": ["./packages/host/session-export/src"],
