@@ -40,6 +40,8 @@ export interface TuiHostDiagnosticSnapshot {
   readonly architecture: string
   /** Official packages resolved outside the profile installation. */
   readonly packages: readonly TuiHostPackageDiagnostic[]
+  /** Shipped Agent preset ids verified before terminal mutation. */
+  readonly agentPresetIds: readonly string[]
   /** Exact reinstall command for a Host/TUI compatibility failure. */
   readonly recoveryCommand: string
 }
@@ -146,6 +148,8 @@ function isHostSnapshot(value: unknown): value is TuiHostDiagnosticSnapshot {
     && typeof value['architecture'] === 'string'
     && Array.isArray(value['packages'])
     && value['packages'].every(isHostPackage)
+    && Array.isArray(value['agentPresetIds'])
+    && value['agentPresetIds'].every(entry => typeof entry === 'string')
     && typeof value['recoveryCommand'] === 'string'
 }
 

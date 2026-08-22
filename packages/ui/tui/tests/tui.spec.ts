@@ -34,6 +34,7 @@ import {
   TuiTranscriptDetailCache, tuiTranscriptDetailText, TuiTranscriptProjectionCache, TuiTranscriptScrollController,
   TuiTranscriptViewportIndex, tuiTranscriptSearchSegments,
   tuiFooterItems, tuiFooterStatusLine, tuiInteractionHelpLines, tuiSelectedFooterLine,
+  tuiAgentModeName, tuiAgentModeOptions,
   moveTuiFooterSelection, visibleTuiFooterItems, type TuiKeypress,
   filterTuiResumeCandidates, formatTuiRelativeTime,
   resolveTuiSessionExportDirectory,
@@ -2200,8 +2201,9 @@ describe('TUI Session resume picker', () => {
 
   it('summarizes compatibility without reading a Session log', () => {
     const currentId = SessionId('current')
+    const standard = { id: 'standard', label: 'Standard', trust: 'system' as const }
     const summarize = (value: SessionRecord) => summarizeTuiResumeCandidate(
-      value, undefined, undefined, currentId, '/workspace/current',
+      value, undefined, undefined, currentId, '/workspace/current', [], false, undefined, standard,
     )
     expect(summarize(record('eligible', 10, { live: false, persisted: true }))).toMatchObject({
       title: 'Untitled session', updatedAt: 10, currentWorkspace: true,
@@ -2215,14 +2217,16 @@ describe('TUI Session resume picker', () => {
       .toBe('session format is incompatible')
     expect(summarize(record('child', 1, { live: false, persisted: true, origin: 'subagent' })).disabledReason)
       .toBe('subagent-owned session')
-    expect(summarize(record('preset', 1, { live: false, persisted: true, agentPreset: 'minimal' })).disabledReason)
-      .toBe('session requires preset minimal')
+    expect(summarizeTuiResumeCandidate(
+      record('legacy', 1, { live: false, persisted: true }),
+      undefined, undefined, currentId, '/workspace/current',
+    ).disabledReason).toBe('legacy rosterless session')
     expect(summarize(record('no-cwd', 1, { live: false, persisted: true, omitCwd: true })).disabledReason)
       .toBe('session has no recorded workspace')
     expect(summarizeTuiResumeCandidate(
       record('preview', 1, { live: false, persisted: true }),
       'Preview', 2, currentId, '/workspace/current',
-      [{ seq: 1, kind: 'human', text: 'hello' }], true, 'backend unavailable',
+      [{ seq: 1, kind: 'human', text: 'hello' }], true, 'backend unavailable', standard,
     )).toMatchObject({
       preview: [{ seq: 1, kind: 'human', text: 'hello' }],
       previewTruncated: true,
@@ -2230,24 +2234,25 @@ describe('TUI Session resume picker', () => {
     })
     expect(summarizeTuiResumeCandidate(
       record('preview', 1, { live: false, persisted: true }),
-      'Preview', 2, currentId, '/workspace/current', [], false, 'backend unavailable',
+      'Preview', 2, currentId, '/workspace/current', [], false, 'backend unavailable', standard,
     ).disabledReason).toBeUndefined()
   })
 
   it('sorts by activity and filters normalized title, id, and visible workspace', () => {
     const currentId = SessionId('current')
+    const standard = { id: 'standard', label: 'Standard', trust: 'system' as const }
     const candidates = sortTuiResumeCandidates([
       summarizeTuiResumeCandidate(
         record('z-id', 1, { live: false, persisted: true, cwd: '/workspace/other' }),
-        'Unicode e\u0301', 20, currentId, '/workspace/current',
+        'Unicode e\u0301', 20, currentId, '/workspace/current', [], false, undefined, standard,
       ),
       summarizeTuiResumeCandidate(
         record('a-id', 1, { live: false, persisted: true }),
-        'Current work', 20, currentId, '/workspace/current',
+        'Current work', 20, currentId, '/workspace/current', [], false, undefined, standard,
       ),
       summarizeTuiResumeCandidate(
         record('older-id', 1, { live: false, persisted: true }),
-        'Older', 10, currentId, '/workspace/current',
+        'Older', 10, currentId, '/workspace/current', [], false, undefined, standard,
       ),
     ])
     expect(candidates.map(candidate => candidate.record.header.id)).toEqual([
@@ -2522,6 +2527,23 @@ describe('TUI actionable footer', () => {
     expect(chinese.find(item => item.id === 'context')?.detailLines).toContain('用量：输入 5,000 · 输出 2,000')
   })
 
+  it('projects the current Agent mode as a localized high-priority action', () => {
+    const preset = {
+      id: 'minimal', trust: 'system' as const, path: '/private/preset/minimal/agent.cordis.yml',
+      name: '极简模式', description: '仅提供两个工具。', order: 3,
+    }
+    const items = tuiFooterItems({ ...sources, agentPreset: preset })
+    expect(items.map(item => item.id)).toEqual([
+      'model', 'mode', 'permission', 'context', 'workspace', 'transcript',
+    ])
+    expect(items.find(item => item.id === 'mode')).toMatchObject({
+      label: 'mode', value: 'Minimal', action: 'modes',
+    })
+    expect(items.find(item => item.id === 'mode')?.detailLines.join('\n')).not.toContain('/private/preset')
+    expect(tuiFooterItems({ ...sources, agentPreset: preset }, 'zh').find(item => item.id === 'mode'))
+      .toMatchObject({ label: '模式', value: '极简模式' })
+  })
+
   it('does not invent cache percentages when the provider reports no prompt denominator', () => {
     const items = tuiFooterItems({
       ...sources,
@@ -2582,6 +2604,27 @@ describe('TUI actionable footer', () => {
     const wide = tuiFooterStatusLine(items, 78)
     expect(wide).toContain('ctx ~25%')
     expect(wide).toContain('view ↑5-9/12↓')
+  })
+})
+
+describe('TUI Agent mode roster projection', () => {
+  const presets = [
+    { id: 'minimal', trust: 'system' as const, path: '/system/minimal', name: '极简模式', order: 3 },
+    { id: 'mine', trust: 'user' as const, path: '/user/mine', name: 'My mode', description: 'Local tools.' },
+    { id: 'broken', trust: 'user' as const, path: '/user/broken', broken: 'invalid composition' },
+    { id: 'standard', trust: 'system' as const, path: '/system/standard', name: '标准模式', order: 1 },
+  ]
+
+  it('localizes official names while retaining user metadata and unavailable state', () => {
+    expect(tuiAgentModeName(presets[0]!, 'en')).toBe('Minimal')
+    expect(tuiAgentModeName(presets[0]!, 'zh')).toBe('极简模式')
+    const options = tuiAgentModeOptions(presets, 'standard', 'en')
+    expect(options.map(option => option.preset.id)).toEqual(['standard', 'minimal', 'broken', 'mine'])
+    expect(options[0]?.label).toContain('current')
+    expect(options.find(option => option.preset.id === 'mine')?.description).toContain('user')
+    expect(options.find(option => option.preset.id === 'broken')?.description)
+      .toContain('unavailable · invalid composition')
+    expect(options.every(option => !option.description.includes(option.preset.path))).toBe(true)
   })
 })
 

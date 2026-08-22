@@ -3,7 +3,7 @@
 import { Command } from 'commander'
 import type { TuiHostDiagnosticSnapshot } from '@lingxi-ai-cn/dsh-tui-runtime'
 import { parseCmdline, type Context } from './host.ts'
-import { assertTuiHostCompatibility } from './compatibility.ts'
+import { assertTuiHostInstallation } from './compatibility.ts'
 
 export const name = 'tui-startup'
 export const inject = ['cmdlineArgs']
@@ -14,6 +14,8 @@ export const TUI_STARTUP_SERVICE = 'tuiStartup'
 export interface TuiStartupValues {
   /** Successful post-install Host compatibility snapshot. */
   diagnostics: TuiHostDiagnosticSnapshot
+  /** Validated read-only root of the official DSH Agent presets. */
+  presetRoot: string
   /** Persisted TUI-owned Session selected by `--resume`. */
   resume?: string
 }
@@ -32,13 +34,14 @@ Examples:
 }
 
 export function apply(ctx: Context): void {
-  const diagnostics = assertTuiHostCompatibility()
+  const { diagnostics, presetRoot } = assertTuiHostInstallation()
   const program = tuiCommand()
   program.action(() => {
     const options = program.opts<{ resume?: string }>()
     if (options.resume === '') program.error('error: --resume needs a Session id')
     ctx.provide(TUI_STARTUP_SERVICE, {
       diagnostics,
+      presetRoot,
       ...options.resume === undefined ? {} : { resume: options.resume },
     } satisfies TuiStartupValues)
   })

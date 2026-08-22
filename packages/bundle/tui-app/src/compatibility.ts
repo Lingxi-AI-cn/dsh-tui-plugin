@@ -1,8 +1,8 @@
 /** Packed-manifest Host compatibility checks that run before terminal mutation. */
 
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import type {
   TuiHostDiagnosticSnapshot,
@@ -11,10 +11,14 @@ import type {
 
 const PACKAGE_MANIFEST = new URL('../package.json', import.meta.url)
 const PROFILE_NAME = 'tui'
+const OFFICIAL_DSH_PACKAGE = '@deepseek-ai/dsh'
+const SHIPPED_AGENT_PRESET_IDS = Object.freeze(['standard', 'code', 'minimal', 'cordis'])
 
 interface PackageManifest {
   readonly name?: unknown
   readonly version?: unknown
+  readonly dependencies?: Readonly<Record<string, unknown>>
+  readonly optionalDependencies?: Readonly<Record<string, unknown>>
   readonly peerDependencies?: Readonly<Record<string, unknown>>
 }
 
@@ -23,6 +27,12 @@ export type TuiHostPackageResolution = TuiHostPackageDiagnostic
 
 /** Complete result retained by startup diagnostics and tests. */
 export type TuiHostCompatibilityReport = TuiHostDiagnosticSnapshot
+
+/** Validated installation facts needed by Loader expressions but not ordinary diagnostics. */
+export interface TuiHostInstallation {
+  readonly diagnostics: TuiHostCompatibilityReport
+  readonly presetRoot: string
+}
 
 /** Typed startup failure whose message is safe before terminal entry. */
 export class TuiHostCompatibilityError extends Error {
@@ -54,8 +64,31 @@ function isInside(root: string, candidate: string): boolean {
   return path === '' || (!path.startsWith('..') && !isAbsolute(path))
 }
 
-function packageManifestPath(packageName: string): string {
-  const request = createRequire(import.meta.url)
+function entrypointPackageManifest(packageName: string): string | undefined {
+  const entrypoint = process.argv[1]
+  if (entrypoint === undefined || !existsSync(entrypoint)) return undefined
+  let cursor = dirname(realpathSync(entrypoint))
+  const filesystemRoot = parse(cursor).root
+  for (;;) {
+    const candidate = join(cursor, 'package.json')
+    if (existsSync(candidate)) {
+      try {
+        if (readManifest(candidate).name === packageName) return realpathSync(candidate)
+      } catch {
+        // Keep walking: an ancestor manifest can still identify the Host package.
+      }
+    }
+    if (cursor === filesystemRoot) return undefined
+    cursor = dirname(cursor)
+  }
+}
+
+function packageManifestPath(packageName: string, from = import.meta.url): string {
+  if (packageName === OFFICIAL_DSH_PACKAGE) {
+    const entrypointManifest = entrypointPackageManifest(packageName)
+    if (entrypointManifest !== undefined) return entrypointManifest
+  }
+  const request = createRequire(from)
   for (const searchPath of request.resolve.paths(packageName) ?? []) {
     const candidate = join(searchPath, packageName, 'package.json')
     if (existsSync(candidate)) return realpathSync(candidate)
@@ -63,14 +96,92 @@ function packageManifestPath(packageName: string): string {
   throw new TuiHostCompatibilityError(`Required Host package ${packageName} is not resolvable.`)
 }
 
-function resolvedPackage(packageName: string): TuiHostPackageResolution {
-  const manifestPath = packageManifestPath(packageName)
+function tryPackageManifestPath(packageName: string, from: string): string | undefined {
+  try {
+    return packageManifestPath(packageName, from)
+  } catch (error) {
+    if (error instanceof TuiHostCompatibilityError) return undefined
+    throw error
+  }
+}
+
+function resolvedPackage(packageName: string, from?: string): TuiHostPackageResolution {
+  const manifestPath = packageManifestPath(packageName, from)
   const manifest = readManifest(manifestPath)
   return Object.freeze({
     name: requiredString(manifest.name, `${packageName} name`),
     version: requiredString(manifest.version, `${packageName} version`),
     manifestPath,
   })
+}
+
+function resolvedManifestPackage(manifestPath: string): TuiHostPackageResolution {
+  const manifest = readManifest(manifestPath)
+  const name = requiredString(manifest.name, `${manifestPath} package name`)
+  return Object.freeze({
+    name,
+    version: requiredString(manifest.version, `${name} version`),
+    manifestPath,
+  })
+}
+
+/** Index only packages reachable from the real DSH CLI dependency graph. */
+function hostPackageManifestIndex(officialDshManifest: string): ReadonlyMap<string, string> {
+  const byName = new Map<string, string>()
+  const visited = new Set<string>()
+  const pending = [officialDshManifest]
+  while (pending.length > 0) {
+    const manifestPath = pending.shift()
+    if (manifestPath === undefined || visited.has(manifestPath)) continue
+    visited.add(manifestPath)
+    const manifest = readManifest(manifestPath)
+    if (typeof manifest.name === 'string' && !byName.has(manifest.name)) byName.set(manifest.name, manifestPath)
+    const dependencies = {
+      ...manifest.dependencies,
+      ...manifest.optionalDependencies,
+      ...manifest.peerDependencies,
+    }
+    for (const dependency of Object.keys(dependencies).sort()) {
+      const child = tryPackageManifestPath(dependency, manifestPath)
+      if (child !== undefined && !visited.has(child)) pending.push(child)
+    }
+  }
+  return byName
+}
+
+function checkedPresetRoot(
+  officialDsh: TuiHostPackageResolution,
+  supportedDsh: string,
+  activeProfileRoot: string,
+): string {
+  if (officialDsh.version !== supportedDsh) {
+    throw new TuiHostCompatibilityError(
+      `Official DSH package is ${officialDsh.version}; expected exactly ${supportedDsh}.`,
+    )
+  }
+  if (isInside(activeProfileRoot, officialDsh.manifestPath)) {
+    throw new TuiHostCompatibilityError(
+      'Official DSH package resolves from the TUI profile instead of the DSH installation.',
+    )
+  }
+  const candidate = join(officialDsh.manifestPath, '..', 'config', 'agent-presets')
+  let root: string
+  try {
+    root = realpathSync(candidate)
+  } catch (error) {
+    throw new TuiHostCompatibilityError(
+      `Official DSH Agent preset root is unavailable: ${String(error)}`,
+    )
+  }
+  for (const id of SHIPPED_AGENT_PRESET_IDS) {
+    for (const file of ['agent.cordis.yml', 'preset.yml']) {
+      const path = join(root, id, file)
+      if (!existsSync(path) || !statSync(path).isFile()) {
+        throw new TuiHostCompatibilityError(`Official DSH Agent preset ${id} is missing ${file}.`)
+      }
+    }
+  }
+  return root
 }
 
 function compatibilityMessage(
@@ -150,6 +261,7 @@ export function validateTuiHostCompatibility(
     platform: process.platform,
     architecture: process.arch,
     packages: Object.freeze(packages.map(entry => Object.freeze({ ...entry }))),
+    agentPresetIds: SHIPPED_AGENT_PRESET_IDS,
     recoveryCommand: `dsh plugin --profile ${PROFILE_NAME} add --save-exact @lingxi-ai-cn/dsh-tui@${tuiVersion}`,
   })
 }
@@ -158,14 +270,34 @@ export function validateTuiHostCompatibility(
  * Resolve and validate every Host peer named by the top-level package manifest.
  * @returns frozen report after all versions and paths pass.
  */
-function inspectTuiHostCompatibility(): TuiHostCompatibilityReport {
+function inspectTuiHostInstallation(): TuiHostInstallation {
   const tuiManifest = readManifest(PACKAGE_MANIFEST)
   const peerDependencies = tuiManifest.peerDependencies ?? {}
-  const packages = Object.keys(peerDependencies).sort().map(resolvedPackage)
-  return validateTuiHostCompatibility(tuiManifest, packages, profileRoot())
+  const officialDsh = resolvedPackage(OFFICIAL_DSH_PACKAGE)
+  const hostPackages = hostPackageManifestIndex(officialDsh.manifestPath)
+  const packages = Object.keys(peerDependencies).sort().map((name) => {
+    const manifestPath = hostPackages.get(name)
+    if (manifestPath === undefined) {
+      throw new TuiHostCompatibilityError(`Required Host package ${name} is not reachable from ${OFFICIAL_DSH_PACKAGE}.`)
+    }
+    return resolvedManifestPackage(manifestPath)
+  })
+  const activeProfileRoot = profileRoot()
+  const diagnostics = validateTuiHostCompatibility(
+    tuiManifest,
+    [...packages, officialDsh],
+    activeProfileRoot,
+  )
+  const presetRoot = checkedPresetRoot(officialDsh, diagnostics.dshVersion, activeProfileRoot)
+  return Object.freeze({ diagnostics, presetRoot })
 }
 
 /** Fail startup before command parsing or terminal negotiation on an unsupported Host. */
 export function assertTuiHostCompatibility(): TuiHostCompatibilityReport {
-  return inspectTuiHostCompatibility()
+  return inspectTuiHostInstallation().diagnostics
+}
+
+/** Resolve the verified official preset root alongside the bounded Host diagnostics. */
+export function assertTuiHostInstallation(): TuiHostInstallation {
+  return inspectTuiHostInstallation()
 }

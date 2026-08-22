@@ -13,6 +13,7 @@ import {
   hostRegisterCommand,
   resolveSessionForkAnchor,
 } from '../src/host.ts'
+import { commandSuggestionState } from '../src/suggestion.ts'
 
 describe('optional Host compatibility', () => {
   it('degrades legacy LLM runtimes to configured routes without login actions', async () => {
@@ -47,17 +48,37 @@ describe('optional Host compatibility', () => {
     })).resolves.toEqual({ entries: [], truncated: false })
   })
 
-  it('treats command completion metadata as an optional additive Host capability', () => {
-    const completion = { descriptions: { en: 'Configure' } }
-    const register = vi.fn(() => () => {})
-    const list = vi.fn(() => [{ name: 'config', description: 'Configure', completion }])
+  it('retains command completion metadata when a legacy Host omits it from discovery', () => {
+    const completion = { descriptions: { en: 'Configure', zh: '配置 TUI' } }
+    const hostDispose = vi.fn()
+    const register = vi.fn(() => hostDispose)
+    const list = vi.fn(() => [{ name: 'config', description: 'Configure' }])
     const commands = { register, list } as unknown as Parameters<typeof hostRegisterCommand>[0]
     const definition = {
       name: 'config', description: 'Configure', completion, handler: () => ({ kind: 'success' as const }),
     }
-    hostRegisterCommand(commands, definition)
+    const dispose = hostRegisterCommand(commands, definition)
     expect(register).toHaveBeenCalledWith(definition)
-    expect(hostCommandDescriptors(commands, {} as never)[0]?.completion).toBe(completion)
+    const descriptors = hostCommandDescriptors(commands, {} as never)
+    expect(descriptors[0]?.completion).toBe(completion)
+    expect(commandSuggestionState('/', 1, descriptors, 'zh')?.items[0]?.description).toBe('配置 TUI')
+    dispose()
+    expect(hostDispose).toHaveBeenCalledOnce()
+    expect(hostCommandDescriptors(commands, {} as never)[0]?.completion).toBeUndefined()
+  })
+
+  it('keeps completion-capable Host metadata authoritative', () => {
+    const registered = { descriptions: { en: 'Registered' } }
+    const discovered = { descriptions: { en: 'Discovered' } }
+    const commands = {
+      register: vi.fn(() => () => {}),
+      list: vi.fn(() => [{ name: 'config', description: 'Configure', completion: discovered }]),
+    } as unknown as Parameters<typeof hostRegisterCommand>[0]
+    hostRegisterCommand(commands, {
+      name: 'config', description: 'Configure', completion: registered,
+      handler: () => ({ kind: 'success' as const }),
+    })
+    expect(hostCommandDescriptors(commands, {} as never)[0]?.completion).toBe(discovered)
   })
 
   it('returns no Session preview when the older Host has no preview reader', async () => {

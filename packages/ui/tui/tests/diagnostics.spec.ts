@@ -15,7 +15,7 @@ const host: TuiHostDiagnosticSnapshot = Object.freeze({
   compatibility: 'compatible',
   dshVersion: '0.1.0-rc.8',
   supportedDshVersion: '0.1.0-rc.8',
-  tuiVersion: '0.1.1-rc.8',
+  tuiVersion: '0.1.2-rc.8',
   profile: 'tui',
   nodeVersion: '24.7.0',
   platform: 'darwin',
@@ -25,7 +25,8 @@ const host: TuiHostDiagnosticSnapshot = Object.freeze({
     version: '0.1.0-rc.8',
     manifestPath: '/opt/dsh/node_modules/@deepseek-ai/dsh-app-boot/package.json',
   })]),
-  recoveryCommand: 'dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8',
+  agentPresetIds: Object.freeze(['standard', 'code', 'minimal', 'cordis']),
+  recoveryCommand: 'dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.2-rc.8',
 })
 
 function input(overrides: Partial<TuiDiagnosticInput> = {}): TuiDiagnosticInput {

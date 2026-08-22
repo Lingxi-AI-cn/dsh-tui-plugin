@@ -4,7 +4,7 @@ This repository is the sanitized public source and release surface for the indep
 
 ## Current release contract
 
-- The current TUI release is `0.1.1-rc.8` and supports exactly official `@deepseek-ai/dsh@0.1.0-rc.8`; previously published versions, including `0.1.0-rc.9`, remain immutable.
+- The current published TUI release is `0.1.1-rc.8`; this source tree prepares the unreleased `0.1.2-rc.8` candidate. Both support exactly official `@deepseek-ai/dsh@0.1.0-rc.8`; previously published versions, including `0.1.0-rc.9`, remain immutable.
 - `@lingxi-ai-cn/dsh-tui` is the only user-facing install package. The six internal packages `dsh-tui-runtime`, `dsh-llm-openai-codex`, `dsh-session-export`, `dsh-plugin-hub`, `dsh-plugin-hub-local`, and `dsh-profile-plugin-manager` use the same npm scope and exact release version.
 - The public default branch is `main`. Public release tags and npm versions are immutable; never move an existing `v*` tag or attempt to republish an existing npm version.
 
@@ -17,7 +17,7 @@ This repository is the sanitized public source and release surface for the indep
 
 ## Compatibility and versioning
 
-- Keep the root version and all seven TUI package versions aligned at `0.1.1-rc.8`. The core `0.1.1` identifies TUI iteration while the final `rc.8` suffix must equal the supported official DSH prerelease suffix. Keep official DSH peers, compatibility guards, clean-room fixtures, pack/release scripts, source-manifest metadata, and the dependency catalog aligned separately at the supported DSH version `0.1.0-rc.8`.
+- Keep the root version and all seven TUI package versions aligned at the candidate `0.1.2-rc.8`. The core `0.1.2` identifies TUI iteration while the final `rc.8` suffix must equal the supported official DSH prerelease suffix. Keep official DSH peers, compatibility guards, clean-room fixtures, pack/release scripts, source-manifest metadata, and the dependency catalog aligned separately at the supported DSH version `0.1.0-rc.8`.
 - The canonical post-install `tui` profile bundle list is exactly `@deepseek-ai/dsh-base` followed by `@lingxi-ai-cn/dsh-tui`. Treat legacy `@deepseek-ai/dsh-tui-app` entries as an explicit backup-and-recreate migration; never compose both bundles or install the reported upstream peers into the profile.
 - Support for a new DSH release is explicit and evidence-based. Do not widen peer ranges or dist-tags merely because a build compiles; require an official-package clean-room install, composition, PTY startup/exit, and terminal restoration on the exact target.
 - The TUI bundle includes `@lingxi-ai-cn/dsh-llm-openai-codex` and exposes provider-owned ChatGPT OAuth through `/models`. Keep provider migration explicit and reversible; package installation must not sign a user in, rewrite settings, or modify provider-owned credentials.

@@ -26,6 +26,7 @@ interface PackageManifest {
   readonly exports?: Readonly<Record<string, unknown>>
   readonly dependencies?: Readonly<Record<string, string>>
   readonly peerDependencies?: Readonly<Record<string, string>>
+  readonly peerDependenciesMeta?: Readonly<Record<string, { readonly optional?: boolean }>>
   readonly repository?: { readonly url?: string }
 }
 
@@ -51,7 +52,7 @@ describe('post-install TUI package surface', () => {
   const top = manifests[0]!
 
   it('publishes one same-version Lingxi package family without install hooks or source exports', () => {
-    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.1-rc.8']))
+    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.2-rc.8']))
     for (const entry of manifests) {
       expect(entry.name).toMatch(/^@lingxi-ai-cn\/dsh-/u)
       expect(entry.repository?.url).toBe(REPOSITORY)
@@ -76,6 +77,18 @@ describe('post-install TUI package surface', () => {
     }
   })
 
+  it('marks installation-supplied peers optional only for package-manager resolution', () => {
+    for (const entry of manifests) {
+      const installationPeers = Object.keys(entry.peerDependencies ?? {})
+        .filter(name => !name.startsWith('@lingxi-ai-cn/'))
+        .sort()
+      expect(Object.keys(entry.peerDependenciesMeta ?? {}).sort()).toEqual(installationPeers)
+      for (const name of installationPeers) {
+        expect(entry.peerDependenciesMeta?.[name]).toEqual({ optional: true })
+      }
+    }
+  })
+
   it('centralizes official imports in the reviewed Host adapters', () => {
     for (const directory of ['packages/bundle/tui-app', 'packages/ui/tui']) {
       const violations = sourceFiles(directory).filter(path => !path.endsWith('/host.ts')
@@ -90,14 +103,28 @@ describe('post-install TUI package surface', () => {
   it('ships a patch whose inserted packages are in the public dependency or Host-peer closure', () => {
     const patches = loadOverlayPatches('post-install package surface', new URL('../cordis.patch.yml', import.meta.url).pathname)
     const overrides = new Set(patches.filter(entry => entry.id !== undefined).map(entry => entry.id))
-    expect(overrides).toEqual(new Set(['system-prompt', 'hmr', 'tools']))
+    expect(overrides).toEqual(new Set([
+      'system-prompt', 'hmr', 'tools',
+      'tool-bash', 'tool-pwsh', 'tool-jobs', 'tool-fs', 'tool-fs-search',
+      'tool-str-replace-editor', 'skill-filesystem', 'tool-skill', 'tool-goal',
+      'plan-mode', 'compaction-basic', 'command-compact', 'tool-result-pruner',
+      'tool-subagent-control', 'tool-subagent-list-agents', 'tool-subagent',
+      'tool-subagent-fork', 'workflow-worker-thread', 'tool-workflow', 'tool-ralph',
+      'agent-instructions', 'tool-todo', 'tool-web',
+    ]))
     const closure = new Set([top.name, ...Object.keys(top.dependencies ?? {}), ...Object.keys(top.peerDependencies ?? {})])
     const rows = patches.flatMap(entry => entry.insert ?? [])
     const inserted = rows.map(entry => entry.name).filter((name): name is string => name !== undefined)
     expect(inserted.filter(name => name.startsWith('@deepseek-ai/') || name.startsWith('@lingxi-ai-cn/'))
       .filter(name => !closure.has(name) && !name.startsWith(`${top.name}/`))).toEqual([])
     expect(rows.some(entry => entry.id === 'code-runtime'
-      || entry.name?.includes('code-runtime'))).toBe(false)
+      && entry.name === '@deepseek-ai/dsh-code-runtime-worker-thread')).toBe(true)
+    expect(rows.find(entry => entry.id === 'cordis-host-runner')?.name)
+      .toBe('@deepseek-ai/dsh-cordis-host-runner')
+    expect(rows.find(entry => entry.id === 'agent-presets')).toMatchObject({
+      name: '@deepseek-ai/dsh-agent-presets', inject: ['tuiStartup'],
+    })
+    expect(rows.some(entry => entry.id === 'tool-ask-user')).toBe(false)
     expect(rows.find(entry => entry.id === 'plugin-hub-local')?.config)
       .toMatchObject({ profile: 'tui', profileMutations: false })
   })

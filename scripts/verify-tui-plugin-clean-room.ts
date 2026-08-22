@@ -12,7 +12,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.1-rc.8'
+const TUI_VERSION = '0.1.2-rc.8'
 const DSH_VERSION = '0.1.0-rc.8'
 const TOP_PACKAGE = '@lingxi-ai-cn/dsh-tui'
 const PACKAGE_DIRS = Object.freeze([
@@ -76,7 +76,10 @@ function run(file: string, args: readonly string[], cwd: string, env: NodeJS.Pro
   }
 }
 
-function runAsync(file: string, args: readonly string[], cwd: string, env: NodeJS.ProcessEnv, timeout = 180_000): Promise<string> {
+function runAsync(file: string, args: readonly string[], cwd: string, env: NodeJS.ProcessEnv, timeout = 180_000): Promise<{
+  readonly stdout: string
+  readonly stderr: string
+}> {
   return new Promise((resolve, reject) => {
     execFile(file, [...args], {
       cwd,
@@ -86,7 +89,7 @@ function runAsync(file: string, args: readonly string[], cwd: string, env: NodeJ
       maxBuffer: 32 * 1024 * 1024,
     }, (error, stdout, stderr) => {
       if (error === null) {
-        resolve(stdout)
+        resolve({ stdout, stderr })
         return
       }
       const output = [stdout, stderr].filter(value => value !== '').join('\n')
@@ -330,7 +333,17 @@ try {
   if (dshHome === undefined) fail('clean-room DSH_HOME is missing')
   const before = treeDigest(official)
   const dsh = join(official, 'node_modules/.bin/dsh')
-  await runAsync(dsh, ['plugin', '--profile', 'tui', 'add', '--save-exact', `${TOP_PACKAGE}@${TUI_VERSION}`], official, environment, 300_000)
+  const pluginInstall = await runAsync(
+    dsh,
+    ['plugin', '--profile', 'tui', 'add', '--save-exact', `${TOP_PACKAGE}@${TUI_VERSION}`],
+    official,
+    environment,
+    300_000,
+  )
+  const pluginInstallOutput = `${pluginInstall.stdout}\n${pluginInstall.stderr}`
+  if (/Issues with peer dependencies found|missing peer/iu.test(pluginInstallOutput)) {
+    fail(`top-level TUI install reported missing Host peers:\n${pluginInstallOutput.slice(-12_000)}`)
+  }
   process.stdout.write('verify-tui-plugin-clean-room: installed the top-level TUI through dsh plugin\n')
 
   const profile = join(dshHome, 'profiles/tui')

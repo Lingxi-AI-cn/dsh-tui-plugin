@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.1-rc.8'
+const TUI_VERSION = '0.1.2-rc.8'
 const DSH_VERSION = '0.1.0-rc.8'
 const PACKAGE_DIRS = Object.freeze([
   'packages/boot/profile-plugin-manager',
@@ -29,6 +29,7 @@ interface PackedManifest {
   readonly exports?: Readonly<Record<string, unknown>>
   readonly dependencies?: Readonly<Record<string, string>>
   readonly peerDependencies?: Readonly<Record<string, string>>
+  readonly peerDependenciesMeta?: Readonly<Record<string, { readonly optional?: boolean }>>
 }
 
 function fail(message: string): never {
@@ -51,6 +52,16 @@ function assertExactSpecs(manifest: PackedManifest): void {
     if (name.startsWith('@deepseek-ai/') && !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(spec)) {
       fail(`${manifest.name} must pin Host peer ${name} to one exact version, got ${spec}`)
     }
+  }
+  const installationPeers = Object.keys(manifest.peerDependencies ?? {})
+    .filter(name => !name.startsWith('@lingxi-ai-cn/'))
+    .sort()
+  const optionalPeers = Object.entries(manifest.peerDependenciesMeta ?? {})
+    .filter(([, meta]) => meta.optional === true)
+    .map(([name]) => name)
+    .sort()
+  if (JSON.stringify(optionalPeers) !== JSON.stringify(installationPeers)) {
+    fail(`${manifest.name} must mark exactly its installation-supplied peers optional for package-manager resolution`)
   }
 }
 

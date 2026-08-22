@@ -13,6 +13,7 @@ import {
   createUserMessage,
   errorChain,
   hostAuthentication,
+  hostAgentPresets,
   hostCommandDescriptors,
   hostCompletePaths,
   hostLogin,
@@ -29,6 +30,7 @@ import {
   UserQuestionError,
   z,
   type Agent,
+  type AgentPreset,
   type AgentCreateSource,
   type AgentHandle,
   type AskUserQuestionItem,
@@ -73,11 +75,12 @@ import {
 import { openExternalUrl } from './open-url.ts'
 import {
   sortTuiResumeCandidates, summarizeTuiResumeCandidate,
-  type TuiResumeCandidate, type TuiResumeDialogSnapshot,
+  type TuiResumeCandidate, type TuiResumeDialogSnapshot, type TuiResumePresetSummary,
 } from './resume.ts'
 import {
   type TuiFreshSessionCommand, type TuiFreshSessionDialogSnapshot,
 } from './session-lifecycle.ts'
+import { tuiAgentModeName, tuiAgentModeOptions } from './mode.ts'
 import {
   resolveTuiSessionExportDirectory, type TuiSessionExportDialogSnapshot,
   type TuiSessionExportFormat,
@@ -131,6 +134,7 @@ export const name = 'tui'
 
 export const inject = [
   'agentDefaultModel', 'agents', 'sessions', 'sessionPersistence',
+  'agentPresets',
   'sessionQuery', 'commands', 'userQuestions', 'approval', 'llm', 'tools',
   'fs', 'sessionLogExporter', 'jobs', 'subagents',
   'attachments', 'subprocess',
@@ -182,12 +186,18 @@ type ResumePreviewResolution =
   | { lines: readonly SessionPreviewLine[]; truncated: boolean; failure?: undefined }
   | { lines: readonly []; truncated: false; failure: unknown }
 
+interface ResumePresetResolution {
+  readonly summary?: TuiResumePresetSummary
+  readonly disabledReason?: string
+}
+
 interface RuntimeDisposers {
   questionProvider?: () => void
   sessionEvents?: () => void
   agentStatus?: () => void
   approval?: () => void
   modelsCommand?: () => void
+  modeCommand?: () => void
   configCommand?: () => void
   helpCommand?: () => void
   doctorCommand?: () => void
@@ -215,6 +225,7 @@ interface PreparedTuiAgent {
   handle: AgentHandle
   selection: ModelSelectionRef
   selectedModel: ModelSelection
+  preset: AgentPreset
 }
 
 function withAgentCreateSource<Options extends object>(
@@ -257,13 +268,14 @@ interface LoadedContextSkillService {
 }
 
 type PrepareTuiAgentRequest =
-  | { kind: 'startup' }
+  | { kind: 'startup'; preset?: string }
   | { kind: 'resume'; sessionId: SessionId }
   | {
     kind: 'fresh'
     source: AgentCreateSource
     cwd: string
     selection: ModelSelection
+    preset: string
   }
   | {
     kind: 'rewind'
@@ -271,6 +283,7 @@ type PrepareTuiAgentRequest =
     cwd: string
     selection: ModelSelection
     seed: readonly SessionEvent[]
+    preset: string
   }
 
 /** One activation's owned Agent, interactions, Ink root, signals, and terminal transaction. */
@@ -279,6 +292,7 @@ class TuiController {
   private readonly interactions = new InteractionStore()
   private readonly externalNotice = new ValueStore('')
   private readonly modelSelection = new ValueStore<ModelSelection | undefined>(undefined)
+  private readonly agentMode = new ValueStore<AgentPreset | undefined>(undefined)
   private readonly helpOpen = new ValueStore(false)
   private readonly diagnostics = new ValueStore<TuiDiagnosticSnapshot | undefined>(undefined)
   private readonly loadedContext = new ValueStore<TuiLoadedContextSnapshot | undefined>(undefined)
@@ -377,6 +391,7 @@ class TuiController {
       this.status = new AgentStatusStore(handle.agent.status)
       this.selection = prepared.selection
       this.modelSelection.set(prepared.selectedModel)
+      this.agentMode.set(prepared.preset)
       this.scheduleStartupGuidanceRefresh(prepared.selectedModel)
       this.refreshAgentDerivedState(handle.agent)
       this.installRuntimeBindings()
@@ -433,6 +448,7 @@ class TuiController {
       interactions: this.interactions,
       externalNotice: this.externalNotice,
       modelSelection: this.modelSelection,
+      agentMode: this.agentMode,
       helpOpen: this.helpOpen,
       diagnostics: this.diagnostics,
       loadedContext: this.loadedContext,
@@ -710,6 +726,9 @@ class TuiController {
     const agents = this.ctx.get('agents')
     const defaultModel = this.ctx.get('agentDefaultModel')
     if (agents === undefined || defaultModel === undefined) throw new Error('TUI core Agent services were disposed during startup')
+    const presets = hostAgentPresets(this.ctx)
+    const requestedPreset = request.kind === 'resume' ? undefined : request.preset
+    const resolvedPreset = request.kind === 'resume' ? undefined : await presets.resolve(requestedPreset)
     const configuredSelection = request.kind === 'fresh' || request.kind === 'rewind'
       ? request.selection
       : defaultModel.currentSelection()
@@ -720,10 +739,14 @@ class TuiController {
       ...resolvedDefault.reasoningEffort === undefined ? {} : { reasoningEffort: resolvedDefault.reasoningEffort },
     }
     const selected: ModelSelectionRef = { current: defaultSelection, assembled: undefined }
-    const setup = (agentCtx: Context): void => {
+    let mountedPreset: AgentPreset | undefined
+    const setup = async (agentCtx: Context): Promise<void> => {
       const session = agentCtx.agent?.session
       if (session === undefined) throw new Error('TUI Agent setup cannot resolve its unpublished Session')
-      if (request.kind === 'resume') this.assertResumeCompatible(session.header, session.events)
+      const presetId = request.kind === 'resume'
+        ? this.assertResumeCompatible(session.header, session.events)
+        : resolvedPreset?.id
+      if (presetId === undefined) throw new Error('TUI Agent setup has no resolved Agent preset')
       const logged = session.requestHeader()?.config
       if (logged !== undefined) {
         selected.current = {
@@ -736,16 +759,27 @@ class TuiController {
         if (route !== undefined) selected.current = route
       }
       installModelSelection(agentCtx, selected)
+      mountedPreset = await presets.mount(agentCtx, presetId)
     }
-    const handle = request.kind !== 'resume'
-      ? await agents.create(withAgentCreateSource({
+    let handle: AgentHandle
+    if (request.kind === 'resume') {
+      handle = await agents.resume({
+        resumeSessionId: request.sessionId,
+        agentOptions: { provider: defaultSelection.provider, model: defaultSelection.model },
+        setup,
+        ...signal === undefined ? {} : { signal },
+      })
+    } else {
+      if (resolvedPreset === undefined) throw new Error('TUI Agent creation has no resolved Agent preset')
+      handle = await agents.create(withAgentCreateSource({
         sessionId: SessionId(`session-${randomUUID()}`),
         meta: request.kind === 'startup'
-          ? { cwd: process.cwd() }
+          ? { cwd: process.cwd(), agentPreset: resolvedPreset.id }
           : request.kind === 'fresh'
-            ? { cwd: request.cwd }
+            ? { cwd: request.cwd, agentPreset: resolvedPreset.id }
             : {
               cwd: request.cwd,
+              agentPreset: resolvedPreset.id,
               parentSession: request.parentSession,
               seedLength: request.seed.length,
             },
@@ -754,19 +788,18 @@ class TuiController {
         setup,
         ...signal === undefined ? {} : { signal },
       }, request.kind === 'fresh' ? request.source : request.kind === 'rewind' ? 'rewind' : 'startup'))
-      : await agents.resume({
-        resumeSessionId: request.sessionId,
-        agentOptions: { provider: defaultSelection.provider, model: defaultSelection.model },
-        setup,
-        ...signal === undefined ? {} : { signal },
-      })
-    return { handle, selection: selected, selectedModel: selected.current ?? defaultSelection }
+    }
+    if (mountedPreset === undefined) {
+      await handle.dispose().catch(() => undefined)
+      throw new Error('TUI Agent was created without a mounted Agent preset')
+    }
+    return { handle, selection: selected, selectedModel: selected.current ?? defaultSelection, preset: mountedPreset }
   }
 
   private assertResumeCompatible(
     header: Agent['session']['header'],
     events: readonly SessionEvent[],
-  ): void {
+  ): string {
     if (header.version !== SESSION_FORMAT_VERSION) {
       throw new Error(`cannot resume Session ${JSON.stringify(header.id)}: incompatible format ${header.version}`)
     }
@@ -777,16 +810,17 @@ class TuiController {
       throw new Error(`cannot resume Session ${JSON.stringify(header.id)} without a recorded workspace`)
     }
     const preset = resolveSessionPreset({ header, events })
-    if (preset !== undefined) {
+    if (preset === undefined) {
       throw new Error(
-        `cannot resume preset-bearing Session ${JSON.stringify(header.id)} in the process-wide TUI composition `
-        + `(recorded preset: ${JSON.stringify(preset)})`,
+        `cannot resume legacy rosterless Session ${JSON.stringify(header.id)} in the preset-aware TUI; `
+        + 'use the previous compatible TUI to export it',
       )
     }
     const route = resumeRoute(events)
     if (route !== undefined && !this.ctx.llm.listProviders().some(provider => provider.id === route.provider)) {
       throw new Error(`session route is unavailable (${route.provider}/${route.model})`)
     }
+    return preset
   }
 
   private refreshAgentDerivedState(agent: Agent): void {
@@ -960,6 +994,14 @@ class TuiController {
       completion: { descriptions: tuiCommandDescriptions('command.models') },
       handler: invocation => this.executeQuestionCommand(
         'models.cancelled', () => this.executeModels(invocation),
+      ),
+    })
+    this.disposers.modeCommand = hostRegisterCommand(this.ctx.commands, {
+      name: 'mode',
+      description: 'Select the Agent execution mode',
+      completion: { descriptions: tuiCommandDescriptions('command.mode') },
+      handler: invocation => this.executeQuestionCommand(
+        'mode.cancelled', () => this.executeMode(invocation),
       ),
     })
     this.disposers.configCommand = hostRegisterCommand(this.ctx.commands, {
@@ -1812,6 +1854,71 @@ class TuiController {
     }
   }
 
+  private async executeMode(invocation: CommandInvocation): Promise<CommandResult> {
+    if (invocation.rawInput.trim() !== '') return { kind: 'error', text: tuiMessage(this.locale, 'mode.usage') }
+    if (invocation.agent !== this.handle?.agent || this.activeView !== undefined) {
+      return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
+    }
+    if (invocation.agent.status !== 'idle') {
+      return { kind: 'error', text: tuiMessage(this.locale, 'fresh.error.agentBusy', { status: invocation.agent.status }) }
+    }
+    if (this.resumeDialog.getSnapshot() !== undefined || this.freshSessionDialog.getSnapshot() !== undefined
+      || this.rewindDialog.getSnapshot() !== undefined || this.sessionExportDialog.getSnapshot() !== undefined
+      || this.pluginHubDialog.getSnapshot() !== undefined) {
+      return { kind: 'error', text: tuiMessage(this.locale, 'plugin.command.dialog') }
+    }
+    const presets = hostAgentPresets(this.ctx)
+    const currentId = resolveSessionPreset(invocation.agent.session)
+      ?? presets.composedPreset(invocation.agent.ctx)
+    if (currentId === undefined) throw new Error('The active TUI Agent has no composed preset')
+    const roster = tuiAgentModeOptions(await presets.list(), currentId, this.locale)
+    const options = Object.freeze([
+      ...roster.filter(option => option.preset.id === currentId),
+      ...roster.filter(option => option.preset.id !== currentId),
+    ])
+    if (options.length === 0) return { kind: 'error', text: tuiMessage(this.locale, 'mode.none') }
+    this.helpOpen.set(false)
+    this.externalNotice.set('')
+    const answer = await this.askOne(invocation.agent, invocation.signal, {
+      id: 'agent-mode-selection',
+      header: tuiMessage(this.locale, 'mode.header'),
+      question: tuiMessage(this.locale, 'mode.question'),
+      options: options.map(option => ({ label: option.label, description: option.description })),
+    })
+    const selected = options.find(option => option.label === answer.selected[0])
+    if (selected === undefined) throw new Error(tuiMessage(this.locale, 'mode.cancelled'))
+    if (selected.preset.broken !== undefined) {
+      return { kind: 'error', text: tuiMessage(this.locale, 'mode.unavailable', {
+        mode: selected.name, reason: selected.preset.broken,
+      }) }
+    }
+    if (selected.preset.id === currentId) {
+      return { kind: 'success', text: tuiMessage(this.locale, 'mode.same', { mode: selected.name }) }
+    }
+    if (invocation.agent.session.events.some(event => event.type === 'turn/start')) {
+      const cwd = invocation.agent.session.header.cwd
+      if (cwd === undefined) return { kind: 'error', text: tuiMessage(this.locale, 'session.error.workspace') }
+      this.freshSessionDialog.set({
+        generation: ++this.freshSessionGeneration,
+        command: 'mode',
+        phase: 'confirming',
+        currentSessionId: invocation.agent.session.id,
+        workspaceLabel: cwd,
+        targetPreset: { id: selected.preset.id, name: selected.name },
+      })
+      return { kind: 'success', text: tuiMessage(this.locale, 'mode.started.opened', { mode: selected.name }) }
+    }
+    try {
+      const mounted = await presets.recompose(invocation.agent.ctx, selected.preset.id)
+      // Commit the durable identity only after the new standing composition is live.
+      invocation.agent.session.append('agent-preset/selected', { agentPreset: mounted.id })
+      this.agentMode.set(mounted)
+      return { kind: 'success', text: tuiMessage(this.locale, 'mode.switched', { mode: selected.name }) }
+    } catch (error: unknown) {
+      return { kind: 'error', text: tuiMessage(this.locale, 'mode.switch.failed', { error: errorChain(error) }) }
+    }
+  }
+
   private async executeConfig(invocation: CommandInvocation): Promise<CommandResult> {
     if (invocation.rawInput.trim() !== '') return { kind: 'error', text: tuiMessage(this.locale, 'config.usage') }
     if (invocation.agent !== this.handle?.agent) return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
@@ -2192,12 +2299,15 @@ class TuiController {
     const initialStatus = this.agentStatus(oldAgent)
     if (initialStatus !== 'idle') throw new Error(`current Agent is ${initialStatus}`)
     const seed = oldAgent.session.events.slice(0, seedLength)
+    const preset = resolveSessionPreset(oldAgent.session)
+    if (preset === undefined) throw new Error('the source Session has no Agent preset to inherit')
     const prepared = await this.prepareAgent({
       kind: 'rewind',
       parentSession: oldAgent.session.id,
       cwd,
       selection: selectedModel,
       seed,
+      preset,
     }, signal)
     let retiredHandle: AgentHandle
     try {
@@ -2399,16 +2509,18 @@ class TuiController {
     const records = await this.ctx.sessionQuery.listSessions(signal)
     signal.throwIfAborted()
     if (!this.ownsAgent(agent) || this.resumeGeneration !== generation) return
-    const [titles, activity, previews] = await Promise.all([
+    const [titles, activity, previews, presetResolutions] = await Promise.all([
       this.resolveResumeTitles(records, signal),
       this.resolveResumeActivity(records, signal),
       this.resolveResumePreviews(records, signal),
+      this.resolveResumePresets(records, signal),
     ])
     signal.throwIfAborted()
     if (!this.ownsAgent(agent) || this.resumeGeneration !== generation) return
     const candidates = records.map((record, index): TuiResumeCandidate => {
       const resolution = titles[index] as { title?: string; failure?: unknown }
       const previewResolution = previews[index]
+      const presetResolution = presetResolutions[index]
       const candidate = summarizeTuiResumeCandidate(
         record,
         resolution.title,
@@ -2418,6 +2530,8 @@ class TuiController {
         previewResolution?.lines,
         previewResolution?.truncated,
         previewResolution?.failure === undefined ? undefined : errorChain(previewResolution.failure),
+        presetResolution?.summary,
+        presetResolution?.disabledReason,
       )
       if (resolution.failure === undefined) return candidate
       return {
@@ -2434,6 +2548,75 @@ class TuiController {
       currentWorkspaceLabel: agent.session.header.cwd ?? tuiMessage(this.locale, 'resume.workspace.none'),
       candidates: sortTuiResumeCandidates(candidates),
     })
+  }
+
+  private async resolveResumePresets(
+    records: readonly SessionRecord[],
+    signal: AbortSignal,
+  ): Promise<ResumePresetResolution[]> {
+    const presets = hostAgentPresets(this.ctx)
+    let roster: readonly AgentPreset[]
+    try {
+      roster = await presets.list()
+    } catch (error: unknown) {
+      const disabledReason = tuiMessage(this.locale, 'resume.preset.unreadable', { error: errorChain(error) })
+      return records.map(() => ({ disabledReason }))
+    }
+    const byId = new Map(roster.map(preset => [preset.id, preset]))
+    const resolutions = new Array<ResumePresetResolution>(records.length)
+    let cursor = 0
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        signal.throwIfAborted()
+        const index = cursor
+        if (index >= records.length) return
+        cursor += 1
+        const record = records[index] as SessionRecord
+        try {
+          const live = this.ctx.sessions.get(record.header.id)
+          const session = live === undefined
+            ? await this.ctx.sessionQuery.readSession(record.header.id)
+            : { session: live.header, events: live.events }
+          signal.throwIfAborted()
+          const id = resolveSessionPreset({ header: session.session, events: session.events })
+          if (id === undefined) {
+            resolutions[index] = { disabledReason: tuiMessage(this.locale, 'resume.preset.legacy') }
+            continue
+          }
+          const preset = byId.get(id)
+          if (preset === undefined) {
+            resolutions[index] = {
+              summary: { id, label: id },
+              disabledReason: tuiMessage(this.locale, 'resume.preset.missing', { id }),
+            }
+            continue
+          }
+          const summary: TuiResumePresetSummary = {
+            id,
+            label: tuiAgentModeName(preset, this.locale),
+            trust: preset.trust,
+            ...preset.broken === undefined ? {} : {
+              disabledReason: tuiMessage(this.locale, 'resume.preset.broken', {
+                id, reason: preset.broken,
+              }),
+            },
+          }
+          resolutions[index] = {
+            summary,
+            ...summary.disabledReason === undefined ? {} : { disabledReason: summary.disabledReason },
+          }
+        } catch (error: unknown) {
+          if (signal.aborted) signal.throwIfAborted()
+          resolutions[index] = {
+            disabledReason: tuiMessage(this.locale, 'resume.preset.unreadable', { error: errorChain(error) }),
+          }
+        }
+      }
+    }
+    const concurrency = Math.min(this.config.resumeScanConcurrency ?? 4, records.length)
+    await Promise.all(Array.from({ length: concurrency }, () => worker()))
+    signal.throwIfAborted()
+    return resolutions
   }
 
   private async resolveResumePreviews(
@@ -2704,8 +2887,11 @@ class TuiController {
       phase: 'creating',
       currentSessionId: dialog.currentSessionId,
       workspaceLabel: dialog.workspaceLabel,
+      ...dialog.targetPreset === undefined ? {} : { targetPreset: dialog.targetPreset },
     })
-    const completion = this.startFreshSession(agent, cwd, selectedModel, controller.signal).catch((error: unknown) => {
+    const completion = this.startFreshSession(
+      agent, cwd, selectedModel, controller.signal, dialog.targetPreset,
+    ).catch((error: unknown) => {
       if (controller.signal.aborted || this.isClosing()) return
       const latest = this.freshSessionDialog.getSnapshot()
       if (latest?.generation !== dialog.generation) return
@@ -2726,12 +2912,15 @@ class TuiController {
     cwd: string,
     selectedModel: ModelSelection,
     signal: AbortSignal,
+    targetPreset?: { readonly id: string; readonly name: string },
   ): Promise<void> {
     if (!this.ownsAgent(oldAgent)) throw new Error('the active TUI Session changed')
     const initialStatus = this.agentStatus(oldAgent)
     if (initialStatus !== 'idle') throw new Error(`current Agent is ${initialStatus}`)
+    const preset = targetPreset?.id ?? resolveSessionPreset(oldAgent.session)
+    if (preset === undefined) throw new Error('the current Session has no Agent preset to inherit')
     const prepared = await this.prepareAgent({
-      kind: 'fresh', source: 'clear', cwd, selection: selectedModel,
+      kind: 'fresh', source: 'clear', cwd, selection: selectedModel, preset,
     }, signal)
     let retiredHandle: AgentHandle
     try {
@@ -2757,9 +2946,15 @@ class TuiController {
     } catch (error: unknown) {
       retirementError ??= error
     }
-    this.externalNotice.set(retirementError === undefined
-      ? tuiMessage(this.locale, 'fresh.complete')
-      : tuiMessage(this.locale, 'fresh.complete.retirementFailed', { error: errorChain(retirementError) }))
+    this.externalNotice.set(targetPreset === undefined
+      ? retirementError === undefined
+        ? tuiMessage(this.locale, 'fresh.complete')
+        : tuiMessage(this.locale, 'fresh.complete.retirementFailed', { error: errorChain(retirementError) })
+      : retirementError === undefined
+        ? tuiMessage(this.locale, 'fresh.mode.complete', { mode: targetPreset.name })
+        : tuiMessage(this.locale, 'fresh.mode.complete.retirementFailed', {
+          mode: targetPreset.name, error: errorChain(retirementError),
+        }))
   }
 
   private commitAgentSwitch(oldAgent: Agent, prepared: PreparedTuiAgent): AgentHandle {
@@ -2768,6 +2963,7 @@ class TuiController {
     const oldStatus = this.status
     const oldSelection = this.selection
     const oldModel = this.modelSelection.getSnapshot()
+    const oldMode = this.agentMode.getSnapshot()
     const oldLoadedContext = this.loadedContext.getSnapshot()
     const oldPermissions = this.permissions.getSnapshot()
     const oldContext = this.contextPressure.getSnapshot()
@@ -2790,6 +2986,7 @@ class TuiController {
     this.selection = prepared.selection
     this.activeView = undefined
     this.modelSelection.set(prepared.selectedModel)
+    this.agentMode.set(prepared.preset)
     this.helpOpen.set(false)
     this.loadedContext.set(undefined)
     this.refreshAgentDerivedState(prepared.handle.agent)
@@ -2806,6 +3003,7 @@ class TuiController {
       this.selection = oldSelection
       this.activeView = oldActiveView
       this.modelSelection.set(oldModel)
+      this.agentMode.set(oldMode)
       this.loadedContext.set(oldLoadedContext)
       this.permissions.set(oldPermissions)
       this.contextPressure.set(oldContext)
@@ -2845,6 +3043,10 @@ class TuiController {
     if (this.handle?.agent !== agent) throw new Error('TUI Session changed before footer activation')
     if (itemId === 'model') {
       await this.submit(agent, '/models')
+      return
+    }
+    if (itemId === 'mode') {
+      await this.submit(agent, '/mode')
       return
     }
     if (itemId !== 'permission') return
@@ -3293,6 +3495,7 @@ class TuiController {
     this.disposers.pluginHubProgress?.()
     this.disposers.projectionChanged?.()
     this.disposers.modelsCommand?.()
+    this.disposers.modeCommand?.()
     this.disposers.llmAdaptersUpdated?.()
     this.disposeWorkRootBindings()
     this.disposers.agentDisposed?.()
@@ -3440,6 +3643,8 @@ export {
 export type {
   TuiFooterItemDescriptor, TuiFooterItemId, TuiFooterPointerTarget, TuiFooterSources, TuiFooterTranscriptPosition,
 } from './footer.ts'
+export { tuiAgentModeName, tuiAgentModeOptions } from './mode.ts'
+export type { TuiAgentModeOption } from './mode.ts'
 export { terminalMarkdownText } from './markdown.ts'
 export { terminalSafe } from './sanitize.ts'
 export {
@@ -3447,7 +3652,7 @@ export {
   sortTuiResumeCandidates, summarizeTuiResumeCandidate,
 } from './resume.ts'
 export type {
-  TuiResumeCandidate, TuiResumeDialogSnapshot, TuiResumeScope,
+  TuiResumeCandidate, TuiResumeDialogSnapshot, TuiResumePresetSummary, TuiResumeScope,
 } from './resume.ts'
 export { resolveTuiSessionExportDirectory } from './session-export.ts'
 export type { TuiSessionExportDialogSnapshot, TuiSessionExportFormat, TuiSessionExportPhase } from './session-export.ts'

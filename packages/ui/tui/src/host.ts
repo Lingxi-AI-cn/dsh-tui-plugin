@@ -11,6 +11,8 @@ import type {
 } from '@deepseek-ai/dsh-commands'
 import type { SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
 import { settingsNamespace as hostSettingsNamespace } from '@deepseek-ai/dsh-settings'
+import type { Context as HostContext } from '@deepseek-ai/cordis'
+import type { AgentPreset, AgentPresets as HostAgentPresets } from '@deepseek-ai/dsh-agent-presets'
 
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-cmdline'
@@ -41,6 +43,7 @@ export type {
   ModelSelectionRef,
 } from '@deepseek-ai/dsh-agent'
 export { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
+export type { AgentPreset } from '@deepseek-ai/dsh-agent-presets'
 export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { JobId } from '@deepseek-ai/dsh-jobs'
 export type { JobSnapshot, JobStatus } from '@deepseek-ai/dsh-jobs'
@@ -85,6 +88,20 @@ export type {
 } from '@deepseek-ai/dsh-user-questions'
 export type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 
+/** Preset operations the native TUI is allowed to use from the official Host. */
+export type TuiAgentPresets = Pick<HostAgentPresets,
+  'list' | 'resolve' | 'mount' | 'recompose' | 'composedPreset'>
+
+/** Resolve the required preset roster through the reviewed Host adapter. */
+export function hostAgentPresets(ctx: HostContext): TuiAgentPresets {
+  const presets = ctx.get('agentPresets')
+  if (presets === undefined) throw new Error('TUI Agent preset service is unavailable')
+  return presets
+}
+
+/** Keep the imported preset row type on the public Host boundary. */
+export type TuiAgentPreset = AgentPreset
+
 /** Localized descriptions accepted by newer command registries and ignored by older ones. */
 export type CommandLocalizedDescriptions = Readonly<Record<string, string>>
 
@@ -117,20 +134,49 @@ export type TuiCommandDefinition = HostCommandDefinition & {
   readonly completion?: CommandCompletionDescriptor
 }
 
-/** Register additive TUI metadata while retaining the legacy Host registration contract. */
+const registeredCommandCompletions = new WeakMap<CommandRuntime, Map<string, CommandCompletionDescriptor>>()
+
+/** Register additive TUI metadata while retaining it when a legacy Host omits the field. */
 export function hostRegisterCommand(
   commands: CommandRuntime,
   definition: TuiCommandDefinition,
 ): ReturnType<CommandRuntime['register']> {
-  return commands.register(definition)
+  const dispose = commands.register(definition)
+  const completion = definition.completion
+  if (completion === undefined) return dispose
+  let completions = registeredCommandCompletions.get(commands)
+  if (completions === undefined) {
+    completions = new Map()
+    registeredCommandCompletions.set(commands, completions)
+  }
+  completions.set(definition.name, completion)
+  return () => {
+    try {
+      dispose()
+    } finally {
+      if (completions.get(definition.name) !== completion) return
+      completions.delete(definition.name)
+      if (completions.size === 0) registeredCommandCompletions.delete(commands)
+    }
+  }
 }
 
-/** Read command descriptors while treating completion metadata as optional Host capability. */
+/** Read descriptors and restore TUI-owned completion metadata omitted by a legacy Host. */
 export function hostCommandDescriptors(
   commands: CommandRuntime,
   agent: Parameters<CommandRuntime['list']>[0],
 ): readonly CommandDescriptor[] {
-  return commands.list(agent)
+  const descriptors = commands.list(agent)
+  const completions = registeredCommandCompletions.get(commands)
+  if (completions === undefined) return descriptors
+  return Object.freeze(descriptors.map((descriptor): CommandDescriptor => {
+    const descriptorWithCompletion = descriptor as HostCommandDescriptor & {
+      readonly completion?: CommandCompletionDescriptor
+    }
+    if (descriptorWithCompletion.completion !== undefined) return descriptorWithCompletion
+    const completion = completions.get(descriptor.name)
+    return completion === undefined ? descriptor : Object.freeze({ ...descriptor, completion })
+  }))
 }
 
 /** Terminal-safe semantic category for one bounded Session preview line. */

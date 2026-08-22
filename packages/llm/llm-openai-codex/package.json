@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-llm-openai-codex",
   "description": "OpenAI Codex ChatGPT OAuth adapter with dynamic account model discovery",
-  "version": "0.1.1-rc.8",
+  "version": "0.1.2-rc.8",
   "publishConfig": {
     "access": "public"
   },
@@ -41,6 +41,38 @@
     "@deepseek-ai/dsh-timeout": "0.1.0-rc.8",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "3.18.1"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-attachment": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-atomic-write": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-home-paths": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-invariants": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm-pi-ai": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-timeout": {
+      "optional": true
+    },
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.82.1",

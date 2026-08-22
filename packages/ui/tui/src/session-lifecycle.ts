@@ -3,7 +3,7 @@
 import type { SessionIdType as SessionId } from './host.ts'
 
 /** User command that requests a fresh TUI Session. */
-export type TuiFreshSessionCommand = 'clear' | 'new'
+export type TuiFreshSessionCommand = 'clear' | 'new' | 'mode'
 
 /** Controller-owned confirmation or creation state for one fresh Session request. */
 export interface TuiFreshSessionDialogSnapshot {
@@ -17,6 +17,8 @@ export interface TuiFreshSessionDialogSnapshot {
   readonly currentSessionId: SessionId
   /** Workspace copied into the fresh Session. */
   readonly workspaceLabel: string
+  /** Explicit target selected through /mode; absent means inherit current. */
+  readonly targetPreset?: { readonly id: string; readonly name: string }
   /** Latest preparation or switch failure while confirmation remains open. */
   readonly error?: string
 }

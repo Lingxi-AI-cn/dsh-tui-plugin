@@ -22,8 +22,18 @@ export interface TuiResumeCandidate {
   previewTruncated: boolean
   /** Preview-only failure; the row remains resumable when this is set. */
   previewError?: string
-  /** Why the row cannot be resumed by this process-wide TUI composition. */
+  /** Resolved durable Agent preset shown without its filesystem path. */
+  agentPreset?: TuiResumePresetSummary
+  /** Why the row cannot be resumed by this preset-aware TUI composition. */
   disabledReason?: string
+}
+
+/** Detached preset identity and health projected during the Session scan. */
+export interface TuiResumePresetSummary {
+  readonly id: string
+  readonly label: string
+  readonly trust?: 'system' | 'user'
+  readonly disabledReason?: string
 }
 
 /** Current workspace scope selected in the native TUI Session picker. */
@@ -46,7 +56,7 @@ export interface TuiResumeDialogSnapshot {
 }
 
 /**
- * Summarize one logical Session for the process-wide TUI composition.
+ * Summarize one logical Session for the preset-aware TUI composition.
  * @param record - live-preferred Session record from `ctx.sessionQuery`.
  * @param title - folded durable title, when one exists.
  * @param updatedAt - live last-event time or persisted artifact mtime.
@@ -55,6 +65,8 @@ export interface TuiResumeDialogSnapshot {
  * @param preview - bounded current-surface summaries, when available.
  * @param previewTruncated - whether older preview content was omitted.
  * @param previewError - preview-only failure text, when the Session could not be read.
+ * @param agentPreset - log-resolved preset identity and health.
+ * @param presetDisabledReason - localized roster/read failure when no healthy preset exists.
  * @returns a detached picker row with compatibility status.
  */
 export function summarizeTuiResumeCandidate(
@@ -66,6 +78,8 @@ export function summarizeTuiResumeCandidate(
   preview: readonly SessionPreviewLine[] = [],
   previewTruncated = false,
   previewError?: string,
+  agentPreset?: TuiResumePresetSummary,
+  presetDisabledReason?: string,
 ): TuiResumeCandidate {
   let disabledReason: string | undefined
   if (record.header.id === currentId) disabledReason = 'current session'
@@ -73,7 +87,9 @@ export function summarizeTuiResumeCandidate(
   else if (!record.persisted) disabledReason = 'session is not persisted'
   else if (record.header.version !== SESSION_FORMAT_VERSION) disabledReason = 'session format is incompatible'
   else if (record.header.origin === 'subagent') disabledReason = 'subagent-owned session'
-  else if (record.header.agentPreset !== undefined) disabledReason = `session requires preset ${record.header.agentPreset}`
+  else if (presetDisabledReason !== undefined) disabledReason = presetDisabledReason
+  else if (agentPreset === undefined) disabledReason = 'legacy rosterless session'
+  else if (agentPreset.disabledReason !== undefined) disabledReason = agentPreset.disabledReason
   else if (record.header.cwd === undefined) disabledReason = 'session has no recorded workspace'
   return {
     record,
@@ -84,6 +100,7 @@ export function summarizeTuiResumeCandidate(
     preview,
     previewTruncated,
     ...previewError === undefined ? {} : { previewError },
+    ...agentPreset === undefined ? {} : { agentPreset },
     ...disabledReason === undefined ? {} : { disabledReason },
   }
 }

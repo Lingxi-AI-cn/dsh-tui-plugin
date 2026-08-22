@@ -32,6 +32,13 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 - Browse and search the complete durable transcript, inspect full block details, move between the root and live child Agents, and monitor cancellable background work.
 - Export a Session for review or backup with `/export`; prompts, tool activity, and workspace paths remain explicit diagnostic data.
 
+### Four real Agent execution modes
+
+- `/mode` selects the official Standard, PTC, Minimal, and Creator Agent Presets, plus healthy user presets already installed under `$DSH_HOME/.agent-presets`.
+- Standard provides the full native coding toolset; PTC presents those capabilities through the TypeScript Code Mode SDK and `run_code`; Minimal keeps the official fixed prompt and exactly two tools; Creator adds runtime inspection and preset-authoring guidance.
+- A blank Session switches atomically in place. After work has started, the same action creates a new confirmed Session so history is never replayed under a different tool catalog.
+- Preset identity is durable: `/resume`, `/new`, `/clear`, and `/rewind` preserve it, and compatible Sessions move between Web and TUI without changing their composition.
+
 ### Fast keyboard and mouse interaction
 
 - Command and path completion, submitted-prompt history, full-transcript search, draft stash, undo/redo, multiline editing, external editor integration, and bounded clipboard operations.
@@ -43,7 +50,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 - `/models` discovers configured providers and models, supports provider-owned authentication flows, and selects the exact reasoning effort when available.
 - The bundled OpenAI Codex adapter offers **Sign in with ChatGPT**, stores refreshable OAuth credentials under `$DSH_HOME/oauth/openai-codex.json`, and discovers the signed-in account's current model catalog dynamically.
 - Approval requests and structured user questions are presented as bounded native dialogs instead of leaking into ordinary transcript state.
-- The actionable footer opens model, permission, work, context, workspace, and transcript details without leaving the current Session.
+- The actionable footer opens mode, model, permission, work, context, workspace, and transcript details without leaving the current Session.
 
 ### Bilingual and terminal-aware
 
@@ -61,6 +68,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 
 | Command | Purpose |
 | --- | --- |
+| `/mode` | Choose Standard, PTC, Minimal, Creator, or an installed user preset |
 | `/models` | Choose a provider, model, and reasoning effort |
 | `/config` | Configure theme, mouse ownership, and keybindings |
 | `/lang en\|zh` | Switch the TUI language |
@@ -80,11 +88,11 @@ The current public TUI release is deliberately pinned to the matching official H
 
 | DSH TUI | DeepSeek Harness | Node.js | Platforms |
 | --- | --- | --- | --- |
-| `0.1.1-rc.8` | exactly `0.1.0-rc.8` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
+| `0.1.2-rc.8` | exactly `0.1.0-rc.8` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
 
 Support for a newer Harness version is added only after exact-package clean-room installation, profile composition, PTY startup/exit, and terminal-restoration verification.
 
-The TUI core version advances independently (`0.1.1` here), while the final prerelease suffix (`rc.8`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
+The TUI core version advances independently (`0.1.2` here), while the final prerelease suffix (`rc.8`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
 
 ## Install
 
@@ -92,7 +100,7 @@ Install the exact supported official Harness, then add DSH TUI to a dedicated `t
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.0-rc.8
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.2-rc.8
 dsh --profile tui
 ```
 
@@ -102,6 +110,7 @@ On first launch:
 
 ```text
 /models      choose or authenticate a model provider
+/mode        choose the Agent execution mode
 /lang zh     switch to Chinese
 /config      choose theme, mouse behavior, and keybindings
 /help        review commands and active shortcuts
@@ -114,7 +123,7 @@ The canonical profile contains exactly `@deepseek-ai/dsh-base` followed by `@lin
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.2-rc.8
 ```
 
 Sessions and credentials live outside the profile directory. Reapply only reviewed custom patches; do not copy the old profile back wholesale.
@@ -122,7 +131,7 @@ Sessions and credentials live outside the profile directory. Reapply only review
 <details>
 <summary>Installation notes</summary>
 
-- pnpm may print missing-peer warnings while installing the profile. Official DSH supplies those exact Host packages; installing the suggested `@deepseek-ai/*` peers into the profile can create a duplicate Host graph.
+- Published TUI manifests mark the exact official Host peers optional for package-manager resolution because DSH supplies them outside the profile. A normal plugin install should not report those peers as missing or copy them into the profile; startup still validates the exact Host graph.
 - Install only the user-facing `@lingxi-ai-cn/dsh-tui` package. It installs the six exact-version internal packages, including the Codex adapter; do not add them to the profile individually.
 - Installation does not start OAuth or modify existing provider credentials. Choose **Sign in with ChatGPT** through `/models` when you want to connect an account.
 - npm may ask whether to allow install scripts for official DSH native helpers. Follow npm's printed guidance for the official installation; do not add those packages to the TUI profile.
@@ -134,7 +143,7 @@ Sessions and credentials live outside the profile directory. Reapply only review
 Install the exact TUI version that declares compatibility with the installed official Harness version:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.2-rc.8
 ```
 
 Release tags and npm versions are immutable. Do not mix package versions from different release candidates.

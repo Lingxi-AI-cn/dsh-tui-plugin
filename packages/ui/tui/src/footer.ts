@@ -2,6 +2,7 @@
 
 import stringWidth from 'string-width'
 import type {
+  AgentPreset,
   ContextBreakdownProjection,
   ContextPressureProjection,
   ModelSelection,
@@ -11,12 +12,13 @@ import type {
 } from './host.ts'
 import { terminalSafe } from './sanitize.ts'
 import { tuiMessage, type TuiLocale } from './locale.ts'
+import { tuiAgentModeDescription, tuiAgentModeName } from './mode.ts'
 import type { TuiWorkSummary } from './work.ts'
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 /** Stable action targets exposed by the native TUI footer. */
-export type TuiFooterItemId = 'model' | 'permission' | 'work' | 'context' | 'workspace' | 'transcript'
+export type TuiFooterItemId = 'model' | 'mode' | 'permission' | 'work' | 'context' | 'workspace' | 'transcript'
 
 /** One actionable status item derived from authoritative runtime state. */
 export interface TuiFooterItemDescriptor {
@@ -27,7 +29,7 @@ export interface TuiFooterItemDescriptor {
   /** Compact current value shown in the status row. */
   readonly value: string
   /** Enter behavior for this item. */
-  readonly action: 'models' | 'permissions' | 'work' | 'detail'
+  readonly action: 'models' | 'modes' | 'permissions' | 'work' | 'detail'
   /** Complete read-only detail shown for local status items. */
   readonly detailLines: readonly string[]
 }
@@ -62,6 +64,8 @@ export interface TuiFooterSources {
   readonly modelSelection?: ModelSelection | undefined
   /** Whether the selection describes a captured running request. */
   readonly modelSelectionKind: 'running request' | 'next request'
+  /** Agent preset composed for the active Session. */
+  readonly agentPreset?: AgentPreset | undefined
   /** Effective permission select, absent when the capability is not composed. */
   readonly permissions?: PermissionSelect | undefined
   /** Provider-anchored approximate context occupancy. */
@@ -110,6 +114,25 @@ export function tuiFooterItems(
         tuiMessage(locale, 'footer.model.effort', {
           effort: effort ?? tuiMessage(locale, 'footer.model.default'),
         }),
+      ],
+    ))
+  }
+
+  const preset = sources.agentPreset
+  if (preset !== undefined) {
+    const name = tuiAgentModeName(preset, locale)
+    const description = tuiAgentModeDescription(preset, locale)
+    items.push(item(
+      'mode',
+      tuiMessage(locale, 'footer.label.mode'),
+      name,
+      'modes',
+      [
+        tuiMessage(locale, 'footer.mode.current', { mode: name, id: preset.id }),
+        tuiMessage(locale, 'footer.mode.kind', {
+          kind: tuiMessage(locale, preset.trust === 'system' ? 'mode.kind.system' : 'mode.kind.user'),
+        }),
+        ...description === undefined ? [] : [description],
       ],
     ))
   }
@@ -227,10 +250,10 @@ export function visibleTuiFooterItems(
   columns: number,
 ): readonly TuiFooterItemDescriptor[] {
   const allowed: readonly TuiFooterItemId[] = columns < 56
-    ? ['model', 'work', 'permission']
+    ? ['model', 'mode', 'work', 'permission']
     : columns < 78
-      ? ['model', 'work', 'permission', 'context', 'transcript']
-      : ['model', 'work', 'permission', 'context', 'workspace', 'transcript']
+      ? ['model', 'mode', 'work', 'permission', 'context', 'transcript']
+      : ['model', 'mode', 'work', 'permission', 'context', 'workspace', 'transcript']
   const visible = items.filter(candidate => allowed.includes(candidate.id))
   return Object.freeze(visible.length === 0 ? items.slice(0, 1) : visible)
 }

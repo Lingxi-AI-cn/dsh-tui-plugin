@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-plugin-hub-local",
   "description": "Trusted local Registry, artifact, and profile transaction provider for Plugin Hub",
-  "version": "0.1.1-rc.8",
+  "version": "0.1.2-rc.8",
   "publishConfig": {
     "access": "public"
   },
@@ -38,6 +38,23 @@
     "@deepseek-ai/dsh-invariants": "0.1.0-rc.8",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "3.18.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-app-boot": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-home-paths": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-invariants": {
+      "optional": true
+    },
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@lingxi-ai-cn/dsh-profile-plugin-manager": "workspace:*",

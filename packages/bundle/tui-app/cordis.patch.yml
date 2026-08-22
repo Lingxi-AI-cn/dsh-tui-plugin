@@ -1,6 +1,7 @@
-# The post-install native terminal surface over dsh-base. It keeps the base's
-# process-wide agent plane, mounts no HTTP/browser rows, and creates exactly one
-# Agent through the TUI runtime after the Loader tree settles.
+# The post-install native terminal surface over dsh-base. Model-visible rows
+# move behind the official Agent preset roster; Host registries, persistence,
+# providers, and terminal interaction remain process-wide. No HTTP/browser
+# rows are mounted.
 
 - id: system-prompt
   config:
@@ -14,7 +15,90 @@
   config:
     mode: !!js process.env.DSH_TOOLS_MODE
 
+# Keep this ownership list aligned with the official Web preset surface. These
+# rows are Agent-plane consumers in dsh-base; leaving even one enabled leaks a
+# global tool or prompt behavior into Minimal and can collide with a preset's
+# scoped registration.
+- id: tool-bash
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
+- id: tool-jobs
+  disabled: true
+
+- id: tool-fs
+  disabled: true
+
+- id: tool-fs-search
+  disabled: true
+
+- id: tool-str-replace-editor
+  disabled: true
+
+- id: skill-filesystem
+  disabled: true
+
+- id: tool-skill
+  disabled: true
+
+- id: tool-goal
+  disabled: true
+
+- id: plan-mode
+  disabled: true
+
+- id: compaction-basic
+  disabled: true
+
+- id: command-compact
+  disabled: true
+
+- id: tool-result-pruner
+  disabled: true
+
+- id: tool-subagent-control
+  disabled: true
+
+- id: tool-subagent-list-agents
+  disabled: true
+
+- id: tool-subagent
+  disabled: true
+
+- id: tool-subagent-fork
+  disabled: true
+
+- id: workflow-worker-thread
+  disabled: true
+
+- id: tool-workflow
+  disabled: true
+
+- id: tool-ralph
+  disabled: true
+
+- id: agent-instructions
+  disabled: true
+
+- id: tool-todo
+  disabled: true
+
+- id: tool-web
+  disabled: true
+
 - insert:
+    # PTC owns only the per-Agent Code Mode presentation. Its worker runtime is
+    # a Host singleton shared by every PTC Session.
+    - id: code-runtime
+      name: '@deepseek-ai/dsh-code-runtime-worker-thread'
+
+    # Creator composes the model-facing Cordis tool inside the preset; its
+    # runtime/inspection backends are Host singletons shared by all Sessions.
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
     # The native Session picker shares projection checkpoints with the Web
     # surface, so repeated scans read metadata and bounded log tails.
     - id: storage
@@ -80,11 +164,20 @@
     - id: tui-startup
       name: '@lingxi-ai-cn/dsh-tui/startup'
 
+    # The writable user root is derived by dsh-agent-presets itself. The
+    # official system root comes from the validated running DSH installation,
+    # never from npm-prefix or checkout path guessing.
+    - id: agent-presets
+      name: '@deepseek-ai/dsh-agent-presets'
+      inject: [tuiStartup]
+      config:
+        default: standard
+        roots:
+          - path: !!js ctx.tuiStartup.presetRoot
+            trust: system
+
     - id: tui-app
       name: '@lingxi-ai-cn/dsh-tui'
-
-    - id: tool-ask-user
-      name: '@deepseek-ai/dsh-tool-ask-user'
 
     - id: tui
       name: '@lingxi-ai-cn/dsh-tui-runtime'

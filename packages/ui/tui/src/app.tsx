@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { Box, Text, useStdout } from 'ink'
 import stringWidth from 'string-width'
 import type {
-  Agent, ApprovalPresentation, AskUserQuestionAnswer, AskUserQuestionAnswerItem,
+  Agent, AgentPreset, ApprovalPresentation, AskUserQuestionAnswer, AskUserQuestionAnswerItem,
   CommandDescriptor, ContextBreakdownProjection, ContextPressureProjection, FsPathCompletionResult,
   ImageAttachmentRef, ModelSelection, PermissionSelect, SessionStatsProjection, TokenUsageProjection,
 } from './host.ts'
@@ -118,6 +118,7 @@ export interface TuiAppProps {
   interactions: InteractionStore
   externalNotice: ValueStore<string>
   modelSelection: ValueStore<ModelSelection | undefined>
+  agentMode: ValueStore<AgentPreset | undefined>
   helpOpen: ValueStore<boolean>
   diagnostics: ValueStore<TuiDiagnosticSnapshot | undefined>
   loadedContext: ValueStore<TuiLoadedContextSnapshot | undefined>
@@ -591,6 +592,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     [extensionSnapshot.revision, props.extensions],
   )
   const modelSelection = useSyncExternalStore(props.modelSelection.subscribe, props.modelSelection.getSnapshot)
+  const agentMode = useSyncExternalStore(props.agentMode.subscribe, props.agentMode.getSnapshot)
   const helpOpen = useSyncExternalStore(props.helpOpen.subscribe, props.helpOpen.getSnapshot)
   const diagnostics = useSyncExternalStore(props.diagnostics.subscribe, props.diagnostics.getSnapshot)
   const loadedContext = useSyncExternalStore(props.loadedContext.subscribe, props.loadedContext.getSnapshot)
@@ -1171,6 +1173,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const completeFooterItems = tuiFooterItems({
     modelSelection: props.view.kind === 'root' ? activeSelection : undefined,
     modelSelectionKind: agentStatus === 'running' ? 'running request' : 'next request',
+    agentPreset: props.view.kind === 'root' ? agentMode : undefined,
     permissions: props.view.kind === 'root' ? permissions : undefined,
     context: props.view.kind === 'root' ? contextPressure : undefined,
     tokenUsage: props.view.kind === 'root' ? tokenUsage : undefined,
@@ -1188,8 +1191,11 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   }, locale)
   const mountedFooterItems = visibleTuiFooterItems(completeFooterItems, Math.max(1, columns - 2))
   const pointerRegions: readonly TuiPointerRegion[] = (() => {
-    if (startupSurface || extensionSnapshot.fullscreenScene !== undefined) {
+    if (extensionSnapshot.fullscreenScene !== undefined) {
       return Object.freeze([])
+    }
+    if (startupSurface) {
+      return tuiFooterPointerRegions(mountedFooterItems, columns, terminalRows, 'Composer')
     }
     if (interaction?.kind === 'approval') {
       const hintStart = 2
@@ -1447,11 +1453,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       : transcriptScroll.reveal(selected.key, selected.nodeIndex))
   }, [currentTodo?.key, transcriptScroll, transcriptSearch, transcriptSearchHits])
 
-  const submitQuestion = (): void => {
+  const commitQuestionAnswer = (answer: AskUserQuestionAnswerItem): void => {
     if (interaction?.kind !== 'question') return
-    const question = interaction.request.questions[questionIndex]
-    if (question === undefined) return
-    const answer = answerFor(question, composer.text)
     if (answer.selected.length === 0 && answer.custom === undefined) {
       setNotice(tuiMessage(locale, 'question.answer.required'))
       return
@@ -1470,10 +1473,23 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     }
   }
 
+  const submitQuestion = (): void => {
+    if (interaction?.kind !== 'question') return
+    const question = interaction.request.questions[questionIndex]
+    if (question === undefined) return
+    commitQuestionAnswer(answerFor(question, composer.text))
+  }
+
   const selectQuestionOption = (index: number): void => {
     if (interaction?.kind !== 'question') return
-    const options = interaction.request.questions[questionIndex]?.options ?? []
+    const question = interaction.request.questions[questionIndex]
+    const options = question?.options ?? []
     if (index < 0 || index >= options.length) return
+    const option = options[index]
+    if (question !== undefined && option !== undefined && question.multiSelect !== true) {
+      commitQuestionAnswer({ id: question.id, selected: [option.label] })
+      return
+    }
     setQuestionCursor(index)
     updateComposer(createComposerState(String(index + 1)))
     setNotice('')
@@ -3134,11 +3150,16 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
 
   if (freshSessionDialog !== undefined && interaction === undefined) {
     const commandLabel = `/${freshSessionDialog.command}`
+    const targetPreset = freshSessionDialog.targetPreset
     return <TuiPane title={tuiMessage(locale, 'pane.fresh')} height={stdout.rows}>
       <TuiSection grow center paddingX={2}>
         <TuiSection framed tone="warning" title={tuiMessage(locale, 'fresh.title')}>
           <Text wrap="wrap">
-            {tuiMessage(locale, 'fresh.description', { command: commandLabel })}
+            {targetPreset === undefined
+              ? tuiMessage(locale, 'fresh.description', { command: commandLabel })
+              : tuiMessage(locale, 'fresh.mode.description', {
+                mode: targetPreset.name, id: targetPreset.id,
+              })}
           </Text>
           <TuiHintLine>{tuiMessage(locale, 'fresh.current', { session: freshSessionDialog.currentSessionId })}</TuiHintLine>
           <TuiHintLine>{tuiMessage(locale, 'fresh.workspace', { workspace: freshSessionDialog.workspaceLabel })}</TuiHintLine>
@@ -3256,6 +3277,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                     const index = resumeVisibleStart + visibleIndex
                     const active = index === effectiveResumeSelection
                     const status = [
+                      candidate.agentPreset === undefined ? undefined : tuiMessage(locale, 'resume.mode', {
+                        mode: candidate.agentPreset.label,
+                      }),
                       candidate.record.header.id === props.agent.session.id ? tuiMessage(locale, 'common.current') : undefined,
                       candidate.record.live ? tuiMessage(locale, 'common.live') : undefined,
                       candidate.record.persisted ? tuiMessage(locale, 'common.persisted') : undefined,
@@ -3286,7 +3310,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
               <TuiScrollablePanel framed paddingX={2} marginX={1}>
                 <Text bold wrap="truncate-end">{terminalSafe(selectedResumeCandidate.title)}</Text>
                 <TuiHintLine>
-                  {terminalSafe(selectedResumeCandidate.workspaceLabel)} · {terminalSafe(selectedResumeCandidate.record.header.id)}
+                  {selectedResumeCandidate.agentPreset === undefined ? '' : `${tuiMessage(locale, 'resume.mode', {
+                    mode: selectedResumeCandidate.agentPreset.label,
+                  })} · `}{terminalSafe(selectedResumeCandidate.workspaceLabel)} · {terminalSafe(selectedResumeCandidate.record.header.id)}
                 </TuiHintLine>
                 {selectedResumeCandidate.previewError !== undefined
                   ? <Text {...tuiTextStyle(theme.tokens.warning)} wrap="wrap">{tuiMessage(locale, 'resume.status.previewUnavailable', {

@@ -32,6 +32,13 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 - 浏览和搜索完整耐久 Transcript，查看完整块详情，在根 Agent 与存活子 Agent 之间切换，并监控可取消的后台工作。
 - 使用 `/export` 导出 Session 以便审阅或备份；prompt、工具活动和工作区路径会作为明确的诊断数据保留。
 
+### 4 种真实 Agent 执行模式
+
+- `/mode` 可以选择官方 Standard、PTC、Minimal 与 Creator Agent Preset，也可以选择 `$DSH_HOME/.agent-presets` 下已经安装且健康的 user preset。
+- Standard 提供完整原生编码工具；PTC 通过 TypeScript Code Mode SDK 与 `run_code` 呈现这些能力；Minimal 保留官方固定提示词和严格的双工具；Creator 增加 runtime 检查与 preset 创作指导。
+- 空白 Session 会原子地原位切换。开始工作后，同一操作会在确认后创建新 Session，避免用不同 tool catalog 重放历史。
+- Preset identity 会耐久保存：`/resume`、`/new`、`/clear` 和 `/rewind` 都会保留该身份，兼容的 Session 可以在 Web 与 TUI 之间切换而不改变组装。
+
 ### 高效键盘与鼠标交互
 
 - 支持命令与路径补全、已提交 prompt 历史、完整 Transcript 搜索、草稿暂存、撤销/重做、多行编辑、外部编辑器和有界剪贴板操作。
@@ -43,7 +50,7 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 - `/models` 发现已配置的提供方和模型，支持提供方拥有的认证流程，并在模型允许时选择精确推理强度。
 - 随包提供的 OpenAI Codex adapter 会显示 **使用 ChatGPT 登录**，把可刷新的 OAuth 凭据存到 `$DSH_HOME/oauth/openai-codex.json`，并动态发现当前登录账户可用的模型目录。
 - 审批请求和结构化用户问题通过有界原生对话框呈现，不混入普通 Transcript 状态。
-- 可操作 Footer 可直接打开模型、权限、后台工作、上下文、工作区和 Transcript 详情，无需离开当前 Session。
+- 可操作 Footer 可直接打开模式、模型、权限、后台工作、上下文、工作区和 Transcript 详情，无需离开当前 Session。
 
 ### 中英文与终端适配
 
@@ -61,6 +68,7 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 
 | 命令 | 用途 |
 | --- | --- |
+| `/mode` | 选择 Standard、PTC、Minimal、Creator 或已安装的 user preset |
 | `/models` | 选择提供方、模型和推理强度 |
 | `/config` | 配置主题、鼠标所有权和按键绑定 |
 | `/lang en\|zh` | 切换 TUI 语言 |
@@ -80,11 +88,11 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 
 | DSH TUI | DeepSeek Harness | Node.js | 平台 |
 | --- | --- | --- | --- |
-| `0.1.1-rc.8` | 精确匹配 `0.1.0-rc.8` | `^22.19.0` 或 `>=24` | macOS 14 与 Ubuntu 24.04 CI |
+| `0.1.2-rc.8` | 精确匹配 `0.1.0-rc.8` | `^22.19.0` 或 `>=24` | macOS 14 与 Ubuntu 24.04 CI |
 
 只有在精确官方包 clean-room 安装、profile 组合、PTY 启动/退出和终端恢复验证完成后，才会增加对新 Harness 版本的支持。
 
-TUI 核心版本独立递增（这里是 `0.1.1`），最后的预发布后缀（`rc.8`）则始终表示兼容的官方 Harness 预发布版本。这样不会让用户把一次 TUI 迭代误认为上游 DSH 已升级。
+TUI 核心版本独立递增（这里是 `0.1.2`），最后的预发布后缀（`rc.8`）则始终表示兼容的官方 Harness 预发布版本。这样不会让用户把一次 TUI 迭代误认为上游 DSH 已升级。
 
 ## 安装
 
@@ -92,7 +100,7 @@ TUI 核心版本独立递增（这里是 `0.1.1`），最后的预发布后缀�
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.0-rc.8
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.2-rc.8
 dsh --profile tui
 ```
 
@@ -102,6 +110,7 @@ dsh --profile tui
 
 ```text
 /models      选择模型提供方或完成认证
+/mode        选择 Agent 执行模式
 /lang zh     切换到中文
 /config      配置主题、鼠标行为和按键绑定
 /help        查看命令与当前快捷键
@@ -114,7 +123,7 @@ dsh --profile tui
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.2-rc.8
 ```
 
 Session 和凭据位于 profile 目录之外。只重新应用经过审查的自定义 patch，不要把旧 profile 整体复制回来。
@@ -122,7 +131,7 @@ Session 和凭据位于 profile 目录之外。只重新应用经过审查的自
 <details>
 <summary>安装说明</summary>
 
-- pnpm 在安装 profile 时可能打印 missing-peer 警告。官方 DSH 会提供这些精确 Host package；把建议的 `@deepseek-ai/*` peer 安装到 profile 中反而可能创建重复 Host 图。
+- TUI 发布 manifest 会把精确的官方 Host peer 标记为仅对 package-manager 解析可选，因为 DSH 会在 profile 外提供它们。正常安装不应再把这些 peer 报为缺失，也不会将其复制进 profile；startup 仍会校验精确 Host 图。
 - 用户只需安装入口包 `@lingxi-ai-cn/dsh-tui`。它会安装包括 Codex adapter 在内的六个精确版本内部包；不要把这些内部包逐一添加到 profile。
 - 安装过程不会启动 OAuth，也不会修改现有提供方凭据。需要连接账户时，请在 `/models` 中选择 **使用 ChatGPT 登录**。
 - npm 可能询问是否允许官方 DSH 原生 helper 的安装脚本。请按 npm 针对官方安装打印的提示处理，不要把这些 package 加入 TUI profile。
@@ -134,7 +143,7 @@ Session 和凭据位于 profile 目录之外。只重新应用经过审查的自
 安装声明兼容当前官方 Harness 版本的精确 TUI 版本：
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.2-rc.8
 ```
 
 Release tag 和 npm 版本不可覆盖或移动。不要混用不同 release candidate 的 package。

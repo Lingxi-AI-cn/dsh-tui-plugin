@@ -2,14 +2,14 @@
 
 English | [中文](README.zh.md)
 
-The post-install native terminal bundle over the official `dsh-base` profile. Its patch keeps the base process-wide agent plane, disables HMR, selects the process-wide tool mode, mounts the shared durable Session projection cache, native Session archive writer, provider-neutral Plugin Hub service, and trusted local [`@lingxi-ai-cn/dsh-plugin-hub-local`](../../interaction/plugin-hub-local/README.md) provider, parses `dsh --profile tui [--resume <session-id>]`, and activates [`@lingxi-ai-cn/dsh-tui-runtime`](../../ui/tui/README.md). It mounts no Web server, API Proxy, browser runtime, Workspace UI, preset roster, or Agent installation tool. The package provides no global binary and does not modify the installed DSH application.
+The post-install native terminal bundle over the official `dsh-base` profile. Its patch removes the base process-wide Agent plane, mounts the official preset roster plus the Host-side Code Mode and Cordis runners, and keeps surface services such as the durable Session projection cache, native Session archive writer, provider-neutral Plugin Hub service, and trusted local [`@lingxi-ai-cn/dsh-plugin-hub-local`](../../interaction/plugin-hub-local/README.md) provider on the Host plane. It parses `dsh --profile tui [--resume <session-id>]` and activates [`@lingxi-ai-cn/dsh-tui-runtime`](../../ui/tui/README.md). It mounts no Web server, API Proxy, browser runtime, Workspace UI, or Agent installation tool. The package provides no global binary and does not modify the installed DSH application.
 
 ## Install and run
 
 Install the exact TUI release into a profile owned by an already installed matching DSH release, then launch that profile through the existing `dsh` binary:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.2-rc.8
 dsh --profile tui
 ```
 
@@ -18,20 +18,33 @@ This install contract assumes that official DSH initializes a fresh `tui` profil
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.1-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.2-rc.8
 ```
 
 Sessions and credentials are stored outside the profile directory and are not removed by this migration. Review and reapply any user-authored profile patch instead of copying the old profile directory back wholesale.
 
-The package checks every declared official Host peer before command parsing and terminal negotiation. The packed package requires exact DSH package versions, rejects Host packages resolved from the `tui` profile, and prints the installed DSH version, supported DSH version, TUI version, profile, and exact recovery command on mismatch. Upgrade DSH and the TUI as a tested pair.
+The package checks every declared official Host peer and the official `standard`, `code`, `minimal`, and `cordis` preset files before command parsing and terminal negotiation. The packed package requires exact DSH package versions, rejects Host packages or preset roots resolved from the `tui` profile, and prints the installed DSH version, supported DSH version, TUI version, profile, and exact recovery command on mismatch. Upgrade DSH and the TUI as a tested pair.
 
-pnpm can report the official Host packages and pi-ai as missing peers while installing the TUI into its isolated profile. Those warnings are expected because the official launcher supplies the exact Host graph from outside the profile. Do not install the listed Host peers into `$DSH_HOME/profiles/tui`; startup validates the external versions and paths.
+The published manifests retain exact Host peer ranges but mark those peers optional for package-manager resolution because the official launcher supplies the complete Host graph from outside the isolated profile. A normal `dsh plugin` install therefore does not report those external packages as missing or duplicate them inside `$DSH_HOME/profiles/tui`; startup still requires and validates their exact external versions and paths.
 
 The public bundle includes [`@lingxi-ai-cn/dsh-llm-openai-codex`](../../llm/llm-openai-codex/README.md). `/models` offers ChatGPT sign-in before the provider has credentials and lists the signed-in account catalog afterward. OAuth credentials remain in the adapter-owned `$DSH_HOME/oauth/openai-codex.json`; installation and upgrades never rewrite them.
 
 The Plugin Hub provider reads `https://redshell-ai.com:9000` and verifies signed installation descriptors with the deployment-owned `registry-2026-08` Ed25519 key embedded in [`cordis.patch.yml`](cordis.patch.yml). The provider does not trust signing keys announced by `/v1/meta`, and ordinary TUI settings cannot replace this trust root; a fixture or another deployment must supply its own explicit patch. The published bundle keeps `profileMutations: false`: discovery and installed-profile truth remain native, while its detail and installed footers show exact `dsh plugin --profile tui ...` commands and Enter never mutates the running profile. The downstream-only staged maintenance lifecycle remains available to compositions that explicitly enable it and install the matching pre-composition recovery hook; it is not part of the official `0.1.0-rc.8` post-install contract.
 
-The startup provider owns application flags and the successful Host compatibility snapshot, then publishes both through `tuiStartup`. The TUI row reads its optional resume id through lazy Loader config and injects the same startup service into the runtime for process-local `/doctor` reporting. Fresh Sessions use the invocation working directory. Startup resume accepts only non-subagent Sessions with no recorded preset and refuses an incompatible target before Ink enters the alternate screen; the in-process `/resume` picker applies the same checks while preserving the current Agent until a replacement publishes. The projection cache uses the same `$DSH_HOME/storages` JSON backend as the Web bundle, so either surface can seed identity-bound title checkpoints for the other. The archive writer streams durable raw artifacts to a private temporary file and publishes only a complete ZIP in the operator-selected directory.
+The startup provider owns application flags, the validated official preset root, and the successful Host compatibility snapshot, then publishes them through `tuiStartup`. The TUI row reads its optional resume id through lazy Loader config and injects the same startup service into the runtime for process-local `/doctor` reporting. Fresh Sessions use the invocation working directory and the roster default. Startup resume resolves the effective preset from the Session header plus the latest durable `agent-preset/selected` event, refuses subagent, missing, broken, or legacy rosterless targets before Ink enters the alternate screen, and mounts the resolved preset before publishing the Agent. The in-process `/resume` picker applies the same checks while preserving the current Agent until a replacement publishes. The projection cache uses the same `$DSH_HOME/storages` JSON backend as the Web bundle, so either surface can seed identity-bound title checkpoints for the other. The archive writer streams durable raw artifacts to a private temporary file and publishes only a complete ZIP in the operator-selected directory.
+
+## Agent modes
+
+The TUI consumes the same dynamic `ctx.agentPresets` roster and durable Session identity as Web. The four official modes are:
+
+| Display name | Preset id | Composition |
+|---|---|---|
+| Standard | `standard` | Full coding Agent with native tools, skills, planning, goals, subagents, and workflows. |
+| PTC | `code` | Standard capabilities presented to the model through the TypeScript Code Mode SDK and `run_code`. |
+| Minimal | `minimal` | The official fixed prompt with exactly persistent `bash` and `str_replace_editor`. |
+| Creator | `cordis` | Standard capabilities plus runtime inspection, plugin experiments, and preset-authoring guidance. |
+
+`/mode` and the actionable footer list these system presets plus healthy user presets from `$DSH_HOME/.agent-presets`. A blank Session switches in place through the official recompose transaction and records `agent-preset/selected` only after the new composition commits. Once a `turn/start` exists, selecting another mode opens the existing fresh-Session confirmation; cancellation keeps the current Agent, transcript, draft, and footer unchanged, while confirmation creates a new Session under the selected preset and leaves the old Session resumable. `/new`, `/clear`, and `/rewind` inherit the current Session's effective preset. Missing or broken presets stay visible but disabled, and this bundle does not add preset copy, edit, or delete UI.
 
 ## Model Experience
 
@@ -51,7 +64,7 @@ The static section sits near the system prompt head and remains unchanged across
 
 ## Known Limitations and Deferred Work
 
-- **No Web/preset composition** — the bundle deliberately keeps the base process-wide agent rows, so preset-aware cross-surface Session resume is unavailable.
+- **No preset authoring UI** — `/mode` selects installed healthy presets, but copy, edit, delete, and Creator-specific authoring controls remain on the official preset mechanisms and Web surface.
 - **TUI-only Codex login** — the public bundle adds native ChatGPT OAuth and account model discovery; the Web Models page does not run this login flow.
 - **Plugin changes use the external CLI** — official DSH `0.1.0-rc.8` has no generic pre-composition recovery hook, so the published TUI does not activate its downstream-only in-process profile swap.
 - **TTY-only application** — redirected stdin or stdout fails before activation; unattended automation uses the headless profile.
