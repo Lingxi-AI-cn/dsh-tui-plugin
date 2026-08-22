@@ -1853,6 +1853,25 @@ describe('TUI suggestions', () => {
     expect(state?.items.map(item => item.label)).toEqual(['/exit', '/help', '/mode', '/models', '/quit'])
   })
 
+  it('localizes official rc.8 command summaries without changing same-name third-party commands', () => {
+    const state = commandSuggestionState('/', 1, [
+      { name: 'compact', description: 'Compact older conversation history' },
+      { name: 'feedback', description: 'record feedback about this session' },
+      { name: 'goal', description: 'set or view the goal for a long-running task' },
+      { name: 'permission', description: 'Switch the permission preset (sandbox mode + approval policy)' },
+      { name: 'plan', description: 'Enter or leave plan mode' },
+      { name: 'third-party', description: 'Third-party command' },
+    ], 'zh')
+    expect(state?.items.map(item => item.description)).toEqual([
+      '压缩较早的对话历史',
+      '记录对当前 Session 的反馈',
+      '设置或查看长期任务目标',
+      '切换权限预设',
+      '进入或退出计划模式',
+      'Third-party command',
+    ])
+  })
+
   it('moves selection inside a bounded mounted window', () => {
     const initial = commandSuggestionState('/', 1, commands)
     expect(initial).toBeDefined()

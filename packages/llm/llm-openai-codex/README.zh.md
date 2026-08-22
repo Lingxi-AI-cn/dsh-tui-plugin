@@ -20,6 +20,8 @@
 
 默认存储位置是 `$DSH_HOME/oauth/openai-codex.json`（仅 owner 可读写的 OAuth 凭据）与 `$DSH_HOME/model-catalogs/openai-codex.json`（衍生的 last-good 目录）。`clientVersion` 是固定的兼容性 header 与查询值，不是模型白名单；部署可在不重新构建的情况下覆盖它。`streamIdleTimeoutMs` 限制单次 provider 读取的停滞时间，`maxRequestImageBytes` 限制经官方 pi-ai adapter 传递的 Base64 图片历史大小。
 
+插件会在每次请求时解析当前 Host 的耐久附件服务，并将其传给 `PiAiAdapter`。支持图片的 Codex route 因此可以读取 Session log 中确切 `ImageAttachmentRef` 所指向的字节；服务缺失或对象不可用时会在 provider I/O 前失败，而不会静默丢弃图片内容。
+
 公开 TUI bundle 会挂载这条路由，但不会代用户登录。交互界面读取 `ctx.llm.authentication('openai-codex')`，以其公布的 `oauth` 方法运行 `ctx.llm.login()`，并提供 provider-neutral 的提示与进度通知。TUI 通过 `/models` 暴露该流程。本适配器有意不接受 API key 或粘贴的 access token。
 
 ## 动态模型目录

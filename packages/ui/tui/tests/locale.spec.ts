@@ -13,7 +13,7 @@ import {
 
 describe('native TUI runtime locale catalog', () => {
   it('ships a versioned English and Chinese catalog with the English fallback', () => {
-    expect(TUI_LOCALE_CATALOG_VERSION).toBe(2)
+    expect(TUI_LOCALE_CATALOG_VERSION).toBe(3)
     expect(TUI_LOCALES).toEqual(['en', 'zh'])
     const keys = Object.keys(TUI_LOCALE_CATALOG.en).toSorted()
     expect(Object.keys(TUI_LOCALE_CATALOG.zh).toSorted()).toEqual(keys)
@@ -41,6 +41,12 @@ describe('native TUI runtime locale catalog', () => {
     }
     expect(tuiCommandDescription(command, 'zh')).toBe('中文描述')
     expect(tuiCommandDescription(command, 'en')).toBe('Fallback description')
+    expect(tuiCommandDescription({
+      name: 'compact', description: 'Compact older conversation history',
+    }, 'zh')).toBe('压缩较早的对话历史')
+    expect(tuiCommandDescription({
+      name: 'compact', description: 'Third-party compact behavior',
+    }, 'zh')).toBe('Third-party compact behavior')
   })
 
   it('keeps localized diagnostic rows within every supported terminal width', () => {

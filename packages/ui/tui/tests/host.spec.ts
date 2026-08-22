@@ -1,17 +1,16 @@
 /** Optional-host compatibility adapters used by the post-install TUI. */
 
 import { describe, expect, it, vi } from 'vitest'
-import type { FileSystem } from '@deepseek-ai/dsh-fs'
+import type { FileSystem, FsTarget } from '@deepseek-ai/dsh-fs'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   hostAuthentication,
-  hostCommandDescriptors,
   hostCompletePaths,
   hostLogin,
   hostReadSessionPreview,
-  hostRegisterCommand,
   resolveSessionForkAnchor,
+  TuiHostCommandCatalog,
 } from '../src/host.ts'
 import { commandSuggestionState } from '../src/suggestion.ts'
 
@@ -39,13 +38,48 @@ describe('optional Host compatibility', () => {
     expect(login).toHaveBeenCalledWith('codex', 'oauth', interaction)
   })
 
-  it('returns no path suggestions when bounded Host completion is absent', async () => {
-    const fs = {} as FileSystem
-    await expect(hostCompletePaths(fs, {} as never, 'src', {
+  it('uses bounded legacy filesystem primitives when Host completion is absent', async () => {
+    const root = { targetKey: 'root', displayPath: '/workspace' } as FsTarget
+    const source = { targetKey: 'source', displayPath: '/workspace/src' } as FsTarget
+    const index = { targetKey: 'index', displayPath: '/workspace/src/index.ts' } as FsTarget
+    const readme = { targetKey: 'readme', displayPath: '/workspace/README.md' } as FsTarget
+    const outside = { targetKey: 'outside', displayPath: '/outside.ts' } as FsTarget
+    const listings = new Map([
+      ['root', [
+        { name: 'README.md', type: 'file' as const, target: readme },
+        { name: 'src', type: 'directory' as const, target: source },
+        { name: 'outside.ts', type: 'file' as const, target: outside },
+      ]],
+      ['source', [{ name: 'index.ts', type: 'file' as const, target: index }]],
+    ])
+    const listDir = vi.fn((target: FsTarget) => Promise.resolve(listings.get(String(target.targetKey)) ?? []))
+    const fs = {
+      listDir,
+      contains: (_parent: FsTarget, child: FsTarget) => child !== outside,
+    } as unknown as FileSystem
+
+    await expect(hostCompletePaths(fs, root, 'src', {
       maxDepth: 4,
       maxItems: 32,
       maxScannedEntries: 256,
-    })).resolves.toEqual({ entries: [], truncated: false })
+    })).resolves.toEqual({
+      entries: [
+        { path: 'src/', type: 'directory' },
+        { path: 'src/index.ts', type: 'file' },
+      ],
+      truncated: false,
+    })
+    expect(listDir).toHaveBeenCalledTimes(2)
+  })
+
+  it('delegates path completion to a newer Host', async () => {
+    const result = { entries: [{ path: 'src/', type: 'directory' as const }], truncated: false }
+    const completePaths = vi.fn(() => Promise.resolve(result))
+    const fs = { completePaths } as unknown as FileSystem
+    const root = {} as FsTarget
+    const options = { maxDepth: 4, maxItems: 32, maxScannedEntries: 256 }
+    await expect(hostCompletePaths(fs, root, 'src', options)).resolves.toBe(result)
+    expect(completePaths).toHaveBeenCalledWith(root, 'src', options)
   })
 
   it('retains command completion metadata when a legacy Host omits it from discovery', () => {
@@ -53,18 +87,19 @@ describe('optional Host compatibility', () => {
     const hostDispose = vi.fn()
     const register = vi.fn(() => hostDispose)
     const list = vi.fn(() => [{ name: 'config', description: 'Configure' }])
-    const commands = { register, list } as unknown as Parameters<typeof hostRegisterCommand>[0]
+    const commands = { register, list } as unknown as ConstructorParameters<typeof TuiHostCommandCatalog>[0]
+    const catalog = new TuiHostCommandCatalog(commands)
     const definition = {
       name: 'config', description: 'Configure', completion, handler: () => ({ kind: 'success' as const }),
     }
-    const dispose = hostRegisterCommand(commands, definition)
+    const dispose = catalog.register(definition)
     expect(register).toHaveBeenCalledWith(definition)
-    const descriptors = hostCommandDescriptors(commands, {} as never)
+    const descriptors = catalog.list({} as never)
     expect(descriptors[0]?.completion).toBe(completion)
     expect(commandSuggestionState('/', 1, descriptors, 'zh')?.items[0]?.description).toBe('配置 TUI')
     dispose()
     expect(hostDispose).toHaveBeenCalledOnce()
-    expect(hostCommandDescriptors(commands, {} as never)[0]?.completion).toBeUndefined()
+    expect(catalog.list({} as never)[0]?.completion).toBeUndefined()
   })
 
   it('keeps completion-capable Host metadata authoritative', () => {
@@ -73,12 +108,13 @@ describe('optional Host compatibility', () => {
     const commands = {
       register: vi.fn(() => () => {}),
       list: vi.fn(() => [{ name: 'config', description: 'Configure', completion: discovered }]),
-    } as unknown as Parameters<typeof hostRegisterCommand>[0]
-    hostRegisterCommand(commands, {
+    } as unknown as ConstructorParameters<typeof TuiHostCommandCatalog>[0]
+    const catalog = new TuiHostCommandCatalog(commands)
+    catalog.register({
       name: 'config', description: 'Configure', completion: registered,
       handler: () => ({ kind: 'success' as const }),
     })
-    expect(hostCommandDescriptors(commands, {} as never)[0]?.completion).toBe(discovered)
+    expect(catalog.list({} as never)[0]?.completion).toBe(discovered)
   })
 
   it('returns no Session preview when the older Host has no preview reader', async () => {

@@ -2690,6 +2690,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       }
     }
     const delivery = resolveTuiComposerDelivery({
+      composerOwnsInput: inputContext === 'Composer',
       rootView: props.view.kind === 'root',
       running: agentStatus === 'running',
       hasDraft: hasComposerDraft,

@@ -14,11 +14,9 @@ import {
   errorChain,
   hostAuthentication,
   hostAgentPresets,
-  hostCommandDescriptors,
   hostCompletePaths,
   hostLogin,
   hostReadSessionPreview,
-  hostRegisterCommand,
   assembleContextFor,
   installModelSelection,
   installSettingsSection,
@@ -27,6 +25,7 @@ import {
   resolveSessionPreset,
   SESSION_FORMAT_VERSION,
   SessionId,
+  TuiHostCommandCatalog,
   UserQuestionError,
   z,
   type Agent,
@@ -289,6 +288,7 @@ type PrepareTuiAgentRequest =
 /** One activation's owned Agent, interactions, Ink root, signals, and terminal transaction. */
 class TuiController {
   private readonly terminal = new TerminalSession(terminalInternals)
+  private commandCatalog!: TuiHostCommandCatalog
   private readonly interactions = new InteractionStore()
   private readonly externalNotice = new ValueStore('')
   private readonly modelSelection = new ValueStore<ModelSelection | undefined>(undefined)
@@ -376,6 +376,7 @@ class TuiController {
   async run(): Promise<void> {
     try {
       this.terminal.assertInteractive()
+      this.commandCatalog = new TuiHostCommandCatalog(this.ctx.commands)
       await this.ctx.get('loader')?.await()
       if (this.ownerDisposed) return
       const prepared = await this.prepareAgent(this.config.resume === undefined
@@ -466,7 +467,7 @@ class TuiController {
       work: this.work,
       extensions: this.ctx.tuiExtensions,
       maxResumeOptions: this.config.maxResumeOptions ?? 8,
-      commands: activeView === undefined ? hostCommandDescriptors(this.ctx.commands, root) : [],
+      commands: activeView === undefined ? this.commandCatalog.list(root) : [],
       interactionRegistry: this.interactionRegistry,
       completePaths: (query, signal) => this.completePaths(root, agent, query, signal),
       onAttachPath: path => this.attachPath(root, agent, path),
@@ -667,7 +668,7 @@ class TuiController {
     const match = /^\/([a-z][a-z0-9_-]*)(?=$|[\t\n\r ])/u.exec(line)
     const name = match?.[1]
     if (name === undefined) return undefined
-    const descriptor = hostCommandDescriptors(this.ctx.commands, agent).find(command => command.name === name
+    const descriptor = this.commandCatalog.list(agent).find(command => command.name === name
       || command.completion?.aliases?.includes(name))
     return descriptor === undefined ? undefined : {
       name: descriptor.name,
@@ -971,7 +972,7 @@ class TuiController {
         const snapshot = this.pluginHubDialog.getSnapshot()
         if (snapshot !== undefined) this.pluginHubDialog.set({ ...snapshot, progress })
       })
-      this.disposers.pluginHubCommand = hostRegisterCommand(this.ctx.commands, {
+      this.disposers.pluginHubCommand = this.commandCatalog.register({
         name: 'plugins',
         description: 'Browse the Plugin Hub catalog',
         input: { hint: '[search]' },
@@ -980,7 +981,7 @@ class TuiController {
       })
     }
     if (this.ctx.get('sessionTitle') !== undefined) {
-      this.disposers.renameCommand = hostRegisterCommand(this.ctx.commands, {
+      this.disposers.renameCommand = this.commandCatalog.register({
         name: 'rename',
         description: 'Rename the current Session',
         input: { hint: '<title>' },
@@ -988,7 +989,7 @@ class TuiController {
         handler: invocation => this.executeRename(invocation),
       })
     }
-    this.disposers.modelsCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.modelsCommand = this.commandCatalog.register({
       name: 'models',
       description: 'Select and configure a model',
       completion: { descriptions: tuiCommandDescriptions('command.models') },
@@ -996,7 +997,7 @@ class TuiController {
         'models.cancelled', () => this.executeModels(invocation),
       ),
     })
-    this.disposers.modeCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.modeCommand = this.commandCatalog.register({
       name: 'mode',
       description: 'Select the Agent execution mode',
       completion: { descriptions: tuiCommandDescriptions('command.mode') },
@@ -1004,7 +1005,7 @@ class TuiController {
         'mode.cancelled', () => this.executeMode(invocation),
       ),
     })
-    this.disposers.configCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.configCommand = this.commandCatalog.register({
       name: 'config',
       description: 'Configure TUI theme, language, and keybindings',
       completion: { descriptions: tuiCommandDescriptions('command.config') },
@@ -1012,25 +1013,25 @@ class TuiController {
         'config.cancelled', () => this.executeConfig(invocation),
       ),
     })
-    this.disposers.helpCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.helpCommand = this.commandCatalog.register({
       name: 'help',
       description: 'List available commands',
       completion: { descriptions: tuiCommandDescriptions('command.help') },
       handler: invocation => this.executeHelp(invocation),
     })
-    this.disposers.doctorCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.doctorCommand = this.commandCatalog.register({
       name: 'doctor',
       description: 'Inspect Host and TUI runtime health',
       completion: { descriptions: tuiCommandDescriptions('command.doctor') },
       handler: invocation => this.executeDoctor(invocation),
     })
-    this.disposers.contextCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.contextCommand = this.commandCatalog.register({
       name: 'context',
       description: 'Inspect loaded context facts',
       completion: { descriptions: tuiCommandDescriptions('command.context') },
       handler: invocation => this.executeLoadedContext(invocation),
     })
-    this.disposers.langCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.langCommand = this.commandCatalog.register({
       name: 'lang',
       description: 'Change the TUI language',
       input: { hint: '[en|zh]' },
@@ -1039,43 +1040,43 @@ class TuiController {
         'language.cancelled', () => this.executeLanguage(invocation),
       ),
     })
-    this.disposers.resumeCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.resumeCommand = this.commandCatalog.register({
       name: 'resume',
       description: 'Select and resume a Session',
       completion: { descriptions: tuiCommandDescriptions('command.resume') },
       handler: invocation => this.executeResume(invocation),
     })
-    this.disposers.clearCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.clearCommand = this.commandCatalog.register({
       name: 'clear',
       description: 'Start a fresh Session',
       completion: { descriptions: tuiCommandDescriptions('command.clear') },
       handler: invocation => this.executeFreshSession(invocation, 'clear'),
     })
-    this.disposers.newCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.newCommand = this.commandCatalog.register({
       name: 'new',
       description: 'Start a fresh Session',
       completion: { descriptions: tuiCommandDescriptions('command.new') },
       handler: invocation => this.executeFreshSession(invocation, 'new'),
     })
-    this.disposers.rewindCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.rewindCommand = this.commandCatalog.register({
       name: 'rewind',
       description: 'Branch from an earlier human turn',
       completion: { descriptions: tuiCommandDescriptions('command.rewind') },
       handler: invocation => this.executeRewind(invocation),
     })
-    this.disposers.exportCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.exportCommand = this.commandCatalog.register({
       name: 'export',
       description: 'Export the durable Session archive',
       completion: { descriptions: tuiCommandDescriptions('command.export') },
       handler: invocation => this.executeSessionExport(invocation),
     })
-    this.disposers.quitCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.quitCommand = this.commandCatalog.register({
       name: 'quit',
       description: 'Exit the TUI',
       completion: { descriptions: tuiCommandDescriptions('command.quit') },
       handler: invocation => this.executeExit(invocation, 'quit'),
     })
-    this.disposers.exitCommand = hostRegisterCommand(this.ctx.commands, {
+    this.disposers.exitCommand = this.commandCatalog.register({
       name: 'exit',
       description: 'Exit the TUI',
       completion: { descriptions: tuiCommandDescriptions('command.exit') },
@@ -1645,7 +1646,7 @@ class TuiController {
     if (invocation.rawInput.trim() !== '') return { kind: 'error', text: tuiMessage(this.locale, 'help.usage') }
     if (invocation.agent !== this.handle?.agent) return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
     this.helpOpen.set(true)
-    const lines = hostCommandDescriptors(this.ctx.commands, invocation.agent).map(command =>
+    const lines = this.commandCatalog.list(invocation.agent).map(command =>
       `/${command.name}${command.input === undefined ? '' : ` ${command.input.hint}`} — ${tuiCommandDescription(command, this.locale)}`)
     return { kind: 'success', text: lines.join('\n') }
   }

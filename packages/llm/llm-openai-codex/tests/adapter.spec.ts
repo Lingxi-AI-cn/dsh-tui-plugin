@@ -2,6 +2,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import {
   FileCredentialStore,
   installOpenAICodexRc8AuthenticationBridge,
@@ -63,6 +65,43 @@ describe('OpenAICodexAdapter', () => {
     expect(fetchImpl).toHaveBeenCalled()
     await adapter.logout('openai-codex')
     expect(await adapter.authentication('openai-codex')).toMatchObject({ configured: false })
+  })
+
+  it('resolves durable image attachments at request time', async () => {
+    const spec = resolveSpec({ dshHome: await home() })
+    const credentials = new FileCredentialStore(spec.credentialsPath)
+    await credentials.modify('openai-codex', async () => ({
+      type: 'oauth', access: 'access', refresh: 'refresh', expires: Date.now() + 60_000, accountId: 'acct',
+    }))
+    const fetchImpl = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ models: [{
+      slug: 'gpt-image', display_name: 'GPT Image', visibility: 'list', priority: 1,
+      context_window: 123_456, input_modalities: ['text', 'image'],
+    }] }), { status: 200 })))
+    const resolverError = new Error('attachment resolver reached')
+    const resolveAttachments = vi.fn(() => { throw resolverError })
+    const adapter = new OpenAICodexAdapter(spec, fetchImpl, undefined, resolveAttachments)
+    const drain = async (): Promise<void> => {
+      for await (const _chunk of adapter.stream({
+        provider: 'openai-codex',
+        model: 'gpt-image',
+        messages: [createUserMessage({
+          content: [{
+            type: 'image',
+            attachment: {
+              attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`),
+              mediaType: 'image/png',
+              bytes: 1,
+              width: 1,
+              height: 1,
+            },
+          }],
+          source: { kind: 'plugin', plugin: 'test' },
+        })],
+      })) { /* drain */ }
+    }
+
+    await expect(drain()).rejects.toBe(resolverError)
+    expect(resolveAttachments).toHaveBeenCalledOnce()
   })
 
   it('bridges authentication on official rc8 without overriding a newer Host', async () => {

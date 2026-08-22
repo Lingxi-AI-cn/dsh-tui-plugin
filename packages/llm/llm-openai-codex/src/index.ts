@@ -17,7 +17,7 @@ import { LlmError, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import type {} from '@deepseek-ai/dsh-attachment'
+import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { join, resolve } from 'node:path'
 import { CodexCatalog, DynamicCodexProvider, OPENAI_CODEX_PROVIDER } from './catalog.ts'
@@ -166,7 +166,18 @@ export class OpenAICodexAdapter extends PiAiAdapter {
   private readonly collection: Models
   private readonly catalog: CodexCatalog
 
-  constructor(spec: ResolvedSpec, fetchImpl: typeof fetch = fetch, reportError?: (message: string, error?: unknown) => void) {
+  /**
+   * @param spec - validated storage, catalog, timeout, and request-image limits.
+   * @param fetchImpl - account catalog transport.
+   * @param reportError - non-fatal catalog warning sink.
+   * @param resolveAttachments - request-time durable attachment lookup from the active Host.
+   */
+  constructor(
+    spec: ResolvedSpec,
+    fetchImpl: typeof fetch = fetch,
+    reportError?: (message: string, error?: unknown) => void,
+    resolveAttachments?: () => AttachmentStore | undefined,
+  ) {
     const credentials = new FileCredentialStore(spec.credentialsPath)
     const provider = new DynamicCodexProvider(openaiCodexProvider())
     const collection = createModels({ credentials })
@@ -196,6 +207,7 @@ export class OpenAICodexAdapter extends PiAiAdapter {
     super({
       profiles: () => profiles,
       resolveApiKey: async () => (await collection.getAuth(OPENAI_CODEX_PROVIDER))?.auth.apiKey,
+      ...resolveAttachments === undefined ? {} : { resolveAttachments },
     })
     this.collection = collection
     this.catalog = catalog
@@ -308,7 +320,7 @@ export function apply(ctx: Context, config: Config): void {
   const adapter = new OpenAICodexAdapter(resolveSpec(config), fetch, (message, error) => {
     ctx.logger.warn(message)
     if (error !== undefined) ctx.logger.warn(error)
-  })
+  }, () => ctx.get('attachments'))
   ctx.llm.registerAdapter([OPENAI_CODEX_PROVIDER], adapter)
   const disposeBridge = installOpenAICodexRc8AuthenticationBridge(ctx.llm, adapter)
   if (disposeBridge !== undefined) ctx.effect(() => disposeBridge, 'llm-openai-codex: rc8 authentication bridge')

@@ -1,6 +1,6 @@
 /** Supported DeepSeek Harness imports and optional-host compatibility adapters. */
 
-import type { FileSystem, FsTarget } from '@deepseek-ai/dsh-fs'
+import { FsError, type FileSystem, type FsDirEntry, type FsTarget } from '@deepseek-ai/dsh-fs'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import type { ApprovalRequest as HostApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 import type { SessionEvent, SessionId as HostSessionId } from '@deepseek-ai/dsh-session'
@@ -134,49 +134,49 @@ export type TuiCommandDefinition = HostCommandDefinition & {
   readonly completion?: CommandCompletionDescriptor
 }
 
-const registeredCommandCompletions = new WeakMap<CommandRuntime, Map<string, CommandCompletionDescriptor>>()
+/** Legacy-host command discovery retaining TUI metadata against one captured service proxy. */
+export class TuiHostCommandCatalog {
+  private readonly completions = new Map<string, CommandCompletionDescriptor>()
 
-/** Register additive TUI metadata while retaining it when a legacy Host omits the field. */
-export function hostRegisterCommand(
-  commands: CommandRuntime,
-  definition: TuiCommandDefinition,
-): ReturnType<CommandRuntime['register']> {
-  const dispose = commands.register(definition)
-  const completion = definition.completion
-  if (completion === undefined) return dispose
-  let completions = registeredCommandCompletions.get(commands)
-  if (completions === undefined) {
-    completions = new Map()
-    registeredCommandCompletions.set(commands, completions)
-  }
-  completions.set(definition.name, completion)
-  return () => {
-    try {
-      dispose()
-    } finally {
-      if (completions.get(definition.name) !== completion) return
-      completions.delete(definition.name)
-      if (completions.size === 0) registeredCommandCompletions.delete(commands)
+  /** @param commands - command service proxy captured from the TUI owner context. */
+  constructor(private readonly commands: CommandRuntime) {}
+
+  /**
+   * Register one TUI command and retain its additive discovery metadata.
+   * @param definition - TUI-owned command registration.
+   * @returns disposer for both the Host registration and retained metadata.
+   */
+  register(definition: TuiCommandDefinition): ReturnType<CommandRuntime['register']> {
+    const dispose = this.commands.register(definition)
+    const completion = definition.completion
+    if (completion === undefined) return dispose
+    this.completions.set(definition.name, completion)
+    return () => {
+      try {
+        dispose()
+      } finally {
+        if (this.completions.get(definition.name) === completion) this.completions.delete(definition.name)
+      }
     }
   }
-}
 
-/** Read descriptors and restore TUI-owned completion metadata omitted by a legacy Host. */
-export function hostCommandDescriptors(
-  commands: CommandRuntime,
-  agent: Parameters<CommandRuntime['list']>[0],
-): readonly CommandDescriptor[] {
-  const descriptors = commands.list(agent)
-  const completions = registeredCommandCompletions.get(commands)
-  if (completions === undefined) return descriptors
-  return Object.freeze(descriptors.map((descriptor): CommandDescriptor => {
-    const descriptorWithCompletion = descriptor as HostCommandDescriptor & {
-      readonly completion?: CommandCompletionDescriptor
-    }
-    if (descriptorWithCompletion.completion !== undefined) return descriptorWithCompletion
-    const completion = completions.get(descriptor.name)
-    return completion === undefined ? descriptor : Object.freeze({ ...descriptor, completion })
-  }))
+  /**
+   * Read descriptors and restore TUI-owned metadata omitted by a legacy Host.
+   * @param agent - exact Agent whose effective commands are requested.
+   * @returns immutable effective descriptors with retained TUI metadata.
+   */
+  list(agent: Parameters<CommandRuntime['list']>[0]): readonly CommandDescriptor[] {
+    const descriptors = this.commands.list(agent)
+    if (this.completions.size === 0) return descriptors
+    return Object.freeze(descriptors.map((descriptor): CommandDescriptor => {
+      const descriptorWithCompletion = descriptor as HostCommandDescriptor & {
+        readonly completion?: CommandCompletionDescriptor
+      }
+      if (descriptorWithCompletion.completion !== undefined) return descriptorWithCompletion
+      const completion = this.completions.get(descriptor.name)
+      return completion === undefined ? descriptor : Object.freeze({ ...descriptor, completion })
+    }))
+  }
 }
 
 /** Terminal-safe semantic category for one bounded Session preview line. */
@@ -313,14 +313,125 @@ interface PathCompletionCapableFileSystem {
   ): Promise<FsPathCompletionResult>
 }
 
+interface LegacyPathCompletionCandidate {
+  readonly path: string
+  readonly type: 'file' | 'directory'
+  readonly rank: number
+}
+
+function pathCompletionRank(path: string, query: string): number | undefined {
+  if (query === '') return 0
+  const normalizedPath = path.normalize('NFC').toLocaleLowerCase()
+  const basename = normalizedPath.replace(/\/$/u, '').split('/').at(-1) ?? ''
+  if (basename.startsWith(query)) return 0
+  if (normalizedPath.startsWith(query)) return 1
+  if (basename.includes(query)) return 2
+  if (normalizedPath.includes(query)) return 3
+  return undefined
+}
+
+function comparePathCompletionCandidates(
+  left: LegacyPathCompletionCandidate,
+  right: LegacyPathCompletionCandidate,
+): number {
+  return left.rank - right.rank
+    || Number(left.type === 'file') - Number(right.type === 'file')
+    || left.path.localeCompare(right.path)
+}
+
+function requirePathCompletionLimit(name: string, value: number): void {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new RangeError(`${name} must be a positive safe integer`)
+}
+
+async function legacyHostCompletePaths(
+  fs: FileSystem,
+  root: FsTarget,
+  query: string,
+  options: {
+    readonly maxDepth: number
+    readonly maxItems: number
+    readonly maxScannedEntries: number
+    readonly signal?: AbortSignal
+  },
+): Promise<FsPathCompletionResult> {
+  requirePathCompletionLimit('maxDepth', options.maxDepth)
+  requirePathCompletionLimit('maxItems', options.maxItems)
+  requirePathCompletionLimit('maxScannedEntries', options.maxScannedEntries)
+  if (options.signal?.aborted) throw new FsError('path completion aborted', 'FS_ABORTED')
+
+  const normalizedQuery = query.replaceAll('\\', '/').replace(/^\.\/+/, '').normalize('NFC').toLocaleLowerCase()
+  const maxDepth = normalizedQuery === '' ? 1 : options.maxDepth
+  const queue: Array<{ target: FsTarget; path: string; depth: number }> = [
+    { target: root, path: '', depth: 0 },
+  ]
+  const visitedDirectories = new Set<string>([String(root.targetKey)])
+  const matches: LegacyPathCompletionCandidate[] = []
+  let scannedEntries = 0
+  let truncated = false
+
+  while (queue.length > 0) {
+    if (options.signal?.aborted) throw new FsError('path completion aborted', 'FS_ABORTED')
+    const directory = queue.shift()
+    if (directory === undefined) break
+    const remaining = options.maxScannedEntries - scannedEntries
+    if (remaining <= 0) {
+      truncated = true
+      break
+    }
+
+    let entries: FsDirEntry[]
+    try {
+      entries = await fs.listDir(directory.target, options.signal)
+    } catch (error: unknown) {
+      if (directory.depth === 0) throw error
+      if (error instanceof FsError
+        && (error.code === 'FS_PERMISSION_DENIED'
+          || error.code === 'FS_NOT_FOUND'
+          || error.code === 'FS_NOT_DIRECTORY')) continue
+      throw error
+    }
+    if (entries.length > remaining) truncated = true
+
+    for (const entry of entries.slice(0, remaining)) {
+      if (options.signal?.aborted) throw new FsError('path completion aborted', 'FS_ABORTED')
+      scannedEntries += 1
+      if (!fs.contains(root, entry.target)) continue
+      if (entry.type !== 'file' && entry.type !== 'directory') continue
+
+      const path = `${directory.path}${entry.name}${entry.type === 'directory' ? '/' : ''}`
+      const rank = pathCompletionRank(path, normalizedQuery)
+      if (rank !== undefined) {
+        matches.push({ path, type: entry.type, rank })
+        matches.sort(comparePathCompletionCandidates)
+        if (matches.length > options.maxItems) {
+          matches.pop()
+          truncated = true
+        }
+      }
+
+      if (entry.type === 'directory' && directory.depth + 1 < maxDepth) {
+        const key = String(entry.target.targetKey)
+        if (!visitedDirectories.has(key)) {
+          visitedDirectories.add(key)
+          queue.push({ target: entry.target, path, depth: directory.depth + 1 })
+        }
+      }
+    }
+  }
+
+  return {
+    entries: matches.map(({ path, type }) => ({ path, type })),
+    truncated,
+  }
+}
+
 /**
- * Complete workspace paths when the Host exposes bounded completion.
- * Older Hosts return no suggestions while ordinary path submission remains available.
+ * Complete workspace paths through the current Host helper or bounded legacy primitives.
  * @param fs - active Host filesystem service.
  * @param root - resolved workspace root.
  * @param query - workspace-relative query.
  * @param options - complete traversal and result bounds.
- * @returns bounded matches, or an empty legacy result.
+ * @returns bounded workspace-relative matches.
  */
 export function hostCompletePaths(
   fs: FileSystem,
@@ -336,7 +447,7 @@ export function hostCompletePaths(
   const candidate = fs as FileSystem & Partial<PathCompletionCapableFileSystem>
   return typeof candidate.completePaths === 'function'
     ? candidate.completePaths(root, query, options)
-    : Promise.resolve({ entries: [], truncated: false })
+    : legacyHostCompletePaths(fs, root, query, options)
 }
 
 /** One provider-neutral approval presentation projected by newer Hosts. */

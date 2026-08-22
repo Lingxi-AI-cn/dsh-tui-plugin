@@ -7,6 +7,8 @@ export type TuiSubmitMode = 'steer' | 'followup' | 'interrupt'
 
 /** Inputs relevant to running-Agent delivery selection. */
 export interface TuiComposerDeliveryInput {
+  /** The composer, rather than a dialog or another modal surface, owns input. */
+  readonly composerOwnsInput: boolean
   /** Only the root view exposes running delivery choices. */
   readonly rootView: boolean
   /** The visible Agent is currently driving a turn. */
@@ -28,7 +30,8 @@ export interface TuiComposerDeliveryInput {
 export function resolveTuiComposerDelivery(
   input: TuiComposerDeliveryInput,
 ): TuiSubmitMode | undefined {
-  if (!input.rootView || !input.running || !input.hasDraft || input.suggestionVisible) return undefined
+  if (!input.composerOwnsInput || !input.rootView || !input.running
+    || !input.hasDraft || input.suggestionVisible) return undefined
   const modified = input.key.meta === true || input.key.super === true || input.key.hyper === true
   if (input.key.ctrl === true && input.key.return === true && input.key.shift !== true && !modified) return 'interrupt'
   if (input.key.tab === true && input.key.shift !== true && input.key.ctrl !== true && !modified) return 'followup'

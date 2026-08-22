@@ -20,6 +20,8 @@ Provider-owned ChatGPT OAuth and dynamic account model discovery for the `openai
 
 Default storage is `$DSH_HOME/oauth/openai-codex.json` for the owner-only OAuth credential and `$DSH_HOME/model-catalogs/openai-codex.json` for the derivative last-good catalog. `clientVersion` is a pinned compatibility header and query value, not a model allowlist; deployments can override it without rebuilding. `streamIdleTimeoutMs` bounds one stalled provider read, while `maxRequestImageBytes` bounds encoded image history passed through the official pi-ai adapter.
 
+The plugin resolves the active Host's durable attachment service at request time and passes it to `PiAiAdapter`. Image-capable Codex routes can therefore read the exact `ImageAttachmentRef` bytes retained by the Session log; a missing service or unavailable object fails before provider I/O instead of silently dropping image content.
+
 The public TUI bundle mounts this route without signing a user in. An interactive surface reads `ctx.llm.authentication('openai-codex')`, runs `ctx.llm.login()` with the advertised `oauth` method, and supplies provider-neutral prompts and progress notifications. The TUI exposes that flow through `/models`. API keys and pasted access tokens are deliberately not accepted by this adapter.
 
 ## Dynamic model catalog
