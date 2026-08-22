@@ -4,7 +4,7 @@ This repository is the sanitized public source and release surface for the indep
 
 ## Current release contract
 
-- The next TUI release candidate source is `0.1.1-rc.8` and supports exactly official `@deepseek-ai/dsh@0.1.0-rc.8`; the previously published `0.1.0-rc.9` remains immutable until this candidate is tagged and published.
+- The current TUI release is `0.1.1-rc.8` and supports exactly official `@deepseek-ai/dsh@0.1.0-rc.8`; previously published versions, including `0.1.0-rc.9`, remain immutable.
 - `@lingxi-ai-cn/dsh-tui` is the only user-facing install package. The six internal packages `dsh-tui-runtime`, `dsh-llm-openai-codex`, `dsh-session-export`, `dsh-plugin-hub`, `dsh-plugin-hub-local`, and `dsh-profile-plugin-manager` use the same npm scope and exact release version.
 - The public default branch is `main`. Public release tags and npm versions are immutable; never move an existing `v*` tag or attempt to republish an existing npm version.
 

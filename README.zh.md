@@ -76,7 +76,7 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 
 ## 兼容性
 
-下一个公开源码候选有意与对应的官方 Harness 版本精确绑定。在该候选被打 tag 并发布以前，npm 当前已发布版本仍是 `0.1.0-rc.9`。
+当前公开 TUI 版本有意与对应的官方 Harness 版本精确绑定。
 
 | DSH TUI | DeepSeek Harness | Node.js | 平台 |
 | --- | --- | --- | --- |
@@ -123,7 +123,8 @@ Session 和凭据位于 profile 目录之外。只重新应用经过审查的自
 <summary>安装说明</summary>
 
 - pnpm 在安装 profile 时可能打印 missing-peer 警告。官方 DSH 会提供这些精确 Host package；把建议的 `@deepseek-ai/*` peer 安装到 profile 中反而可能创建重复 Host 图。
-- TUI bundle 已包含 Codex adapter，但安装过程不会启动 OAuth，也不会修改现有提供方凭据。需要连接账户时，请在 `/models` 中选择 **使用 ChatGPT 登录**。
+- 用户只需安装入口包 `@lingxi-ai-cn/dsh-tui`。它会安装包括 Codex adapter 在内的六个精确版本内部包；不要把这些内部包逐一添加到 profile。
+- 安装过程不会启动 OAuth，也不会修改现有提供方凭据。需要连接账户时，请在 `/models` 中选择 **使用 ChatGPT 登录**。
 - npm 可能询问是否允许官方 DSH 原生 helper 的安装脚本。请按 npm 针对官方安装打印的提示处理，不要把这些 package 加入 TUI profile。
 
 </details>

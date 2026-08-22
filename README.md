@@ -76,7 +76,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 
 ## Compatibility
 
-The next public source candidate is deliberately pinned to the matching official Harness release. The currently published npm version remains `0.1.0-rc.9` until this candidate is tagged and released.
+The current public TUI release is deliberately pinned to the matching official Harness release.
 
 | DSH TUI | DeepSeek Harness | Node.js | Platforms |
 | --- | --- | --- | --- |
@@ -123,7 +123,8 @@ Sessions and credentials live outside the profile directory. Reapply only review
 <summary>Installation notes</summary>
 
 - pnpm may print missing-peer warnings while installing the profile. Official DSH supplies those exact Host packages; installing the suggested `@deepseek-ai/*` peers into the profile can create a duplicate Host graph.
-- The TUI bundle includes its Codex adapter, but installation does not start OAuth or modify existing provider credentials. Choose **Sign in with ChatGPT** through `/models` when you want to connect an account.
+- Install only the user-facing `@lingxi-ai-cn/dsh-tui` package. It installs the six exact-version internal packages, including the Codex adapter; do not add them to the profile individually.
+- Installation does not start OAuth or modify existing provider credentials. Choose **Sign in with ChatGPT** through `/models` when you want to connect an account.
 - npm may ask whether to allow install scripts for official DSH native helpers. Follow npm's printed guidance for the official installation; do not add those packages to the TUI profile.
 
 </details>
