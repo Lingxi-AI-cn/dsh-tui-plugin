@@ -14,11 +14,12 @@ import { terminalSafe } from './sanitize.ts'
 import { tuiMessage, type TuiLocale } from './locale.ts'
 import { tuiAgentModeDescription, tuiAgentModeName } from './mode.ts'
 import type { TuiWorkSummary } from './work.ts'
+import type { TuiSpeedProjection } from './live-feedback.ts'
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 /** Stable action targets exposed by the native TUI footer. */
-export type TuiFooterItemId = 'model' | 'mode' | 'permission' | 'work' | 'context' | 'workspace' | 'transcript'
+export type TuiFooterItemId = 'model' | 'mode' | 'permission' | 'work' | 'speed' | 'context' | 'workspace' | 'transcript'
 
 /** One actionable status item derived from authoritative runtime state. */
 export interface TuiFooterItemDescriptor {
@@ -29,7 +30,7 @@ export interface TuiFooterItemDescriptor {
   /** Compact current value shown in the status row. */
   readonly value: string
   /** Enter behavior for this item. */
-  readonly action: 'models' | 'modes' | 'permissions' | 'work' | 'detail'
+  readonly action: 'models' | 'modes' | 'permissions' | 'work' | 'detail' | 'bottom'
   /** Complete read-only detail shown for local status items. */
   readonly detailLines: readonly string[]
 }
@@ -76,6 +77,8 @@ export interface TuiFooterSources {
   readonly contextBreakdown?: ContextBreakdownProjection | undefined
   /** Whole-log settled model timing and decode facts. */
   readonly sessionStats?: SessionStatsProjection | undefined
+  /** Latest-step or settled decode speed, with explicit approximation semantics. */
+  readonly speed?: TuiSpeedProjection | undefined
   /** Authoritative background-work counters. */
   readonly work?: TuiWorkSummary | undefined
   /** Full Session workspace path. */
@@ -179,6 +182,23 @@ export function tuiFooterItems(
     ))
   }
 
+  const speed = sources.speed
+  if (speed !== undefined) {
+    items.push(item(
+      'speed',
+      'TPS',
+      `${speed.approximate ? '~' : ''}${speed.tokensPerSecond.toFixed(1)}${speed.trend === '' ? '' : ` ${speed.trend}`}`,
+      'detail',
+      [
+        tuiMessage(locale, speed.approximate ? 'footer.speed.live' : 'footer.speed.settled', {
+          throughput: speed.tokensPerSecond.toFixed(1), tokens: formatTokens(speed.tokens),
+          seconds: (speed.elapsedMs / 1_000).toFixed(1),
+        }),
+        ...speed.approximate ? [tuiMessage(locale, 'footer.speed.estimate')] : [],
+      ],
+    ))
+  }
+
   const context = sources.context
   const used = context?.projectedTokens ?? context?.pressureTokens
   const capacity = context?.contextWindow
@@ -191,13 +211,14 @@ export function tuiFooterItems(
     items.push(item(
       'context',
       tuiMessage(locale, 'footer.label.context'),
-      `~${percent}%`,
+      `~${percent}%${sources.contextBreakdown === undefined ? '' : ` ${tuiContextSegmentBar(sources.contextBreakdown)}`}`,
       'detail',
       [
         tuiMessage(locale, 'footer.context.approximate', { kind, tokens: formatTokens(boundedUsed) }),
         tuiMessage(locale, 'footer.context.window', { tokens: formatTokens(capacity) }),
         tuiMessage(locale, 'footer.context.remaining', { tokens: formatTokens(Math.max(0, capacity - boundedUsed)) }),
         tuiMessage(locale, 'footer.context.estimate'),
+        ...sources.contextBreakdown === undefined ? [] : [tuiMessage(locale, 'footer.context.bar')],
         ...contextBreakdownLines(sources.contextBreakdown, locale),
         ...tokenUsageLines(sources.tokenUsage, locale),
         ...sessionTimingLines(sources.sessionStats, locale),
@@ -219,12 +240,13 @@ export function tuiFooterItems(
   const range = position.total === 0 || position.startIndex < 0 || position.endIndex < 0
     ? '0/0'
     : `${position.startIndex + 1}-${position.endIndex + 1}/${position.total}`
-  const positionValue = `${position.hasOlder ? '↑' : ''}${range}${position.hasNewer ? '↓' : ''}`
+  const newerCount = position.hasNewer ? Math.max(0, position.total - position.endIndex - 1) : 0
+  const positionValue = `${position.hasOlder ? '↑' : ''}${range}${newerCount > 0 ? `↓${newerCount}` : ''}`
   items.push(item(
     'transcript',
     tuiMessage(locale, 'footer.label.transcript'),
     positionValue,
-    'detail',
+    newerCount > 0 ? 'bottom' : 'detail',
     [
       tuiMessage(locale, 'footer.transcript.mounted', { range }),
       tuiMessage(locale, 'footer.transcript.older', {
@@ -253,7 +275,7 @@ export function visibleTuiFooterItems(
     ? ['model', 'mode', 'work', 'permission']
     : columns < 78
       ? ['model', 'mode', 'work', 'permission', 'context', 'transcript']
-      : ['model', 'mode', 'work', 'permission', 'context', 'workspace', 'transcript']
+      : ['model', 'mode', 'work', 'permission', 'speed', 'context', 'workspace', 'transcript']
   const visible = items.filter(candidate => allowed.includes(candidate.id))
   return Object.freeze(visible.length === 0 ? items.slice(0, 1) : visible)
 }
@@ -313,7 +335,7 @@ function footerStatusSegments(
     stringWidth(item.label) + 2,
   ))
   let remaining = Math.max(0, available - budgets.reduce((total, value) => total + value, 0))
-  for (const id of ['work', 'context', 'transcript'] as const) {
+  for (const id of ['work', 'speed', 'transcript', 'context'] as const) {
     const index = items.findIndex(item => item.id === id)
     if (index < 0) continue
     const wanted = Math.max(0, stringWidth(texts[index] ?? '') - (budgets[index] ?? 0))
@@ -419,6 +441,34 @@ function pathLabel(path: string): string {
 
 function formatTokens(tokens: number): string {
   return String(Math.round(tokens)).replace(/\B(?=(\d{3})+(?!\d))/gu, ',')
+}
+
+/**
+ * Build a system/tools/messages composition bar using largest remainders.
+ * @param breakdown - approximate token composition from the Host projection.
+ * @param cells - fixed number of rendered composition cells.
+ * @returns one bracketed S/T/M segment bar.
+ */
+export function tuiContextSegmentBar(
+  breakdown: ContextBreakdownProjection,
+  cells = 8,
+): string {
+  const count = Math.max(1, Math.floor(cells))
+  const values = [breakdown.systemTokens, breakdown.toolsTokens, breakdown.messageTokens]
+    .map(value => Math.max(0, value))
+  const total = values.reduce((sum, value) => sum + value, 0)
+  if (total <= 0) return `[${'·'.repeat(count)}]`
+  const exact = values.map(value => value * count / total)
+  const allocated = exact.map(value => Math.floor(value))
+  let remaining = count - allocated.reduce((sum, value) => sum + value, 0)
+  const order = exact.map((value, index) => ({ index, remainder: value - Math.floor(value) }))
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index)
+  for (const entry of order) {
+    if (remaining <= 0) break
+    allocated[entry.index] = (allocated[entry.index] ?? 0) + 1
+    remaining -= 1
+  }
+  return `[${'S'.repeat(allocated[0] ?? 0)}${'T'.repeat(allocated[1] ?? 0)}${'M'.repeat(allocated[2] ?? 0)}]`
 }
 
 function contextBreakdownLines(

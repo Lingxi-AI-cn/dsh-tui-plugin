@@ -23,6 +23,20 @@ describe('fixture Plugin Hub provider', () => {
     await expect(provider.plugin(item.id)).resolves.toMatchObject({ versions: [{ version: '1.0.0' }] })
   })
 
+  it('exposes discovery repositories separately from installable catalog rows', async () => {
+    const provider = createFixturePluginHubProvider({
+      revision: 7, items: [item], repositories: [{
+        id: 'repo_fixture', repository: { provider: 'github', fullName: 'example/discovery', url: 'https://github.com/example/discovery', primaryLanguage: 'TypeScript' },
+        stars: 12, forks: 1, topics: ['dsh-plugin'], catalogState: 'candidate', stateReason: null, observedAt: '2026-08-19T00:01:00Z', installable: false,
+        sync: { headSha: 'a'.repeat(40), lastSeenAt: '2026-08-19T00:00:00Z', lastSyncedAt: '2026-08-19T00:01:00Z' },
+        scan: { status: 'never', scannerVersion: null, sourceCommit: null, packageCount: 0, updatedAt: null, errorCode: null, errorSummary: null, rejectionCodes: [] },
+        packages: { total: 0, active: 0, rejected: 0 }, published: { projectionCount: 0, installableCount: 0, revision: null },
+      }],
+    })
+    await expect(provider.searchRepositories({ sort: 'stars' })).resolves.toMatchObject({ items: [{ id: 'repo_fixture', catalogState: 'candidate' }] })
+    await expect(provider.search({ sort: 'stars' })).resolves.toMatchObject({ items: [{ id: item.id }] })
+  })
+
   it('defaults Registry providers to catalog-only profile access', async () => {
     const ctx = new Context()
     await ctx.plugin(PluginHubRuntime)
@@ -356,7 +370,7 @@ describe('Registry request bounds and cache behavior', () => {
     }
   })
 
-  it('requires the search data.items response field and reuses ETag entries', async () => {
+  it('requires the search data.items response field and reuses ETag entries without stale fallback', async () => {
     let requests = 0
     const server = createServer((request, response) => {
       requests += 1
@@ -373,8 +387,11 @@ describe('Registry request bounds and cache behavior', () => {
       const ctx = new Context()
       await ctx.plugin(PluginHubRuntime)
       apply(ctx, { registryUrl: `http://127.0.0.1:${port}`, allowLoopbackHttp: true })
-      await expect(ctx.pluginHub.search({ query: 'fixture' })).resolves.toMatchObject({ items: [{ id: 'plg_fixture' }] })
-      await expect(ctx.pluginHub.search({ query: 'fixture' })).resolves.toMatchObject({ items: [{ id: 'plg_fixture' }] })
+      const first = await ctx.pluginHub.search({ query: 'fixture' })
+      const second = await ctx.pluginHub.search({ query: 'fixture' })
+      expect(first).toMatchObject({ items: [{ id: 'plg_fixture' }] })
+      expect(second).toEqual(first)
+      expect(second).not.toHaveProperty('stale')
       expect(requests).toBe(2)
       await ctx.fiber.dispose()
     } finally {

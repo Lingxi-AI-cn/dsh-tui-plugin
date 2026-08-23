@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  advanceTuiScreenClick, projectTuiScreenMap, resolveTuiScreenSelection,
+  advanceTuiScreenClick, extendTuiScreenSelection, projectTuiScreenMap, resolveTuiScreenSelection,
   tuiScreenSelectionText, tuiScreenTextSegments,
   type TuiScreenMap, type TuiScreenSelection,
 } from '../src/index.ts'
@@ -73,6 +73,18 @@ describe('resolveTuiScreenSelection', () => {
     expect(secondLine).toMatchObject({ start: { row: 2, column: 0 }, end: { row: 2, column: 1 }, kind: 'triple' })
     expect(textFor(map, firstLine!)).toBe('abcd')
     expect(textFor(map, secondLine!)).toBe('xy')
+  })
+
+  it('expands an existing range by grapheme and logical-line edge from the keyboard', () => {
+    const map = projectTuiScreenMap([{ semanticBlockKey: 'line', text: 'alpha beta' }], { columns: 6 })
+    const beta = resolveTuiScreenSelection(map, { kind: 'double', at: { row: 1, column: 1 } })
+    expect(beta).toBeDefined()
+    const left = extendTuiScreenSelection(map, beta!, 'left')
+    expect(left.kind).toBe('keyboard')
+    expect(tuiScreenSelectionText(map, left)).toBe(' beta')
+    const home = extendTuiScreenSelection(map, left, 'home')
+    expect(tuiScreenSelectionText(map, home)).toBe('alpha beta')
+    expect(extendTuiScreenSelection(map, home, 'right')).toBe(home)
   })
 
   it('never resolves a gutter or padding cell', () => {

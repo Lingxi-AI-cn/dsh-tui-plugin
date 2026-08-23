@@ -8,7 +8,7 @@ const SHOW_CURSOR = '\u001B[?25h'
 const HIDE_CURSOR = '\u001B[?25l'
 const ENABLE_MOUSE = '\u001B[?1000h\u001B[?1006h'
 const ENABLE_SELECTION_MOUSE = '\u001B[?1002h'
-const DISABLE_SELECTION_MOUSE = '\u001B[?1002l'
+const DISABLE_SELECTION_MOUSE = `\u001B[?1002l${ENABLE_MOUSE}`
 const DISABLE_MOUSE = '\u001B[?1000l\u001B[?1002l\u001B[?1003l\u001B[?1006l'
 const ENABLE_ALTERNATE_SCROLL = '\u001B[?1007h'
 const DISABLE_ALTERNATE_SCROLL = '\u001B[?1007l'
@@ -204,7 +204,9 @@ export class TerminalSession {
   /**
    * Enable or disable button-motion reports for a process-local text-selection owner.
    * All-motion hover (`1003`) is never enabled. Unsupported or inactive sessions
-   * return `false` without writing a terminal mode sequence.
+   * return `false` without writing a terminal mode sequence. Disabling explicitly
+   * reasserts click and SGR reporting because terminals differ on whether resetting
+   * button-motion preserves the previously enabled click mode.
    * @param enabled - whether selection drag motion should be reported.
    * @returns whether the requested state is active in this transaction.
    */

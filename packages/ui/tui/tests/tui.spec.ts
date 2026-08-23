@@ -33,7 +33,7 @@ import {
   normalizeTuiTranscriptSearchText, resolveTuiTranscriptSearchHit, TuiTranscriptSearchIndex,
   TuiTranscriptDetailCache, tuiTranscriptDetailText, TuiTranscriptProjectionCache, TuiTranscriptScrollController,
   TuiTranscriptViewportIndex, tuiTranscriptSearchSegments,
-  tuiFooterItems, tuiFooterStatusLine, tuiInteractionHelpLines, tuiSelectedFooterLine,
+  tuiContextSegmentBar, tuiFooterItems, tuiFooterStatusLine, tuiInteractionHelpLines, tuiSelectedFooterLine,
   tuiAgentModeName, tuiAgentModeOptions,
   moveTuiFooterSelection, visibleTuiFooterItems, type TuiKeypress,
   filterTuiResumeCandidates, formatTuiRelativeTime,
@@ -43,10 +43,10 @@ import {
   consumeTuiDoubleEscape, TUI_DOUBLE_ESCAPE_WINDOW_MS,
   formatTuiWorkElapsed, formatTuiWorkOwner, projectTuiWork,
   applyTuiTerminalReply, TuiAgentViewStateCache, TuiTerminalInputDecoder, tuiTerminalMouseReportKind,
-  resolveTuiTheme, TUI_MOUSE_PREFERENCES, TUI_SETTINGS_SCHEMA, TUI_THEME_PREFERENCES,
+  resolveTuiTheme, TUI_ACTIVITY_PREFERENCES, TUI_MOUSE_PREFERENCES, TUI_SETTINGS_SCHEMA, TUI_THEME_PREFERENCES,
 } from '../src/index.ts'
 import {
-  inputCursorTarget, tuiPluginHubDetailTextStyle, tuiStartupComposerFrame, tuiWorkingFrame,
+  inputCursorTarget, toggleTuiTranscriptFocus, tuiPluginHubDetailTextStyle, tuiStartupComposerFrame, tuiWorkingFrame,
 } from '../src/app.tsx'
 import {
   resolveTuiStartupLogoVariant, TUI_STARTUP_LOGO_HEIGHT,
@@ -144,10 +144,18 @@ describe('semantic terminal themes', () => {
 
   it('defaults persisted settings and rejects invalid theme or keybinding values', () => {
     expect(TUI_THEME_PREFERENCES).toEqual(['auto', 'dark', 'light', 'no-color'])
+    expect(TUI_ACTIVITY_PREFERENCES).toEqual(['dots', 'pulse', 'minimal', 'off'])
     expect(TUI_MOUSE_PREFERENCES).toEqual(['auto', 'off'])
-    expect(TUI_SETTINGS_SCHEMA({} as never)).toEqual({ theme: 'auto', locale: 'en', mouse: 'auto', keybindings: {} })
+    expect(TUI_SETTINGS_SCHEMA({} as never)).toEqual({
+      theme: 'auto', locale: 'en', mouse: 'auto', activity: 'dots', keybindings: {},
+    })
     expect(TUI_SETTINGS_SCHEMA({ theme: 'dark', mouse: 'off' } as never))
-      .toEqual({ theme: 'dark', locale: 'en', mouse: 'off', keybindings: {} })
+      .toEqual({ theme: 'dark', locale: 'en', mouse: 'off', activity: 'dots', keybindings: {} })
+    expect(TUI_SETTINGS_SCHEMA({ themeFile: 'nord.json', activity: 'pulse' } as never)).toMatchObject({
+      themeFile: 'nord.json', activity: 'pulse',
+    })
+    expect(() => TUI_SETTINGS_SCHEMA({ themeFile: '../nord.json' } as never)).toThrow()
+    expect(() => TUI_SETTINGS_SCHEMA({ activity: 'spin' } as never)).toThrow()
     expect(() => TUI_SETTINGS_SCHEMA({ theme: 'solarized' } as never)).toThrow()
     expect(() => TUI_SETTINGS_SCHEMA({ locale: 'ja' } as never)).toThrow()
     expect(() => TUI_SETTINGS_SCHEMA({ mouse: 'hover' } as never)).toThrow()
@@ -923,6 +931,10 @@ describe('virtual transcript viewport', () => {
 describe('TuiTerminalInputDecoder', () => {
   const decode = (sequence: string): readonly unknown[] => new TuiTerminalInputDecoder().push(sequence)
 
+  it('infers Shift from one legacy-terminal uppercase key', () => {
+    expect(decode('S')).toEqual([{ kind: 'input', input: 'S', key: { shift: true } }])
+  })
+
   it('separates controls from committed text in one transport chunk', () => {
     expect(decode('\u007fexports')).toEqual([
       { kind: 'input', input: '', key: { backspace: true } },
@@ -1207,6 +1219,7 @@ describe('TerminalSession', () => {
     expect(output.match(/\u001b\[\?1002h/gu)).toHaveLength(2)
     expect(terminal.setSelectionMouseMode(false)).toBe(true)
     expect(output.match(/\u001b\[\?1002l/gu)).toHaveLength(2)
+    expect(output).toContain('\u001b[?1002l\u001b[?1000h\u001b[?1006h')
     terminal.restore()
     expect(terminal.setSelectionMouseMode(true)).toBe(false)
   })
@@ -1621,6 +1634,28 @@ describe('TUI working indicator', () => {
     expect(frames.slice(0, 6)).toEqual(['.  ', '.. ', '...', ' ..', '  .', ' ..'])
     expect(frames.slice(6)).toEqual(frames.slice(0, 6))
     expect(frames.every(frame => stringWidth(frame) === 3)).toBe(true)
+  })
+
+  it('offers bounded pulse, minimal, and disabled variants', () => {
+    expect(Array.from({ length: 4 }, (_, tick) => tuiWorkingFrame(tick, 'pulse')))
+      .toEqual(['·  ', '∙  ', '●  ', '∙  '])
+    expect(tuiWorkingFrame(5, 'minimal')).toBe('›  ')
+    expect(tuiWorkingFrame(5, 'off')).toBe('')
+  })
+})
+
+describe('TUI transcript pointer focus', () => {
+  it('opens a clicked row directly and closes the same row on a second click', () => {
+    const detail = toggleTuiTranscriptFocus(undefined, 'event:4', 3)
+    expect(detail).toEqual({
+      mode: 'detail', focusedKey: 'event:4', focusedIndex: 3, detailOffset: 0, returnToComposer: true,
+    })
+    expect(toggleTuiTranscriptFocus(detail, 'event:4', 3))
+      .toEqual({ mode: 'browse', focusedKey: 'event:4', focusedIndex: 3 })
+    expect(toggleTuiTranscriptFocus(detail, 'event:5', 4))
+      .toEqual({
+        mode: 'detail', focusedKey: 'event:5', focusedIndex: 4, detailOffset: 0, returnToComposer: true,
+      })
   })
 })
 
@@ -2278,6 +2313,8 @@ describe('TUI Session resume picker', () => {
       SessionId('a-id'), SessionId('z-id'), SessionId('older-id'),
     ])
     expect(filterTuiResumeCandidates(candidates, 'workspace', '')).toHaveLength(2)
+    expect(filterTuiResumeCandidates(candidates, 'all', '').map(candidate => candidate.record.header.id))
+      .toEqual([SessionId('a-id'), SessionId('older-id'), SessionId('z-id')])
     expect(filterTuiResumeCandidates(candidates, 'workspace', 'OTHER')).toEqual([])
     expect(filterTuiResumeCandidates(candidates, 'all', 'OTHER').map(candidate => candidate.record.header.id))
       .toEqual([SessionId('z-id')])
@@ -2325,8 +2362,10 @@ describe('TUI interaction bindings', () => {
       r: { input: 'r', key: {} },
       'meta+p': { input: 'p', key: { meta: true } },
       'meta+r': { input: 'r', key: { meta: true } },
-      'meta+s': { input: 's', key: { meta: true } },
-      'meta+c': { input: 'c', key: { meta: true } },
+      'shift+s': { input: 'S', key: { shift: true } },
+      'shift+c': { input: 'C', key: { shift: true } },
+      'shift+i': { input: 'I', key: { shift: true } },
+      'shift+o': { input: 'O', key: { shift: true } },
       pageup: { input: '', key: { pageUp: true } },
       pagedown: { input: '', key: { pageDown: true } },
       home: { input: '\u001b[H', key: {} },
@@ -2406,6 +2445,19 @@ describe('TUI interaction bindings', () => {
 
   it('keeps Escape bound to the running-Agent cancel action', () => {
     expect(matchTuiInteractionAction('Composer', '', { escape: true })).toBe('composer.cancel')
+  })
+
+  it('keeps Plugin Hub letter search distinct from shifted catalog actions', () => {
+    expect(matchTuiInteractionAction('PluginHub', 's', {})).toBeUndefined()
+    expect(matchTuiInteractionAction('PluginHub', 'c', {})).toBeUndefined()
+    expect(matchTuiInteractionAction('PluginHub', 'i', {})).toBeUndefined()
+    expect(matchTuiInteractionAction('PluginHub', 'o', {})).toBeUndefined()
+    expect(matchTuiInteractionAction('PluginHub', 'S', { shift: true })).toBe('pluginHub.sort')
+    expect(matchTuiInteractionAction('PluginHub', 'C', { shift: true })).toBe('pluginHub.category')
+    expect(matchTuiInteractionAction('PluginHub', 'I', { shift: true })).toBe('pluginHub.installable')
+    expect(matchTuiInteractionAction('PluginHub', 'O', { shift: true })).toBe('pluginHub.openRepository')
+    expect(TUI_SETTINGS_SCHEMA({ keybindings: { 'pluginHub.sort': ['shift+s'] } } as never))
+      .toMatchObject({ keybindings: { 'pluginHub.sort': ['shift+s'] } })
   })
 
   it('uses one effective registry for custom dispatch and help', () => {
@@ -2509,15 +2561,18 @@ describe('TUI actionable footer', () => {
       decodeMs: 3_000,
       decodeTokens: 60,
     },
+    speed: { tokensPerSecond: 20, approximate: false, trend: '▁▃▆█', tokens: 60, elapsedMs: 3_000 },
     workspace: '/workspace/DSH',
     transcript: { startIndex: 4, endIndex: 8, total: 12, hasOlder: true, hasNewer: true },
   }
 
   it('projects authoritative items and omits context without a provider sample', () => {
     const items = tuiFooterItems(sources)
-    expect(items.map(item => item.id)).toEqual(['model', 'permission', 'context', 'workspace', 'transcript'])
+    expect(items.map(item => item.id)).toEqual(['model', 'permission', 'speed', 'context', 'workspace', 'transcript'])
     expect(items.find(item => item.id === 'model')?.detailLines).toContain('Selection: next request')
-    expect(items.find(item => item.id === 'context')).toMatchObject({ value: '~25%', action: 'detail' })
+    expect(items.find(item => item.id === 'speed')).toMatchObject({ value: '20.0 ▁▃▆█', action: 'detail' })
+    expect(items.find(item => item.id === 'context')).toMatchObject({ value: '~25% [STMMMMMM]', action: 'detail' })
+    expect(tuiContextSegmentBar(sources.contextBreakdown)).toBe('[STMMMMMM]')
     expect(items.find(item => item.id === 'context')?.detailLines).toContain('Approximate remaining: 24,000 tokens')
     expect(items.find(item => item.id === 'context')?.detailLines).toContain(
       'Approximate composition: system ~1,000 · tools ~500 · messages ~6,500',
@@ -2532,13 +2587,13 @@ describe('TUI actionable footer', () => {
     expect(items.find(item => item.id === 'context')?.detailLines).toContain(
       'Decode throughput: 20.0 tokens/s (60 output tokens)',
     )
-    expect(items.find(item => item.id === 'transcript')?.value).toBe('↑5-9/12↓')
+    expect(items.find(item => item.id === 'transcript')).toMatchObject({ value: '↑5-9/12↓3', action: 'bottom' })
 
     const withoutSample = tuiFooterItems({ ...sources, context: { contextWindow: 32_000 } })
     expect(withoutSample.some(item => item.id === 'context')).toBe(false)
 
     const chinese = tuiFooterItems(sources, 'zh')
-    expect(chinese.map(item => item.label)).toEqual(['模型', '权限', '上下文', '目录', '视图'])
+    expect(chinese.map(item => item.label)).toEqual(['模型', '权限', 'TPS', '上下文', '目录', '视图'])
     expect(chinese.find(item => item.id === 'model')?.detailLines).toContain('选择：下次请求')
     expect(chinese.find(item => item.id === 'context')?.detailLines).toContain(
       '估算组成：系统 ~1,000 · 工具 ~500 · 消息 ~6,500',
@@ -2553,7 +2608,7 @@ describe('TUI actionable footer', () => {
     }
     const items = tuiFooterItems({ ...sources, agentPreset: preset })
     expect(items.map(item => item.id)).toEqual([
-      'model', 'mode', 'permission', 'context', 'workspace', 'transcript',
+      'model', 'mode', 'permission', 'speed', 'context', 'workspace', 'transcript',
     ])
     expect(items.find(item => item.id === 'mode')).toMatchObject({
       label: 'mode', value: 'Minimal', action: 'modes',
@@ -2598,7 +2653,7 @@ describe('TUI actionable footer', () => {
       work: { running: 2, queued: 0, failed: 1, total: 4 },
     })
     expect(items.map(item => item.id)).toEqual([
-      'model', 'permission', 'work', 'context', 'workspace', 'transcript',
+      'model', 'permission', 'work', 'speed', 'context', 'workspace', 'transcript',
     ])
     expect(items.find(item => item.id === 'work')).toMatchObject({
       value: '2r/0q/1f', action: 'work',
@@ -2621,8 +2676,8 @@ describe('TUI actionable footer', () => {
     expect(stringWidth(tuiSelectedFooterLine(narrow, 'permission', 38))).toBeLessThanOrEqual(38)
 
     const wide = tuiFooterStatusLine(items, 78)
-    expect(wide).toContain('ctx ~25%')
-    expect(wide).toContain('view ↑5-9/12↓')
+    expect(wide).toContain('TPS 20.0')
+    expect(wide).toContain('view ↑5-9/12↓3')
   })
 })
 

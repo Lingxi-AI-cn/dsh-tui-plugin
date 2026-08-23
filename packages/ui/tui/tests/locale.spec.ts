@@ -13,7 +13,7 @@ import {
 
 describe('native TUI runtime locale catalog', () => {
   it('ships a versioned English and Chinese catalog with the English fallback', () => {
-    expect(TUI_LOCALE_CATALOG_VERSION).toBe(3)
+    expect(TUI_LOCALE_CATALOG_VERSION).toBe(4)
     expect(TUI_LOCALES).toEqual(['en', 'zh'])
     const keys = Object.keys(TUI_LOCALE_CATALOG.en).toSorted()
     expect(Object.keys(TUI_LOCALE_CATALOG.zh).toSorted()).toEqual(keys)

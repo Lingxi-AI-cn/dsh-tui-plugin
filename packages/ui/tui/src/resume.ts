@@ -130,13 +130,36 @@ export function filterTuiResumeCandidates(
   query: string,
 ): TuiResumeCandidate[] {
   const scoped = scope === 'all'
-    ? candidates
+    ? groupTuiResumeCandidates(candidates)
     : candidates.filter(candidate => candidate.currentWorkspace)
   const normalized = normalizeResumeText(query.trim())
   if (normalized === '') return [...scoped]
   return scoped.filter(candidate => normalizeResumeText(candidate.title).includes(normalized)
     || normalizeResumeText(candidate.record.header.id).includes(normalized)
     || (scope === 'all' && normalizeResumeText(candidate.workspaceLabel).includes(normalized)))
+}
+
+/**
+ * Keep all-workspace browsing readable without losing newest-first order inside each workspace.
+ * The current workspace appears first, followed by other workspace groups ordered by their
+ * most recently active Session.
+ * @param candidates - already newest-first Session candidates.
+ * @returns candidates grouped by workspace with the current workspace first.
+ */
+export function groupTuiResumeCandidates(
+  candidates: readonly TuiResumeCandidate[],
+): TuiResumeCandidate[] {
+  const groups = new Map<string, TuiResumeCandidate[]>()
+  for (const candidate of candidates) {
+    const entries = groups.get(candidate.workspaceLabel) ?? []
+    entries.push(candidate)
+    groups.set(candidate.workspaceLabel, entries)
+  }
+  return [...groups.values()]
+    .sort((a, b) => Number(Boolean(b[0]?.currentWorkspace)) - Number(Boolean(a[0]?.currentWorkspace))
+      || (b[0]?.updatedAt ?? 0) - (a[0]?.updatedAt ?? 0)
+      || (a[0]?.workspaceLabel ?? '').localeCompare(b[0]?.workspaceLabel ?? ''))
+    .flatMap(group => group)
 }
 
 /**

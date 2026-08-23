@@ -1,5 +1,6 @@
 /** Render-generation-bound terminal pointer regions and typed UI actions. */
 
+import stringWidth from 'string-width'
 import type { TuiInteractionContext } from './keybindings.ts'
 import { tuiFooterPointerTargets, type TuiFooterItemId, type TuiFooterItemDescriptor } from './footer.ts'
 
@@ -35,7 +36,7 @@ export type TuiPointerAction =
   }
   | {
     readonly id: 'pluginHub.toggleView'
-    readonly targetView: 'discover' | 'installed'
+    readonly targetView: 'discover' | 'discovery' | 'installed'
   }
   | {
     readonly id: 'pluginHub.accept'
@@ -43,6 +44,18 @@ export type TuiPointerAction =
   }
   | {
     readonly id: 'pluginHub.close'
+  }
+  | {
+    readonly id: 'pluginHub.sort'
+  }
+  | {
+    readonly id: 'pluginHub.category'
+  }
+  | {
+    readonly id: 'pluginHub.installable'
+  }
+  | {
+    readonly id: 'pluginHub.openRepository'
   }
   | {
     readonly id: 'resume.scope'
@@ -175,9 +188,29 @@ export interface TuiPluginHubPointerOptions {
   /** Whether the profile change confirmation projection is active. */
   readonly confirmation: boolean
   /** Current Plugin Hub browse mode. */
-  readonly view: 'discover' | 'installed'
+  readonly view: 'discover' | 'discovery' | 'installed'
   /** Current controller phase. */
   readonly phase: 'loading' | 'browse' | 'detail-loading' | 'detail' | 'planning' | 'confirm' | 'staging' | 'handoff' | 'error'
+  /** Rendered tab prefix and labels in their visual order. */
+  readonly tabs: {
+    readonly line: string
+    readonly installedLabel: string
+    readonly registryLabel: string
+    readonly repositoriesLabel: string
+  }
+  /** Rendered Registry status line and the labels that own catalog controls. */
+  readonly catalog?: {
+    readonly line: string
+    /** Omitted when the Registry has not supplied any usable category facets. */
+    readonly categoryLabel?: string | undefined
+    readonly installableLabel: string
+    readonly sortLabel: string
+  } | undefined
+  /** Visible zero-based detail rows that open the current GitHub repository. */
+  readonly detailLinks?: readonly {
+    readonly rowOffset: number
+    readonly text: string
+  }[] | undefined
   /** Index of the first row mounted in the current list window. */
   readonly visibleStart: number
   /** Bounded row heights for the mounted list slice. */
@@ -199,24 +232,34 @@ export function tuiPluginHubPointerRegions(
 ): readonly TuiPointerRegion[] {
   const regions: TuiPointerRegion[] = []
   if (options.phase === 'browse' || options.phase === 'detail') {
-    regions.push(
-      {
-        id: 'pluginHub:discover-tab',
-        rect: { left: 3, top: 3, right: 9, bottom: 3 },
-        context: options.context,
-        priority: 40,
-        action: { id: 'pluginHub.toggleView', targetView: 'discover' },
-      },
-      {
-        id: 'pluginHub:installed-tab',
-        rect: { left: 13, top: 3, right: 20, bottom: 3 },
-        context: options.context,
-        priority: 40,
-        action: { id: 'pluginHub.toggleView', targetView: 'installed' },
-      },
-    )
+    const installed = textPointerRegion('pluginHub:installed-tab', options.tabs.line, options.tabs.installedLabel,
+      0, options.context, { id: 'pluginHub.toggleView', targetView: 'installed' }, 3)
+    const registry = textPointerRegion('pluginHub:discover-tab', options.tabs.line, options.tabs.registryLabel,
+      installed?.endIndex ?? 0, options.context, { id: 'pluginHub.toggleView', targetView: 'discover' }, 3)
+    const repositories = textPointerRegion('pluginHub:discovery-tab', options.tabs.line, options.tabs.repositoriesLabel,
+      registry?.endIndex ?? 0, options.context, { id: 'pluginHub.toggleView', targetView: 'discovery' }, 3)
+    if (installed !== undefined) regions.push(installed.region)
+    if (registry !== undefined) regions.push(registry.region)
+    if (repositories !== undefined) regions.push(repositories.region)
   }
   if (options.phase === 'browse' && !options.detail && !options.confirmation) {
+    if (options.view === 'discover' && options.catalog !== undefined) {
+      const installable = textPointerRegion(
+        'pluginHub:installable', options.catalog.line, options.catalog.installableLabel, 0,
+        options.context, { id: 'pluginHub.installable' },
+      )
+      const category = options.catalog.categoryLabel === undefined ? undefined : textPointerRegion(
+        'pluginHub:category', options.catalog.line, options.catalog.categoryLabel, installable?.endIndex ?? 0,
+        options.context, { id: 'pluginHub.category' },
+      )
+      const sort = textPointerRegion(
+        'pluginHub:sort', options.catalog.line, options.catalog.sortLabel,
+        category?.endIndex ?? installable?.endIndex ?? 0, options.context, { id: 'pluginHub.sort' },
+      )
+      if (installable !== undefined) regions.push(installable.region)
+      if (category !== undefined) regions.push(category.region)
+      if (sort !== undefined) regions.push(sort.region)
+    }
     const top = options.searchVisible ? 8 : 5
     let row = top
     options.rowHeights.forEach((height, offset) => {
@@ -237,6 +280,21 @@ export function tuiPluginHubPointerRegions(
     })
   }
   if (options.phase === 'detail') {
+    for (const [index, link] of (options.detailLinks ?? []).entries()) {
+      const top = 4 + Math.max(0, Math.floor(link.rowOffset))
+      regions.push({
+        id: `pluginHub:detail-link:${index}`,
+        rect: {
+          left: 3,
+          top,
+          right: Math.min(Math.max(3, Math.floor(options.columns) - 2), Math.max(3, 2 + stringWidth(link.text))),
+          bottom: top,
+        },
+        context: options.context,
+        priority: 40,
+        action: { id: 'pluginHub.openRepository' },
+      })
+    }
     regions.push({
       id: 'pluginHub:detail-close',
       rect: {
@@ -247,7 +305,7 @@ export function tuiPluginHubPointerRegions(
       },
       context: options.context,
       priority: 30,
-      action: { id: 'pluginHub.close' },
+      action: options.view === 'discovery' ? { id: 'pluginHub.openRepository' } : { id: 'pluginHub.close' },
     })
   } else if (options.phase === 'confirm') {
     regions.push({
@@ -264,6 +322,31 @@ export function tuiPluginHubPointerRegions(
     })
   }
   return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
+function textPointerRegion(
+  id: string,
+  line: string,
+  label: string,
+  startIndex: number,
+  context: Extract<TuiInteractionContext, 'PluginHub'>,
+  action: Extract<TuiPointerAction, { readonly id: 'pluginHub.sort' | 'pluginHub.category' | 'pluginHub.installable' | 'pluginHub.toggleView' }>,
+  top = 4,
+): { readonly region: TuiPointerRegion; readonly endIndex: number } | undefined {
+  const index = line.indexOf(label, startIndex)
+  const width = stringWidth(label)
+  if (index < 0 || width === 0) return undefined
+  const left = 3 + stringWidth(line.slice(0, index))
+  return Object.freeze({
+    endIndex: index + label.length,
+    region: Object.freeze({
+      id,
+      rect: { left, top, right: left + width - 1, bottom: top },
+      context,
+      priority: 40,
+      action,
+    }),
+  })
 }
 
 /** Inputs needed to publish Session picker pointer regions. */

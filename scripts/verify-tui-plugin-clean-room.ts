@@ -12,7 +12,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.3-rc.8'
+const TUI_VERSION = '0.1.4-rc.8'
 const DSH_VERSION = '0.1.0-rc.8'
 const TOP_PACKAGE = '@lingxi-ai-cn/dsh-tui'
 const PACKAGE_DIRS = Object.freeze([
@@ -283,6 +283,8 @@ async function bootPty(official: string, dshScript: string, home: string, env: R
     await new Promise(resolve => setTimeout(resolve, 100))
     child.write('\r')
     await waitFor(() => output, 'Plugin Hub')
+    await waitFor(() => output, 'Installed · Registry · GitHub repositories')
+    await waitFor(() => output, 'All Registry entries')
     child.write('\u001b')
     await new Promise(resolve => setTimeout(resolve, 100))
     child.write('/quit')

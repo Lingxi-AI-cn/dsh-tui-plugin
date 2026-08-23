@@ -48,7 +48,7 @@ export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands
 export { JobId } from '@deepseek-ai/dsh-jobs'
 export type { JobSnapshot, JobStatus } from '@deepseek-ai/dsh-jobs'
 export { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
-export type { ContentBlock, StreamChunk, UserMessage } from '@deepseek-ai/dsh-llm'
+export type { ContentBlock, LlmConfigurableProvider, StreamChunk, UserMessage } from '@deepseek-ai/dsh-llm'
 export { runNativeCommand } from '@deepseek-ai/dsh-native-command'
 export type { PermissionSelect } from '@deepseek-ai/dsh-permission-presets'
 export {
@@ -66,6 +66,7 @@ export { installSettingsSection } from '@deepseek-ai/dsh-settings'
 export const settingsNamespace = hostSettingsNamespace
 export type {
   SubagentDescendantListEntry,
+  SubagentResult,
   SubagentRunEndInfo,
   SubagentRunInfo,
   SubagentTimingProjection,

@@ -74,6 +74,8 @@ export type TuiInteractionActionId =
   | 'pluginHub.refresh'
   | 'pluginHub.sort'
   | 'pluginHub.category'
+  | 'pluginHub.installable'
+  | 'pluginHub.openRepository'
   | 'dialog.previous'
   | 'dialog.next'
   | 'dialog.accept'
@@ -305,11 +307,13 @@ export const TUI_INTERACTION_REGISTRY: readonly TuiInteractionDescriptor[] = Obj
   descriptor('pluginHub.previousPage', 'PluginHub', 'Previous plugin page', [key('pageup', 'PageUp')]),
   descriptor('pluginHub.nextPage', 'PluginHub', 'Next plugin page', [key('pagedown', 'PageDown')]),
   descriptor('pluginHub.accept', 'PluginHub', 'Open or confirm selected plugin action', [key('enter', 'Enter')]),
-  descriptor('pluginHub.toggleView', 'PluginHub', 'Switch Discover and Installed', [key('tab', 'Tab')]),
+  descriptor('pluginHub.toggleView', 'PluginHub', 'Switch Plugin Hub view', [key('tab', 'Tab')]),
   descriptor('pluginHub.search', 'PluginHub', 'Search Plugin Hub', [key('ctrl+f', 'Ctrl+F')]),
   descriptor('pluginHub.refresh', 'PluginHub', 'Refresh Plugin Hub', [key('r', 'R')]),
-  descriptor('pluginHub.sort', 'PluginHub', 'Change catalog sort', [key('meta+s', 'Alt+S')]),
-  descriptor('pluginHub.category', 'PluginHub', 'Change catalog category', [key('meta+c', 'Alt+C')]),
+  descriptor('pluginHub.sort', 'PluginHub', 'Change catalog sort', [key('shift+s', 'Shift+S')]),
+  descriptor('pluginHub.category', 'PluginHub', 'Change catalog category', [key('shift+c', 'Shift+C')]),
+  descriptor('pluginHub.installable', 'PluginHub', 'Toggle installable Registry entries', [key('shift+i', 'Shift+I')]),
+  descriptor('pluginHub.openRepository', 'PluginHub', 'Open selected GitHub repository', [key('shift+o', 'Shift+O')]),
 
   descriptor('dialog.previous', 'Dialog', 'Previous option or help row', [key('up', 'Up')]),
   descriptor('dialog.next', 'Dialog', 'Next option or help row', [key('down', 'Down')]),
@@ -393,11 +397,13 @@ const TUI_INTERACTION_DESCRIPTIONS_ZH: Readonly<Record<TuiInteractionActionId, s
   'pluginHub.previousPage': '插件列表上一页',
   'pluginHub.nextPage': '插件列表下一页',
   'pluginHub.accept': '打开或确认所选插件操作',
-  'pluginHub.toggleView': '切换发现和已安装视图',
+  'pluginHub.toggleView': '切换 Plugin Hub 视图',
   'pluginHub.search': '搜索 Plugin Hub',
   'pluginHub.refresh': '刷新 Plugin Hub',
   'pluginHub.sort': '切换目录排序',
   'pluginHub.category': '切换目录分类',
+  'pluginHub.installable': '切换可安装收录过滤',
+  'pluginHub.openRepository': '打开所选 GitHub 仓库',
   'dialog.previous': '上一个选项或帮助行',
   'dialog.next': '下一个选项或帮助行',
   'dialog.previousPage': '帮助上一页',
@@ -447,6 +453,7 @@ export const TUI_INTERACTION_ACTION_IDS: readonly TuiInteractionActionId[] = Obj
 const TUI_KEYBINDING_SEQUENCE_PATTERN = new RegExp([
   '^(?!.*[A-Z])(?:',
   'enter|escape|tab|shift\\+tab|shift\\+enter|up|down|left|right|pageup|pagedown|home|end|ctrl\\+shift\\+-|',
+  'shift\\+(?:space|[!-~])|',
   '(?:ctrl\\+(?:meta|super)\\+|ctrl\\+|meta\\+|super\\+|hyper\\+)(?:space|[!-~])|',
   '[!-~])$',
 ].join(''), 'u')
@@ -693,6 +700,7 @@ function normalizeKeypress(input: string, keypress: TuiKeypress): string | undef
   if (keypress.super === true) return `super+${value}`
   if (keypress.hyper === true) return `hyper+${value}`
   if (keypress.meta === true) return `meta+${value}`
+  if (keypress.shift === true) return `shift+${value}`
   return value
 }
 

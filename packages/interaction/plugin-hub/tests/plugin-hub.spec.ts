@@ -43,6 +43,7 @@ describe('PluginHubRuntime', () => {
       profileMutations: true,
       status: async () => ({ apiVersion: 'dsh.plugin-hub/v1' as const, stale: false, source: 'fixture' as const }),
       search: async () => ({ apiVersion: 'dsh.plugin-hub/v1' as const, catalogRevision: 1, items: [] }),
+      searchRepositories: async () => ({ apiVersion: 'dsh.plugin-hub/v1' as const, catalogRevision: 1, items: [] }),
       plugin: async () => { throw new PluginHubError('missing', 'PLUGIN_NOT_FOUND') },
       ...lifecycle(),
     }
@@ -71,6 +72,7 @@ describe('PluginHubRuntime', () => {
       profileMutations: false,
       status: async () => ({ apiVersion: 'dsh.plugin-hub/v1' as const, stale: false, source: 'fixture' as const }),
       search: async () => ({ apiVersion: 'dsh.plugin-hub/v1' as const, catalogRevision: 1, items: [] }),
+      searchRepositories: async () => ({ apiVersion: 'dsh.plugin-hub/v1' as const, catalogRevision: 1, items: [] }),
       plugin: async (id: PluginId) => { throw new PluginHubError(String(id), 'PLUGIN_NOT_FOUND') },
       ...lifecycle(),
     }

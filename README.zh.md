@@ -45,6 +45,7 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 - 在精确官方 rc.8 Host 上，`@` 补全通过有界 Host 文件系统遍历继续以工作区为根工作，不会扩大为不受限的全机搜索。
 - 协商后的鼠标能力可用于滚动 Transcript 和选择常用界面目标；也可在 `/config` 中把选择与滚动交还外层终端。
 - 单一可配置交互注册表同时驱动运行时按键和 `/help` 面板，让当前可用手势始终可发现。
+- 面向能力的 `/commands`、`/skills`、`/mcp`、`/tips`、`/provider`、`/update` 与 `/btw` 视图，让已安装功能、Provider 配置、兼容更新和轻量旁路问题可以直接发现。
 
 ### 模型、权限与人类决策
 
@@ -62,7 +63,7 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 
 ### Plugin Hub 与诊断
 
-- `/plugins` 浏览签名 Registry、已安装 profile 事实、版本、兼容性、验证级别、安全建议和经过清理的 README 内容。
+- `/plugins` 明确分开已安装事实、Registry 收录与仅浏览的 GitHub 仓库；筛选器可区分全部收录与可安装版本，仓库详情会先显示扫描和发布状态，再由用户选择打开 GitHub。
 - Profile 变更继续使用官方 `dsh plugin` 路径；TUI 显示精确安装或移除命令，不建立第二套包管理权限。
 - `/doctor` 检查 Host/TUI 能力，`/context` 查看当前模型、权限、工具、skills 和 system prompt 贡献者。
 
@@ -82,6 +83,9 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 | `/doctor` | 检查运行状态与能力 |
 | `/context` | 查看已加载上下文事实 |
 | `/help` | 查看命令与当前有效交互按键 |
+| `/commands`、`/skills`、`/mcp`、`/tips` | 查看可用命令、Skills、MCP 工具与交互提示 |
+| `/provider`、`/update` | 查看 Provider 配置并检查兼容的 TUI 更新 |
+| `/btw` | 在不替换当前 Session 的情况下提出一次有界、无工具的旁路问题 |
 | `/quit`、`/exit` | 恢复终端并安全退出 |
 
 ## 兼容性
@@ -90,11 +94,11 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 
 | DSH TUI | DeepSeek Harness | Node.js | 平台 |
 | --- | --- | --- | --- |
-| `0.1.3-rc.8` | 精确匹配 `0.1.0-rc.8` | `^22.19.0` 或 `>=24` | macOS 14 与 Ubuntu 24.04 CI |
+| `0.1.4-rc.8` | 精确匹配 `0.1.0-rc.8` | `^22.19.0` 或 `>=24` | macOS 14 与 Ubuntu 24.04 CI |
 
 只有在精确官方包 clean-room 安装、profile 组合、PTY 启动/退出和终端恢复验证完成后，才会增加对新 Harness 版本的支持。
 
-TUI 核心版本独立递增（这里是 `0.1.3`），最后的预发布后缀（`rc.8`）则始终表示兼容的官方 Harness 预发布版本。这样不会让用户把一次 TUI 迭代误认为上游 DSH 已升级。
+TUI 核心版本独立递增（这里是 `0.1.4`），最后的预发布后缀（`rc.8`）则始终表示兼容的官方 Harness 预发布版本。这样不会让用户把一次 TUI 迭代误认为上游 DSH 已升级。
 
 ## 安装
 
@@ -102,7 +106,7 @@ TUI 核心版本独立递增（这里是 `0.1.3`），最后的预发布后缀�
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.0-rc.8
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.3-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
 dsh --profile tui
 ```
 
@@ -125,7 +129,7 @@ dsh --profile tui
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.3-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
 ```
 
 Session 和凭据位于 profile 目录之外。只重新应用经过审查的自定义 patch，不要把旧 profile 整体复制回来。
@@ -145,7 +149,7 @@ Session 和凭据位于 profile 目录之外。只重新应用经过审查的自
 安装声明兼容当前官方 Harness 版本的精确 TUI 版本：
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.3-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
 ```
 
 Release tag 和 npm 版本不可覆盖或移动。不要混用不同 release candidate 的 package。

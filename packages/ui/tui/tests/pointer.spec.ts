@@ -7,6 +7,10 @@ import {
 } from '../src/pointer.ts'
 
 const action = { id: 'transcript.focus' as const, key: 'text', index: 0 }
+const pluginHubTabs = {
+  line: 'Installed · Registry · GitHub repositories',
+  installedLabel: 'Installed', registryLabel: 'Registry', repositoriesLabel: 'GitHub repositories',
+} as const
 
 function region(overrides: Partial<TuiPointerRegion> = {}): TuiPointerRegion {
   return {
@@ -100,18 +104,91 @@ describe('TUI pointer region registry', () => {
       confirmation: false,
       view: 'discover',
       phase: 'browse',
+      tabs: pluginHubTabs,
+      catalog: {
+        line: 'Registry r7 · All Registry entries · All categories · Sort: Stars',
+        installableLabel: 'All Registry entries',
+        categoryLabel: 'All categories',
+        sortLabel: 'Stars',
+      },
       visibleStart: 4,
       rowHeights: [4, 5],
       context: 'PluginHub',
     })
     expect(browse.map(region => region.action)).toEqual([
-      { id: 'pluginHub.toggleView', targetView: 'discover' },
       { id: 'pluginHub.toggleView', targetView: 'installed' },
+      { id: 'pluginHub.toggleView', targetView: 'discover' },
+      { id: 'pluginHub.toggleView', targetView: 'discovery' },
+      { id: 'pluginHub.installable' },
+      { id: 'pluginHub.category' },
+      { id: 'pluginHub.sort' },
       { id: 'pluginHub.accept', index: 4 },
       { id: 'pluginHub.accept', index: 5 },
     ])
-    expect(browse[2]?.rect).toEqual({ left: 3, top: 8, right: 98, bottom: 11 })
-    expect(browse[3]?.rect).toEqual({ left: 3, top: 12, right: 98, bottom: 16 })
+    expect(browse[3]?.rect).toEqual({ left: 17, top: 4, right: 36, bottom: 4 })
+    expect(browse[4]?.rect).toEqual({ left: 40, top: 4, right: 53, bottom: 4 })
+    expect(browse[5]?.rect).toEqual({ left: 63, top: 4, right: 67, bottom: 4 })
+    expect(browse[6]?.rect).toEqual({ left: 3, top: 8, right: 98, bottom: 11 })
+    expect(browse[7]?.rect).toEqual({ left: 3, top: 12, right: 98, bottom: 16 })
+
+    const chineseCatalog = tuiPluginHubPointerRegions({
+      columns: 80,
+      rows: 24,
+      searchVisible: true,
+      detail: false,
+      confirmation: false,
+      view: 'discover',
+      phase: 'browse',
+      tabs: {
+        line: '已安装 · Registry 收录 · GitHub 仓库',
+        installedLabel: '已安装', registryLabel: 'Registry 收录', repositoriesLabel: 'GitHub 仓库',
+      },
+      catalog: {
+        line: 'Registry r7 · 全部收录 · 全部分类 · 排序：最近更新 · 变更方式：外部 CLI',
+        installableLabel: '全部收录',
+        categoryLabel: '全部分类',
+        sortLabel: '最近更新',
+      },
+      visibleStart: 0,
+      rowHeights: [],
+      context: 'PluginHub',
+    })
+    expect(chineseCatalog[3]?.action).toEqual({ id: 'pluginHub.installable' })
+    expect(chineseCatalog[4]?.action).toEqual({ id: 'pluginHub.category' })
+    expect(chineseCatalog[5]?.action).toEqual({ id: 'pluginHub.sort' })
+
+    const noCategories = tuiPluginHubPointerRegions({
+      columns: 80,
+      rows: 24,
+      searchVisible: true,
+      detail: false,
+      confirmation: false,
+      view: 'discover',
+      phase: 'browse',
+      tabs: pluginHubTabs,
+      catalog: {
+        line: 'Registry r7 · All Registry entries · All categories · Sort: Stars',
+        installableLabel: 'All Registry entries',
+        sortLabel: 'Stars',
+      },
+      visibleStart: 0,
+      rowHeights: [],
+      context: 'PluginHub',
+    })
+    expect(noCategories.map(region => region.action)).toEqual([
+      { id: 'pluginHub.toggleView', targetView: 'installed' },
+      { id: 'pluginHub.toggleView', targetView: 'discover' },
+      { id: 'pluginHub.toggleView', targetView: 'discovery' },
+      { id: 'pluginHub.installable' },
+      { id: 'pluginHub.sort' },
+    ])
+
+    const discovery = tuiPluginHubPointerRegions({
+      columns: 80, rows: 24, searchVisible: true, detail: false, confirmation: false,
+      view: 'discovery', phase: 'browse', tabs: pluginHubTabs,
+      visibleStart: 0, rowHeights: [2], context: 'PluginHub',
+    })
+    expect(discovery.at(-1)?.action).toEqual({ id: 'pluginHub.accept', index: 0 })
 
     const detail = tuiPluginHubPointerRegions({
       columns: 80,
@@ -121,12 +198,25 @@ describe('TUI pointer region registry', () => {
       confirmation: false,
       view: 'installed',
       phase: 'detail',
+      tabs: pluginHubTabs,
       visibleStart: 0,
       rowHeights: [],
       context: 'PluginHub',
     })
     expect(detail.at(-1)?.action).toEqual({ id: 'pluginHub.close' })
     expect(detail.at(-1)?.rect).toEqual({ left: 1, top: 24, right: 80, bottom: 24 })
+
+    const discoveryDetail = tuiPluginHubPointerRegions({
+      columns: 80, rows: 24, searchVisible: false, detail: true, confirmation: false,
+      view: 'discovery', phase: 'detail', tabs: pluginHubTabs,
+      detailLinks: [{ rowOffset: 4, text: '  Repository: https://github.com/example/discovery' }],
+      visibleStart: 0, rowHeights: [], context: 'PluginHub',
+    })
+    expect(discoveryDetail.find(region => region.id === 'pluginHub:detail-link:0')).toMatchObject({
+      rect: { left: 3, top: 8, right: 52, bottom: 8 },
+      action: { id: 'pluginHub.openRepository' },
+    })
+    expect(discoveryDetail.at(-1)?.action).toEqual({ id: 'pluginHub.openRepository' })
 
     const confirmation = tuiPluginHubPointerRegions({
       columns: 80,
@@ -136,6 +226,7 @@ describe('TUI pointer region registry', () => {
       confirmation: true,
       view: 'discover',
       phase: 'confirm',
+      tabs: pluginHubTabs,
       visibleStart: 0,
       rowHeights: [],
       context: 'PluginHub',

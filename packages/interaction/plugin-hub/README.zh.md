@@ -10,6 +10,8 @@
 
 目录 search 接受 provider-neutral 的 `relevance`、`stars`、`updated` 和 `newest` ordering。provider 会保持 continuation cursor opaque，并将其绑定到包含 ordering 在内的完整 request；目录 ordering 只属于人工发现 state，不会影响 installability 或 verification。
 
+provider 还可以提供独立的发现仓库 page。Discovery row 携带 repository sync、exact-head scan、rejection、package 和 published projection 事实；它们只能浏览，绝不表示存在可安装版本。consumer 必须将该视图与 installable catalog 分开，并且不能把 discovery row 传入安装计划。
+
 安装计划只接受 opaque `PluginId` 和 `PluginVersionId`。plan 公开精确确认事实，但绝不公开 artifact URL、本地路径、executable、包管理器参数或 signature bypass。staging 和 activation 只接受 provider 签发的 branded id；`markMaintenanceReady()` 在 authenticated relaunch handoff 之外是 no-op。
 
 ## Model Experience

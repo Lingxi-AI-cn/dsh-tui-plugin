@@ -2,8 +2,10 @@
 
 import type {
   InstalledPluginSnapshot, PluginAdvisorySummary, PluginCatalogSort, PluginChangePlan,
-  PluginCategory, PluginDetail, PluginHubProgress, PluginHubStatus, PluginSearchPage, PluginVerification,
+  PluginCategory, PluginDetail, PluginDiscoveryRepository, PluginDiscoveryRepositoryPage,
+  PluginHubProgress, PluginHubStatus, PluginSearchPage, PluginVerification,
 } from '@lingxi-ai-cn/dsh-plugin-hub'
+import { PluginHubError } from '@lingxi-ai-cn/dsh-plugin-hub'
 import stringWidth from 'string-width'
 import { terminalMarkdownText } from './markdown.ts'
 import { terminalSafe } from './sanitize.ts'
@@ -21,11 +23,17 @@ export interface TuiPluginHubDialogSnapshot {
   readonly phase:
     | 'loading' | 'browse' | 'detail-loading' | 'detail'
     | 'planning' | 'confirm' | 'staging' | 'handoff' | 'error'
-  readonly view: 'discover' | 'installed'
+  readonly view: 'discover' | 'discovery' | 'installed'
   readonly initialQuery: string
   readonly sort: PluginCatalogSort
   readonly category?: PluginCategory | undefined
+  /** Whether Registry results are limited to entries with a current install descriptor. */
+  readonly installableOnly?: boolean | undefined
+  /** Categories observed in the loaded unfiltered catalog pages for this query. */
+  readonly availableCategories?: readonly PluginCategory[] | undefined
   readonly page?: PluginSearchPage | undefined
+  readonly discoveryPage?: PluginDiscoveryRepositoryPage | undefined
+  readonly discoveryDetail?: PluginDiscoveryRepository | undefined
   readonly installed?: InstalledPluginSnapshot | undefined
   readonly detail?: PluginDetail | undefined
   readonly plan?: PluginChangePlan | undefined
@@ -40,11 +48,26 @@ const TUI_PLUGIN_HUB_SORTS: readonly PluginCatalogSort[] = Object.freeze([
   'relevance', 'stars', 'updated', 'newest',
 ])
 
-/** Stable category cycle used by the human Plugin Hub catalog. */
+/** Stable presentation order for categories actually supplied by the Registry. */
 const TUI_PLUGIN_HUB_CATEGORIES: readonly PluginCategory[] = Object.freeze([
   'communication', 'vision', 'browser', 'interface', 'agent', 'development',
   'data', 'automation', 'integration', 'theme', 'other',
 ])
+
+/**
+ * Collect the Registry-owned categories present in loaded catalog rows.
+ * Static taxonomy values are used only for presentation order, never to invent
+ * filters that the current catalog does not contain.
+ * @param page - loaded unfiltered catalog page, when available.
+ * @returns immutable observed categories in stable presentation order.
+ */
+export function tuiPluginHubAvailableCategories(
+  page: PluginSearchPage | undefined,
+): readonly PluginCategory[] {
+  if (page === undefined) return Object.freeze([])
+  const observed = new Set(page.items.flatMap(item => item.categories ?? []))
+  return Object.freeze(TUI_PLUGIN_HUB_CATEGORIES.filter(category => observed.has(category)))
+}
 
 /**
  * Format one provider-neutral catalog ordering for the TUI status line.
@@ -82,15 +105,29 @@ export function tuiPluginHubCategoryLabel(
   return `${category.slice(0, 1).toLocaleUpperCase()}${category.slice(1)}`
 }
 
+/** Format the Registry installability filter for the status line. */
+export function tuiPluginHubInstallableLabel(
+  installableOnly: boolean | undefined,
+  locale: TuiLocale = 'en',
+): string {
+  return tuiMessage(locale, installableOnly === true
+    ? 'plugin.catalog.installableOnly'
+    : 'plugin.catalog.allEntries')
+}
+
 /**
  * Advance the category filter, returning null to clear it after the final category.
  * @param category - current category, or undefined for all categories.
+ * @param availableCategories - categories observed in the current Registry catalog.
  * @returns next category, or null when the filter should be cleared.
  */
-export function tuiPluginHubNextCategory(category: PluginCategory | undefined): PluginCategory | null {
-  if (category === undefined) return TUI_PLUGIN_HUB_CATEGORIES[0] ?? null
-  const index = TUI_PLUGIN_HUB_CATEGORIES.indexOf(category)
-  return TUI_PLUGIN_HUB_CATEGORIES[index + 1] ?? null
+export function tuiPluginHubNextCategory(
+  category: PluginCategory | undefined,
+  availableCategories: readonly PluginCategory[],
+): PluginCategory | null {
+  if (category === undefined) return availableCategories[0] ?? null
+  const index = availableCategories.indexOf(category)
+  return index < 0 ? null : availableCategories[index + 1] ?? null
 }
 
 /**
@@ -106,6 +143,7 @@ export function tuiPluginHubCatalogLine(
   const mutationMode = snapshot.profileMutations === false ? tuiMessage(locale, 'plugin.catalog.external') : ''
   if (snapshot.status?.stale === true || snapshot.page?.stale === true) {
     return tuiMessage(locale, 'plugin.catalog.offline', {
+      installable: tuiPluginHubInstallableLabel(snapshot.installableOnly, locale),
       category: tuiPluginHubCategoryLabel(snapshot.category, locale),
       sort: tuiPluginHubSortLabel(snapshot.sort, locale),
       mutation: mutationMode,
@@ -114,6 +152,7 @@ export function tuiPluginHubCatalogLine(
   const revision = snapshot.page?.catalogRevision ?? snapshot.status?.catalogRevision ?? 'unknown'
   return tuiMessage(locale, 'plugin.catalog.current', {
     revision,
+    installable: tuiPluginHubInstallableLabel(snapshot.installableOnly, locale),
     category: tuiPluginHubCategoryLabel(snapshot.category, locale),
     sort: tuiPluginHubSortLabel(snapshot.sort, locale),
     mutation: mutationMode,
@@ -123,9 +162,10 @@ export function tuiPluginHubCatalogLine(
 /** One sanitized structured Plugin Hub card projected for Ink. */
 export interface TuiPluginHubCard {
   readonly id: string
-  readonly kind: 'catalog' | 'installed'
+  readonly kind: 'catalog' | 'discovery' | 'installed'
   readonly displayName: string
   readonly packageName: string
+  readonly repositoryUrl?: string | undefined
   readonly summary: string
   readonly version?: string | undefined
   readonly categories: readonly string[]
@@ -159,7 +199,7 @@ export type TuiPluginHubLineTone = 'default' | 'muted' | 'accent' | 'success' | 
 
 /** One physical line projected from a semantic Plugin Hub detail or confirmation entry. */
 export interface TuiPluginHubDetailLine {
-  readonly kind: 'title' | 'summary' | 'section' | 'field' | 'warning' | 'body' | 'blank'
+  readonly kind: 'title' | 'summary' | 'section' | 'field' | 'link' | 'warning' | 'body' | 'blank'
   readonly tone: TuiPluginHubLineTone
   readonly text: string
 }
@@ -222,7 +262,7 @@ export function formatTuiPluginHubRelativeTime(
 }
 
 /**
- * Resolve the real terminal cursor cell for the fixed-height Discover query editor.
+ * Resolve the real terminal cursor cell for the fixed-height Registry query editor.
  * @param query - append-only process-local search query.
  * @param columns - active terminal columns.
  * @returns one-based terminal cell after the visible query suffix.
@@ -303,6 +343,139 @@ export function tuiPluginHubInstalledRows(
 }
 
 /**
+ * Project discovered repositories into non-installable bounded rows.
+ * @param page - current GitHub repository discovery page.
+ * @param selectedIndex - selected row index in the complete loaded page.
+ * @param locale - active TUI locale.
+ * @returns immutable bounded repository rows for the current page.
+ */
+export function tuiPluginHubDiscoveryRows(
+  page: PluginDiscoveryRepositoryPage | undefined,
+  selectedIndex: number,
+  locale: TuiLocale = 'en',
+): readonly TuiPluginHubRow[] {
+  return (page?.items ?? []).map((item, index) => Object.freeze({
+    id: item.id, kind: 'discovery', displayName: singleLine(item.repository.fullName, 512),
+    packageName: singleLine(item.repository.fullName, 512), repositoryUrl: singleLine(item.repository.url, 2048),
+    summary: singleLine([
+      discoveryStateLabel(item.catalogState, locale),
+      `${discoveryScanLabel(item.scan.status, locale)}${item.scan.errorCode === null || item.scan.errorCode === undefined ? '' : ` (${item.scan.errorCode})`}`,
+      tuiMessage(locale, 'plugin.discovery.packages', { active: item.packages.active, total: item.packages.total, rejected: item.packages.rejected }),
+      tuiMessage(locale, 'plugin.discovery.published', { count: item.published.projectionCount }),
+      tuiMessage(locale, 'plugin.discovery.installable', { count: item.published.installableCount }),
+      ...item.scan.rejectionCodes.slice(0, 2),
+    ].join(' · '), 1024),
+    categories: Object.freeze([]), surfaces: Object.freeze([]),
+    ...(Number.isFinite(item.stars) && item.stars >= 0 ? { stars: Math.floor(item.stars) } : {}),
+    ...(item.repository.primaryLanguage === null || item.repository.primaryLanguage === undefined
+      ? {} : { primaryLanguage: singleLine(item.repository.primaryLanguage, 128) }),
+    ...(item.scan.updatedAt === null || item.scan.updatedAt === undefined ? {} : { updatedAt: singleLine(item.scan.updatedAt, 128) }),
+    installable: false, verificationLevel: 'discovered' as const, selected: index === selectedIndex,
+  }))
+}
+
+/** Project one discovered GitHub repository into a bounded local status detail. */
+export function tuiPluginHubDiscoveryDetailLines(
+  repository: PluginDiscoveryRepository | undefined,
+  columns: number,
+  now = Date.now(),
+  locale: TuiLocale = 'en',
+): readonly TuiPluginHubDetailLine[] {
+  if (repository === undefined) return []
+  const width = Math.max(1, columns - 4)
+  const unknown = tuiMessage(locale, 'plugin.value.unknown')
+  const none = tuiMessage(locale, 'plugin.value.none')
+  const scanUpdated = repository.scan.updatedAt === null || repository.scan.updatedAt === undefined
+    ? unknown
+    : formatTuiPluginHubAbsoluteDate(repository.scan.updatedAt, now, locale) ?? repository.scan.updatedAt
+  const lines: TuiPluginHubDetailLine[] = [
+    detailLine('title', repository.repository.fullName, 'accent'),
+    ...wrappedDetail('warning', tuiMessage(locale, 'plugin.discovery.detail.notice'), width, 'warning', 3),
+    detailLine('blank', ''),
+    detailLine('section', tuiMessage(locale, 'plugin.discovery.detail.repository'), 'accent'),
+  ]
+  lines.push(...wrappedDetail('link', `  ${tuiMessage(locale, 'plugin.discovery.detail.url', {
+    value: repository.repository.url,
+  })}`, width, 'accent', 3))
+  lines.push(...wrappedDetail('field', `  ${tuiMessage(locale, 'plugin.discovery.detail.language', {
+    value: repository.repository.primaryLanguage ?? unknown,
+  })}`, width, 'muted', 2))
+  lines.push(...wrappedDetail('field', `  ${tuiMessage(locale, 'plugin.discovery.detail.popularity', {
+    stars: repository.stars, forks: repository.forks,
+  })}`, width, 'muted', 2))
+  lines.push(...wrappedDetail('field', `  ${tuiMessage(locale, 'plugin.discovery.detail.head', {
+    value: repository.sync.headSha ?? unknown,
+  })}`, width, 'muted', 2))
+  lines.push(detailLine('blank', ''), detailLine('section', tuiMessage(locale, 'plugin.discovery.detail.scan'), 'accent'))
+  lines.push(...wrappedDetail('field', `  ${tuiMessage(locale, 'plugin.discovery.detail.scanStatus', {
+    value: discoveryScanLabel(repository.scan.status, locale),
+  })}`, width, repository.scan.status === 'failed' ? 'error' : repository.scan.status === 'succeeded' ? 'success' : 'warning', 2))
+  lines.push(...wrappedDetail('field', `  ${tuiMessage(locale, 'plugin.discovery.detail.scanSource', {
+    value: repository.scan.sourceCommit ?? unknown,
+  })}`, width, 'muted', 2))
+  lines.push(...wrappedDetail('field', `  ${tuiMessage(locale, 'plugin.discovery.detail.scanner', {
+    value: repository.scan.scannerVersion ?? unknown,
+  })}`, width, 'muted', 2))
+  lines.push(...wrappedDetail('field', `  ${tuiMessage(locale, 'plugin.discovery.detail.scanUpdated', {
+    value: scanUpdated,
+  })}`, width, 'muted', 2))
+  if (repository.scan.errorCode !== null && repository.scan.errorCode !== undefined) {
+    lines.push(...wrappedDetail('warning', `  ${tuiMessage(locale, 'plugin.discovery.detail.scanError', {
+      code: repository.scan.errorCode,
+      summary: repository.scan.errorSummary ?? unknown,
+    })}`, width, 'error', 4))
+  }
+  lines.push(...wrappedDetail('field', `  ${tuiMessage(locale, 'plugin.discovery.detail.rejections', {
+    value: repository.scan.rejectionCodes.join(', ') || none,
+  })}`, width, repository.scan.rejectionCodes.length > 0 ? 'warning' : 'muted', 4))
+  lines.push(detailLine('blank', ''), detailLine('section', tuiMessage(locale, 'plugin.discovery.detail.registry'), 'accent'))
+  lines.push(...wrappedDetail('field', `  ${tuiMessage(locale, 'plugin.discovery.detail.catalogState', {
+    value: discoveryStateLabel(repository.catalogState, locale),
+  })}`, width, repository.catalogState === 'active' ? 'success' : 'warning', 2))
+  if (repository.stateReason !== null && repository.stateReason !== undefined) {
+    lines.push(...wrappedDetail('warning', `  ${tuiMessage(locale, 'plugin.discovery.detail.stateReason', {
+      value: repository.stateReason,
+    })}`, width, 'warning', 4))
+  }
+  lines.push(...wrappedDetail('field', `  ${tuiMessage(locale, 'plugin.discovery.detail.packages', {
+    total: repository.packages.total, active: repository.packages.active, rejected: repository.packages.rejected,
+  })}`, width, 'default', 3))
+  lines.push(...wrappedDetail('field', `  ${tuiMessage(locale, 'plugin.discovery.detail.projections', {
+    total: repository.published.projectionCount,
+    installable: repository.published.installableCount,
+    revision: repository.published.revision ?? unknown,
+  })}`, width, repository.published.installableCount > 0 ? 'success' : 'muted', 3))
+  return Object.freeze(lines.slice(0, MAX_DETAIL_LINES).map(line => Object.freeze(line)))
+}
+
+/** Resolve the repository URL for the row that owns one pointer index. */
+export function tuiPluginHubDiscoveryUrl(
+  rows: readonly TuiPluginHubRow[],
+  index: number,
+): string | undefined {
+  const row = rows[index]
+  return row?.kind === 'discovery' ? row.repositoryUrl : undefined
+}
+
+/** Close the loading state after one paginated Plugin Hub request fails. */
+export function tuiPluginHubLoadMoreFailure(
+  snapshot: TuiPluginHubDialogSnapshot,
+  error: unknown,
+  locale: TuiLocale = 'en',
+): TuiPluginHubDialogSnapshot {
+  if (error instanceof PluginHubError && error.code === 'INVALID_CURSOR') {
+    return snapshot.view === 'discovery'
+      ? { ...snapshot, discoveryPage: undefined, loadingMore: false, phase: 'loading', error: undefined }
+      : { ...snapshot, page: undefined, loadingMore: false, phase: 'loading', error: undefined }
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  return {
+    ...snapshot, loadingMore: false, phase: 'error',
+    error: tuiMessage(locale, 'plugin.error.catalog', { error: message }),
+  }
+}
+
+/**
  * Resolve bounded card strings for one terminal width.
  * @param card - sanitized structured card.
  * @param columns - active terminal columns.
@@ -319,7 +492,8 @@ export function tuiPluginHubCardLayout(
   const height = tuiPluginHubCardHeight(columns)
   const width = Math.max(1, columns - 4)
   const contentWidth = Math.max(1, width - 2)
-  const badges = card.kind === 'catalog' ? catalogBadges(card, columns, contentWidth, locale) : ''
+  const badges = card.kind === 'catalog' ? catalogBadges(card, columns, contentWidth, locale)
+    : card.kind === 'discovery' ? discoveryBadges(card, locale) : ''
   const badgeGap = badges === '' ? 0 : 1
   const displayName = trimForTerminal(card.displayName, Math.max(1, contentWidth - stringWidth(badges) - badgeGap))
   const summary = trimForTerminal(card.summary === '' ? tuiMessage(locale, 'plugin.card.noSummary') : card.summary, contentWidth)
@@ -646,6 +820,25 @@ function catalogBadges(
   const maximum = Math.max(0, contentWidth - minimumNameCells - 1)
   while (fitted.length > 0 && stringWidth(fitted.join(' ')) > maximum) fitted.pop()
   return fitted.join(' ')
+}
+
+function discoveryBadges(card: TuiPluginHubCard, locale: TuiLocale): string {
+  const stars = formatTuiPluginHubStars(card.stars)
+  return `${stars === undefined ? '' : `★${stars} `}${tuiMessage(locale, 'plugin.discovery.badge')}`.trim()
+}
+
+function discoveryStateLabel(
+  state: 'candidate' | 'active' | 'missing' | 'quarantined' | 'rejected',
+  locale: TuiLocale,
+): string {
+  return tuiMessage(locale, `plugin.discovery.state.${state}` as const)
+}
+
+function discoveryScanLabel(
+  status: 'never' | 'queued' | 'running' | 'succeeded' | 'failed' | 'superseded',
+  locale: TuiLocale,
+): string {
+  return tuiMessage(locale, `plugin.discovery.scan.${status}` as const)
 }
 
 function trimDecimal(value: number): string {

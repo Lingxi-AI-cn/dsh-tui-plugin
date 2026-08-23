@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-plugin-hub",
   "description": "Provider-neutral Plugin Hub catalog and profile transaction capability for native TUI consumers",
-  "version": "0.1.3-rc.8",
+  "version": "0.1.4-rc.8",
   "publishConfig": {
     "access": "public"
   },

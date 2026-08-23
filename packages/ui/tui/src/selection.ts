@@ -17,8 +17,11 @@ export interface TuiScreenSelection {
   /** Last selected text cell in document order. */
   end: TuiScreenPosition
   /** Gesture that established this range. */
-  kind: 'drag' | 'double' | 'triple'
+  kind: 'drag' | 'double' | 'triple' | 'keyboard'
 }
+
+/** Direction used to extend an existing screen selection from the keyboard. */
+export type TuiScreenSelectionDirection = 'left' | 'right' | 'up' | 'down' | 'home' | 'end'
 
 /** Pointer gesture resolved against a screen map. */
 export type TuiScreenSelectionGesture =
@@ -214,6 +217,65 @@ export function resolveTuiScreenSelection(
   return gesture.kind === 'double'
     ? doubleSelection(map, gesture.at)
     : tripleSelection(map, gesture.at)
+}
+
+function adjacentRowPoint(
+  map: TuiScreenMap,
+  focus: TuiScreenPosition,
+  offset: -1 | 1,
+): GraphemePoint | undefined {
+  for (let row = focus.row + offset; row >= 0 && row < map.rows.length; row += offset) {
+    const points = rowTextPoints(map, row)
+    if (points.length === 0) continue
+    return points.reduce((nearest, point) =>
+      Math.abs(point.column - focus.column) < Math.abs(nearest.column - focus.column) ? point : nearest)
+  }
+  return undefined
+}
+
+/**
+ * Expand one existing selection by one grapheme, row, or logical-line edge.
+ *
+ * The operation is intentionally monotonic: keyboard gestures add text to the
+ * existing normalized range and never collapse a pointer-established range.
+ * @param map - immutable screen-cell provenance.
+ * @param selection - active normalized range.
+ * @param direction - requested expansion direction.
+ * @returns expanded immutable range, or the original range at a screen edge.
+ */
+export function extendTuiScreenSelection(
+  map: TuiScreenMap,
+  selection: TuiScreenSelection,
+  direction: TuiScreenSelectionDirection,
+): TuiScreenSelection {
+  const points = map.rows.flatMap((_row, row) => rowTextPoints(map, row))
+  if (points.length === 0) return selection
+  const leading = direction === 'left' || direction === 'up' || direction === 'home'
+  const focus = leading ? selection.start : selection.end
+  const current = pointAt(map, focus)
+  if (current === undefined) return selection
+  const index = points.findIndex(point => point.row === current.row && point.column === current.column)
+  const next = direction === 'left'
+    ? points[Math.max(0, index - 1)]
+    : direction === 'right'
+      ? points[Math.min(points.length - 1, index + 1)]
+      : direction === 'up'
+        ? adjacentRowPoint(map, focus, -1)
+        : direction === 'down'
+          ? adjacentRowPoint(map, focus, 1)
+          : direction === 'home'
+            ? linePoints(map, focus.row).at(0)
+            : linePoints(map, focus.row).at(-1)
+  if (next === undefined) return selection
+  const nextStart = { row: next.row, column: next.column }
+  const nextEnd = {
+    row: next.row,
+    column: next.column + Math.max(1, next.cell.displayWidth) - 1,
+  }
+  const start = positionOrder(nextStart, selection.start) < 0 ? nextStart : selection.start
+  const end = positionOrder(nextEnd, selection.end) > 0 ? nextEnd : selection.end
+  if (positionOrder(start, selection.start) === 0 && positionOrder(end, selection.end) === 0) return selection
+  return Object.freeze({ start: { ...start }, end: { ...end }, kind: 'keyboard' })
 }
 
 /**

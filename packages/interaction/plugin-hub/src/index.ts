@@ -3,7 +3,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   InstalledPluginSnapshot, PluginChangePlan, PluginChangePlanId, PluginDetail,
-  PluginHubProgress, PluginHubProvider, PluginHubStatus, PluginId,
+  PluginDiscoveryRepositoryPage, PluginDiscoverySearchRequest, PluginHubProgress, PluginHubProvider, PluginHubStatus, PluginId,
   PluginMaintenanceHandoff, PluginSearchPage, PluginSearchRequest,
   PluginTransactionId, PluginVersionId, StagedPluginTransaction,
 } from './types.ts'
@@ -80,6 +80,15 @@ export class PluginHubRuntime extends Service {
    */
   async search(request: PluginSearchRequest, signal?: AbortSignal): Promise<PluginSearchPage> {
     return this.provider().search(request, signal)
+  }
+  /**
+   * Search discovered GitHub repositories without granting install authority.
+   * @param request - bounded discovery search request.
+   * @param signal - optional caller cancellation signal.
+   * @returns one discovery repository page.
+   */
+  async searchRepositories(request: PluginDiscoverySearchRequest, signal?: AbortSignal): Promise<PluginDiscoveryRepositoryPage> {
+    return this.provider().searchRepositories(request, signal)
   }
   /**
    * Load one complete read-only plugin description.

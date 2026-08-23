@@ -2,11 +2,13 @@
 
 中文 | [English](README.md)
 
-这是可信本地 Plugin Hub provider。部署显式提供 HTTPS `registryUrl` 和本地固定的 Ed25519 key；缺少配置时可选 provider 不挂载。目录响应会进行 runtime parse 和 API 版本校验，最多在配置的 Registry origin 内跟随三次 redirect，限制字节数并遵守调用方取消；Registry 暂时不可用时保留进程内 last-good view。Registry detail 响应会归一化 `validationMatrix` row（`manifest`、`install` 和 `tui-boot`），并严格把 quarantine、repository archive、operating-system、curation 和结构化 advisory 事实投影为 provider-neutral DTO；detail metadata 异常时会 fail closed。
+这是可信本地 Plugin Hub provider。部署显式提供 HTTPS `registryUrl` 和本地固定的 Ed25519 key；缺少配置时可选 provider 不挂载。目录响应会进行 runtime parse 和 API 版本校验，最多在配置的 Registry origin 内跟随三次 redirect，限制字节数并遵守调用方取消；Registry 暂时不可用时保留进程内 last-good view。HTTP 304 响应会验证匹配的 ETag entry，并返回其 cached value 而不把目录标记为 stale；其他 Registry failure 可以使用 last-good fallback。Registry detail 响应会归一化 `validationMatrix` row（`manifest`、`install` 和 `tui-boot`），并严格把 quarantine、repository archive、operating-system、curation 和结构化 advisory 事实投影为 provider-neutral DTO；detail metadata 异常时会 fail closed。
 
 `profileMutations` 默认为 `false`。在这种适用于后装插件的安全模式中，Registry 浏览和 active-profile `installed()` 事实仍然可用，修改方法以 `CONTRACT_UNSUPPORTED` 失败，启动 ready 操作则为空操作。已发布 TUI bundle 使用该模式，因为官方 DSH `0.1.0-rc.8` 在 profile composition 之前没有通用 recovery hook；用户通过 `dsh plugin --profile tui ...` 执行修改。设置 `profileMutations: true` 会启用下文所述的下游 maintenance lifecycle，只供安装了配套 pre-composition recovery hook 的 composition 使用。
 
 目录 search 会把 provider-neutral 的 `relevance`、`stars`、`updated` 或 `newest` ordering 传给 Registry，将 ordering 纳入 request cache key，并让 signed snapshot fallback 使用相同 ordering 和 cursor binding。Registry 返回 `INVALID_CURSOR` 时会保留为 typed provider error，不会静默从第一页重启。
+
+provider 通过 `searchRepositories()` 转发独立的 `/v1/discovery/repositories` 视图。Discovery row 会做有界 contract 校验，提供 repository/scan/package/projection 状态，但绝不会进入 `planInstall()`；只有 `/v1/plugins` row 可以进入安装计划。
 
 provider 会对 Registry 提供的 category、package kind、metadata source 和 repository primary language 做有界的 fail-closed 校验。category、kind 和 language filter 会传给 live Registry request、进入 cache identity，并以相同语义应用于 fixture 和 signed-snapshot fallback；这些字段不会影响 installability 或 descriptor verification。
 

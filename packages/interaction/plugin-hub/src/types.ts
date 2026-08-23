@@ -185,6 +185,61 @@ export interface PluginSearchPage {
   readonly stale?: boolean | undefined
 }
 
+/** Bounded request for the discovered GitHub repository view. */
+export interface PluginDiscoverySearchRequest {
+  readonly query?: string | undefined
+  readonly state?: 'candidate' | 'active' | 'missing' | 'quarantined' | 'rejected' | undefined
+  readonly scanStatus?: 'never' | 'queued' | 'running' | 'succeeded' | 'failed' | 'superseded' | undefined
+  readonly sort?: 'stars' | 'updated' | 'newest' | undefined
+  readonly cursor?: string | undefined
+  readonly limit?: number | undefined
+}
+
+/** One discovered repository, independent from installable plugin truth. */
+export interface PluginDiscoveryRepository {
+  readonly id: string
+  readonly repository: {
+    readonly provider: string
+    readonly providerId?: string | undefined
+    readonly fullName: string
+    readonly url: string
+    readonly primaryLanguage?: string | null | undefined
+  }
+  readonly stars: number
+  readonly forks: number
+  readonly topics: readonly string[]
+  readonly catalogState: 'candidate' | 'active' | 'missing' | 'quarantined' | 'rejected'
+  readonly stateReason?: string | null | undefined
+  readonly observedAt: string
+  readonly installable: false
+  readonly sync: {
+    readonly headSha?: string | null | undefined
+    readonly lastSeenAt: string
+    readonly lastSyncedAt?: string | null | undefined
+  }
+  readonly scan: {
+    readonly status: 'never' | 'queued' | 'running' | 'succeeded' | 'failed' | 'superseded'
+    readonly scannerVersion?: string | null | undefined
+    readonly sourceCommit?: string | null | undefined
+    readonly packageCount: number
+    readonly updatedAt?: string | null | undefined
+    readonly errorCode?: string | null | undefined
+    readonly errorSummary?: string | null | undefined
+    readonly rejectionCodes: readonly string[]
+  }
+  readonly packages: { readonly total: number; readonly active: number; readonly rejected: number }
+  readonly published: { readonly projectionCount: number; readonly installableCount: number; readonly revision?: number | null | undefined }
+}
+
+/** Cursor-paginated discovery repository page. */
+export interface PluginDiscoveryRepositoryPage {
+  readonly apiVersion: typeof PLUGIN_HUB_API_VERSION
+  readonly catalogRevision: number
+  readonly items: readonly PluginDiscoveryRepository[]
+  readonly nextCursor?: string | undefined
+  readonly stale?: boolean | undefined
+}
+
 /** Full read-only plugin description used by the Detail panel. */
 export interface PluginDetail extends PluginSummary {
   readonly packagePath?: string | undefined
@@ -281,6 +336,7 @@ export interface PluginHubProvider {
   readonly profileMutations: boolean
   status(signal?: AbortSignal): Promise<PluginHubStatus>
   search(request: PluginSearchRequest, signal?: AbortSignal): Promise<PluginSearchPage>
+  searchRepositories(request: PluginDiscoverySearchRequest, signal?: AbortSignal): Promise<PluginDiscoveryRepositoryPage>
   plugin(pluginId: PluginId, signal?: AbortSignal): Promise<PluginDetail>
   installed(signal?: AbortSignal): Promise<InstalledPluginSnapshot>
   planInstall(pluginId: PluginId, versionId: PluginVersionId, signal?: AbortSignal): Promise<PluginChangePlan>

@@ -10,6 +10,8 @@ Catalog rows may also carry Registry-owned categories, package kind, metadata so
 
 Catalog search accepts provider-neutral `relevance`, `stars`, `updated`, and `newest` ordering. Providers keep continuation cursors opaque and bind them to the complete request, including ordering; catalog ordering remains human discovery state and does not affect installability or verification.
 
+Providers may also expose a separate discovered-repository page. Discovery rows carry repository sync, exact-head scan, rejection, package, and published-projection facts; they are browse-only and never imply an installable version. Consumers must keep this view separate from the installable catalog and must not route discovery rows into install planning.
+
 Install planning accepts only opaque `PluginId` and `PluginVersionId` values. Plans expose exact confirmation facts but never artifact URLs, local paths, executables, package-manager arguments, or a signature bypass. Staging and activation accept only provider-issued branded ids, and `markMaintenanceReady()` is a no-op outside an authenticated relaunch handoff.
 
 ## Model Experience

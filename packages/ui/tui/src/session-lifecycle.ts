@@ -3,7 +3,7 @@
 import type { SessionIdType as SessionId } from './host.ts'
 
 /** User command that requests a fresh TUI Session. */
-export type TuiFreshSessionCommand = 'clear' | 'new' | 'mode'
+export type TuiFreshSessionCommand = 'clear' | 'new' | 'mode' | 'workspace'
 
 /** Controller-owned confirmation or creation state for one fresh Session request. */
 export interface TuiFreshSessionDialogSnapshot {

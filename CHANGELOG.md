@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.4-rc.8
+
+- Separates installed plugins, Registry entries, and GitHub repositories, with explicit installability filters, repository scan status, and mouse-accessible details and links.
+- Adds capability-oriented `/commands`, `/skills`, `/mcp`, `/tips`, `/provider`, `/update`, and `/btw` workflows with bilingual, bounded terminal presentation.
+- Adds custom theme files, activity animation choices, live feedback notices, passive compatible-version discovery, resume-and-rename, and richer footer actions.
+- Restores pointer regions after leaving a tool detail opened during Agent execution and strengthens Plugin Hub cache, pagination, filtering, and click behavior.
+
 ## 0.1.3-rc.8
 
 - Resolves Codex image prompts through the Host-owned durable attachment service.

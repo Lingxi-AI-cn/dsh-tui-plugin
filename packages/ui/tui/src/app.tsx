@@ -21,7 +21,7 @@ import { tuiOsc8Text, tuiSafeHyperlinkUrl } from './hyperlink.ts'
 import { tuiBidiVisualText } from './bidi.ts'
 import type { InputCursorTarget } from './terminal-session.ts'
 import {
-  advanceTuiScreenClick, resolveTuiScreenSelection,
+  advanceTuiScreenClick, extendTuiScreenSelection, resolveTuiScreenSelection,
   tuiScreenSelectionText, tuiScreenTextSegments,
   type TuiScreenClick, type TuiScreenPosition, type TuiScreenSelection,
 } from './selection.ts'
@@ -68,8 +68,12 @@ import type { TuiRewindCandidate, TuiRewindDialogSnapshot } from './rewind.ts'
 import type { TuiWorkItemView, TuiWorkSnapshot } from './work.ts'
 import { TuiWorkPanel } from './work-panel.tsx'
 import {
-  tuiPluginHubCardHeight, tuiPluginHubCardLayout, tuiPluginHubCatalogLine, tuiPluginHubDetailLines, tuiPluginHubInstalledRows,
-  tuiPluginHubPlanLines, tuiPluginHubQueryCursor, tuiPluginHubRows, tuiPluginHubViewportRows,
+  tuiPluginHubCardHeight, tuiPluginHubCardLayout, tuiPluginHubCatalogLine, tuiPluginHubDetailLines,
+  tuiPluginHubDiscoveryDetailLines, tuiPluginHubDiscoveryRows, tuiPluginHubDiscoveryUrl, tuiPluginHubInstalledRows,
+  tuiPluginHubAvailableCategories, tuiPluginHubCategoryLabel, tuiPluginHubInstallableLabel,
+  tuiPluginHubPlanLines, tuiPluginHubQueryCursor,
+  tuiPluginHubRows, tuiPluginHubSortLabel,
+  tuiPluginHubViewportRows,
   type TuiPluginHubDetailLine, type TuiPluginHubDialogSnapshot,
 } from './plugin-hub.ts'
 import type { PluginId } from '@lingxi-ai-cn/dsh-plugin-hub'
@@ -83,8 +87,11 @@ import {
   tuiWorkPointerRegions,
   type TuiPointerRegion,
 } from './pointer.ts'
-import { tuiBorderStyle, tuiTextStyle, useTuiTheme, type TuiTheme } from './theme.tsx'
-import { tuiMessage, useTuiLocale, type TuiLocale } from './locale.ts'
+import {
+  tuiBorderStyle, tuiTextStyle, useTuiTheme, type TuiActivityPreference, type TuiTheme,
+} from './theme.tsx'
+import { tuiCommandDescription, tuiMessage, useTuiLocale, type TuiLocale } from './locale.ts'
+import { tuiGroupedCommandHelpLines } from './command-help.ts'
 import {
   resolveTuiStartupLogoVariant, tuiStartupLogoHeight, TuiStartupLogo,
   type TuiStartupLogoVariant,
@@ -105,6 +112,7 @@ import {
 } from './design-system.tsx'
 import { resolveTuiComposerDelivery, tuiRunningDeliveryHelpLines, type TuiSubmitMode } from './delivery.ts'
 import { selectTuiReclaimableMessage, tuiReclaimMessageText } from './reclaim.ts'
+import { projectTuiLatestSpeed, projectTuiSettledSpeed } from './live-feedback.ts'
 import { consumeTuiDoubleEscape } from './double-escape.ts'
 import type { TuiExternalEditorResult } from './external-editor.ts'
 import type { TuiClipboardInsert } from './clipboard.ts'
@@ -117,6 +125,7 @@ export interface TuiAppProps {
   status: AgentStatusStore
   interactions: InteractionStore
   externalNotice: ValueStore<string>
+  composerPrefill: ValueStore<{ readonly revision: number; readonly text: string } | undefined>
   modelSelection: ValueStore<ModelSelection | undefined>
   agentMode: ValueStore<AgentPreset | undefined>
   helpOpen: ValueStore<boolean>
@@ -138,6 +147,8 @@ export interface TuiAppProps {
   maxResumeOptions: number
   commands: readonly CommandDescriptor[]
   interactionRegistry: readonly TuiInteractionDescriptor[]
+  /** Optional running-Agent activity animation selected by the user. */
+  activityPreference: TuiActivityPreference
   completePaths(query: string, signal: AbortSignal): Promise<FsPathCompletionResult>
   onAttachPath(path: string): Promise<ImageAttachmentRef>
   onInputCursor(target: InputCursorTarget | undefined): void
@@ -158,6 +169,7 @@ export interface TuiAppProps {
   onOpenUrl(url: string): Promise<void>
   onActivateFooter(itemId: TuiFooterItemId): Promise<void>
   onResume(candidate: TuiResumeCandidate): Promise<void>
+  onResumeForRename(candidate: TuiResumeCandidate): Promise<void>
   onCloseResume(): void
   onConfirmFreshSession(): Promise<void>
   onCloseFreshSession(): void
@@ -166,9 +178,10 @@ export interface TuiAppProps {
   onExportSession(directory: string, includeDescendants: boolean, format: TuiSessionExportFormat): Promise<void>
   onCloseSessionExport(): void
   onClosePluginHub(): void
-  onPluginHubToggleView(): Promise<void>
+  onPluginHubToggleView(targetView?: 'discover' | 'discovery' | 'installed'): Promise<void>
   onPluginHubSearch(query: string): Promise<void>
   onPluginHubDetail(pluginId: PluginId): Promise<void>
+  onPluginHubDiscoveryDetail(repositoryId: string): void
   onPluginHubInstall(): Promise<void>
   onPluginHubRemove(packageName: string): Promise<void>
   onPluginHubConfirm(): Promise<void>
@@ -176,6 +189,7 @@ export interface TuiAppProps {
   onPluginHubLoadMore(): Promise<void>
   onPluginHubSort(): Promise<void>
   onPluginHubCategory(): Promise<void>
+  onPluginHubInstallable(): Promise<void>
   onMounted: () => void
   onOpenHelp(): void
   onCloseHelp(): void
@@ -288,9 +302,34 @@ interface FocusTarget {
   child?: TranscriptToolNode | undefined
 }
 
-type FocusState =
+/** Keyboard or pointer focus over one transcript row. */
+export type TuiTranscriptFocusState =
   | { mode: 'browse'; focusedKey: string; focusedIndex: number }
-  | { mode: 'detail'; focusedKey: string; focusedIndex: number; detailOffset: number }
+  | {
+    mode: 'detail'
+    focusedKey: string
+    focusedIndex: number
+    detailOffset: number
+    /** Pointer-opened detail returns directly to the composer on Escape. */
+    returnToComposer?: boolean
+  }
+
+/**
+ * Toggle one pointer-selected transcript row between browse and detail.
+ * @param previous - current transcript focus, when one exists.
+ * @param focusedKey - stable key of the clicked transcript target.
+ * @param focusedIndex - current target index after projection.
+ * @returns next focus state.
+ */
+export function toggleTuiTranscriptFocus(
+  previous: TuiTranscriptFocusState | undefined,
+  focusedKey: string,
+  focusedIndex: number,
+): TuiTranscriptFocusState {
+  return previous?.mode === 'detail' && previous.focusedKey === focusedKey
+    ? { mode: 'browse', focusedKey, focusedIndex }
+    : { mode: 'detail', focusedKey, focusedIndex, detailOffset: 0, returnToComposer: true }
+}
 
 interface FooterDetailState {
   itemId: TuiFooterItemId
@@ -314,7 +353,7 @@ interface TuiAgentViewLocalState {
   readonly composer: ComposerState
   readonly history: TuiComposerDraft[]
   readonly historySearch: TuiHistorySearchState | undefined
-  readonly focus: FocusState | undefined
+  readonly focus: TuiTranscriptFocusState | undefined
   readonly transcriptAnchor: TuiTranscriptViewportAnchor | undefined
   readonly transcriptSearch: TranscriptSearchState | undefined
 }
@@ -541,15 +580,22 @@ export function tuiStartupComposerFrame(
   }
 }
 
-const TUI_WORKING_FRAMES = Object.freeze(['.  ', '.. ', '...', ' ..', '  .', ' ..'] as const)
+const TUI_WORKING_FRAMES: Readonly<Record<TuiActivityPreference, readonly string[]>> = Object.freeze({
+  dots: Object.freeze(['.  ', '.. ', '...', ' ..', '  .', ' ..']),
+  pulse: Object.freeze(['·  ', '∙  ', '●  ', '∙  ']),
+  minimal: Object.freeze(['›  ']),
+  off: Object.freeze(['']),
+})
 
 /**
  * Select one stable-width frame for the running-Agent activity indicator.
  * @param tick - monotonically increasing process-local animation tick.
- * @returns a three-cell ASCII frame.
+ * @param preference - selected optional activity style.
+ * @returns a stable-width frame, or an empty string when animation is disabled.
  */
-export function tuiWorkingFrame(tick: number): string {
-  return TUI_WORKING_FRAMES[Math.abs(Math.trunc(tick)) % TUI_WORKING_FRAMES.length] ?? TUI_WORKING_FRAMES[0]
+export function tuiWorkingFrame(tick: number, preference: TuiActivityPreference = 'dots'): string {
+  const frames = TUI_WORKING_FRAMES[preference]
+  return frames[Math.abs(Math.trunc(tick)) % frames.length] ?? frames[0] ?? ''
 }
 
 function answerFor(question: PendingQuestion['request']['questions'][number], draft: string): AskUserQuestionAnswerItem {
@@ -581,6 +627,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const agentStatus = useSyncExternalStore(props.status.subscribe, props.status.getSnapshot)
   const interaction = useSyncExternalStore(props.interactions.subscribe, props.interactions.getSnapshot)
   const externalNotice = useSyncExternalStore(props.externalNotice.subscribe, props.externalNotice.getSnapshot)
+  const composerPrefill = useSyncExternalStore(props.composerPrefill.subscribe, props.composerPrefill.getSnapshot)
   const extensionSubscribe = useCallback(
     (listener: () => void) => props.extensions.subscribe(listener),
     [props.extensions],
@@ -642,6 +689,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   }))
   const terminalRows = terminalSize.rows
   const [composer, setComposer] = useState<ComposerState>(createComposerState)
+  const appliedComposerPrefill = useRef(0)
   const [suggestionOverride, setSuggestionOverride] = useState<SuggestionOverride | undefined>()
   const [pathResolution, setPathResolution] = useState<{
     key: string
@@ -657,7 +705,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const [questionAnswers, setQuestionAnswers] = useState<AskUserQuestionAnswerItem[]>([])
   const [questionCursor, setQuestionCursor] = useState(0)
   const [approvalOffset, setApprovalOffset] = useState(0)
-  const [focus, setFocus] = useState<FocusState | undefined>()
+  const [focus, setFocus] = useState<TuiTranscriptFocusState | undefined>()
   const [transcriptAnchor, setTranscriptAnchor] = useState<TuiTranscriptViewportAnchor | undefined>()
   const [transcriptSearch, setTranscriptSearch] = useState<TranscriptSearchState | undefined>()
   const [helpOffset, setHelpOffset] = useState(0)
@@ -733,6 +781,13 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     setHistorySearch(undefined)
     setApprovalOffset(0)
   }, [interaction])
+  useEffect(() => {
+    if (composerPrefill === undefined || composerPrefill.revision <= appliedComposerPrefill.current
+      || props.view.kind !== 'root') return
+    appliedComposerPrefill.current = composerPrefill.revision
+    setComposer(createComposerState(composerPrefill.text))
+    setSuggestionOverride(undefined)
+  }, [composerPrefill, props.view.kind])
 
   useEffect(() => {
     setResumeScope('workspace')
@@ -804,10 +859,10 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   }, [work.summary.running, workOpen])
 
   useEffect(() => {
-    if (agentStatus !== 'running') return
+    if (agentStatus !== 'running' || props.activityPreference === 'off') return
     const interval = setInterval(() => { setWorkingFrameTick(previous => previous + 1) }, 120)
     return () => { clearInterval(interval) }
-  }, [agentStatus])
+  }, [agentStatus, props.activityPreference])
 
   const focusTargets = [...rows, ...currentTodo === undefined || currentTodo.todos.length === 0 ? [] : [currentTodo]]
     .flatMap((node): FocusTarget[] => {
@@ -1059,9 +1114,20 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     approval: true,
     childView: props.view.kind === 'child',
   }, props.interactionRegistry)
+  const commandHelpLines = tuiGroupedCommandHelpLines(
+    props.commands, locale, command => tuiCommandDescription(command, locale),
+  ).map((text, index) => ({
+    key: `command:${index}`,
+    kind: text !== '' && !text.startsWith('  /') ? 'heading' as const : 'description' as const,
+    text,
+  }))
   const helpLines = [
     ...tuiInteractionHelpLines(helpDescriptors, Math.max(1, (stdout.columns || 80) - 4), locale),
     ...(props.view.kind === 'root' && agentStatus === 'running' ? tuiRunningDeliveryHelpLines() : []),
+    ...commandHelpLines.length === 0 ? [] : [
+      { key: 'commands:separator', kind: 'description' as const, text: '' },
+      ...commandHelpLines,
+    ],
   ]
   const doctorLines = diagnostics === undefined
     ? []
@@ -1076,6 +1142,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     loadedContextOffset, Math.max(0, loadedContextLines.length - loadedContextBodyRows),
   )
   const pluginHubDiscoverRows = tuiPluginHubRows(pluginHubDialog?.page, pluginHubSelection, stdout.columns || 80)
+  const pluginHubDiscoveryRows = tuiPluginHubDiscoveryRows(pluginHubDialog?.discoveryPage, pluginHubSelection, locale)
   const pluginHubInstalledRows = tuiPluginHubInstalledRows(
     pluginHubDialog?.installed,
     pluginHubSelection,
@@ -1084,11 +1151,17 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   )
   const pluginHubRows = pluginHubDialog?.view === 'installed'
     ? pluginHubInstalledRows
-    : pluginHubDiscoverRows
-  const pluginHubDetailLines = tuiPluginHubDetailLines(
+    : pluginHubDialog?.view === 'discovery' ? pluginHubDiscoveryRows : pluginHubDiscoverRows
+  const pluginHubCatalogDetailLines = tuiPluginHubDetailLines(
     pluginHubDialog?.detail, stdout.columns || 80, Date.now(), locale,
   )
-  const pluginHubDetailOpen = pluginHubDialog?.phase === 'detail' && pluginHubDialog.detail !== undefined
+  const pluginHubDiscoveryDetailLines = tuiPluginHubDiscoveryDetailLines(
+    pluginHubDialog?.discoveryDetail, stdout.columns || 80, Date.now(), locale,
+  )
+  const pluginHubDetailLines = pluginHubDialog?.discoveryDetail === undefined
+    ? pluginHubCatalogDetailLines : pluginHubDiscoveryDetailLines
+  const pluginHubDetailOpen = pluginHubDialog?.phase === 'detail'
+    && (pluginHubDialog.detail !== undefined || pluginHubDialog.discoveryDetail !== undefined)
   const pluginHubPlanLines = tuiPluginHubPlanLines(
     pluginHubDialog?.plan,
     pluginHubDialog?.detail,
@@ -1096,11 +1169,30 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     locale,
   )
   const pluginHubPlanOpen = pluginHubDialog?.phase === 'confirm' && pluginHubDialog.plan !== undefined
-  const pluginHubSearchVisible = pluginHubDialog?.view === 'discover'
+  const pluginHubCatalogLine = pluginHubDialog?.view === 'discover'
+    ? tuiPluginHubCatalogLine(pluginHubDialog, locale)
+    : undefined
+  const pluginHubInstalledTabLabel = tuiMessage(locale, 'plugin.view.installed')
+  const pluginHubRegistryTabLabel = tuiMessage(locale, 'plugin.view.discover')
+  const pluginHubRepositoriesTabLabel = tuiMessage(locale, 'plugin.view.discovery')
+  const pluginHubTabsLine = `${pluginHubInstalledTabLabel} · ${pluginHubRegistryTabLabel} · ${pluginHubRepositoriesTabLabel}`
+  const pluginHubAvailableCategories = pluginHubDialog?.availableCategories
+    ?? tuiPluginHubAvailableCategories(pluginHubDialog?.page)
+  const pluginHubHasCategories = pluginHubAvailableCategories.length > 0
+  const pluginHubSearchVisible = (pluginHubDialog?.view === 'discover' || pluginHubDialog?.view === 'discovery')
     && !pluginHubDetailOpen && !pluginHubPlanOpen
     && pluginHubDialog.phase !== 'planning' && pluginHubDialog.phase !== 'staging'
     && pluginHubDialog.phase !== 'handoff'
   const pluginHubBodyRows = tuiPluginHubViewportRows(terminalRows, pluginHubSearchVisible)
+  const pluginHubDiscoveryDetailWindow = tuiScrollableWindow(
+    pluginHubDetailLines.length, pluginHubDetailOffset, pluginHubBodyRows,
+  )
+  const pluginHubDiscoveryDetailLinks = pluginHubDialog?.discoveryDetail === undefined
+    ? undefined
+    : pluginHubDetailLines.flatMap((line, index) => line.kind === 'link'
+        && index >= pluginHubDiscoveryDetailWindow.start && index < pluginHubDiscoveryDetailWindow.end
+      ? [{ rowOffset: index - pluginHubDiscoveryDetailWindow.start, text: line.text }]
+      : [])
   const pluginHubRowHeight = tuiPluginHubCardHeight(stdout.columns || 80)
   const pluginHubVisibleCount = Math.max(1, Math.floor(pluginHubBodyRows / pluginHubRowHeight))
   const pluginHubVisibleStart = Math.max(0, Math.min(
@@ -1111,6 +1203,10 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const pluginHubSelected = pluginHubItems?.[
     Math.min(pluginHubSelection, Math.max(0, pluginHubItems.length - 1))
   ]
+  const pluginHubDiscoveryItems = pluginHubDialog?.discoveryPage?.items
+  const pluginHubSelectedDiscovery = pluginHubDiscoveryItems?.[
+    Math.min(pluginHubSelection, Math.max(0, pluginHubDiscoveryItems.length - 1))
+  ]
   const installedPlugins = pluginHubDialog?.installed?.plugins
   const pluginHubInstalled = installedPlugins?.[
     Math.min(pluginHubSelection, Math.max(0, installedPlugins.length - 1))
@@ -1119,6 +1215,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     pluginHubVisibleStart + pluginHubVisibleCount,
     pluginHubRows.length,
   )
+  const pluginHubNextCursor = pluginHubDialog?.view === 'discovery'
+    ? pluginHubDialog.discoveryPage?.nextCursor
+    : pluginHubDialog?.page?.nextCursor
   const pluginHubDetailPageSize = pluginHubBodyRows
   const helpHeight = helpVisible ? Math.min(Math.max(7, terminalRows - 6), 18) : 0
   const helpBodyRows = Math.max(1, helpHeight - 4)
@@ -1179,6 +1278,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     tokenUsage: props.view.kind === 'root' ? tokenUsage : undefined,
     contextBreakdown: props.view.kind === 'root' ? contextBreakdown : undefined,
     sessionStats: props.view.kind === 'root' ? sessionStats : undefined,
+    speed: props.view.kind === 'root'
+      ? projectTuiLatestSpeed(eventSnapshot, Date.now()) ?? projectTuiSettledSpeed(sessionStats)
+      : undefined,
     work: work.summary,
     workspace,
     transcript: {
@@ -1258,6 +1360,21 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         confirmation: pluginHubPlanOpen,
         view: pluginHubDialog.view,
         phase: pluginHubDialog.phase,
+        tabs: {
+          line: pluginHubTabsLine,
+          installedLabel: pluginHubInstalledTabLabel,
+          registryLabel: pluginHubRegistryTabLabel,
+          repositoriesLabel: pluginHubRepositoriesTabLabel,
+        },
+        catalog: pluginHubCatalogLine === undefined ? undefined : {
+          line: pluginHubCatalogLine,
+          installableLabel: tuiPluginHubInstallableLabel(pluginHubDialog.installableOnly, locale),
+          ...(pluginHubHasCategories
+            ? { categoryLabel: tuiPluginHubCategoryLabel(pluginHubDialog.category, locale) }
+            : {}),
+          sortLabel: tuiPluginHubSortLabel(pluginHubDialog.sort, locale),
+        },
+        detailLinks: pluginHubDiscoveryDetailLinks,
         visibleStart: pluginHubVisibleStart,
         rowHeights: pluginHubRows.slice(
           pluginHubVisibleStart, pluginHubVisibleStart + pluginHubVisibleCount,
@@ -1598,6 +1715,12 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       setFooterDetail({ itemId: item.id, offset: 0 })
       return
     }
+    if (item.action === 'bottom') {
+      setTranscriptAnchor(undefined)
+      setFocus(undefined)
+      setTranscriptSearch(undefined)
+      return
+    }
     const itemId = item.id
     setFooterSelection(undefined)
     setBusy(true)
@@ -1619,6 +1742,10 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     setPluginHubSelection(index)
     if (pluginHubDialog.view === 'installed') {
       if (pluginHubDialog.profileMutations !== false) void props.onPluginHubRemove(selected.packageName)
+      return
+    }
+    if (pluginHubDialog.view === 'discovery') {
+      props.onPluginHubDiscoveryDetail(selected.id)
       return
     }
     const catalogItem = pluginHubItems?.find(item => String(item.id) === selected.id)
@@ -1693,6 +1820,16 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
 
   const focusTranscriptTarget = (target: FocusTarget, index: number): void => {
     setFocus({ mode: 'browse', focusedKey: target.key, focusedIndex: index })
+    if (target.node.kind !== 'todo') {
+      const parentIndex = transcriptViewport.indexOfNode(target.node)
+      setTranscriptAnchor(previous => transcriptScroll.ensureVisible(
+        previous, transcriptPage, target.node.key, parentIndex,
+      ))
+    }
+  }
+
+  const toggleTranscriptTargetDetail = (target: FocusTarget, index: number): void => {
+    setFocus(previous => toggleTuiTranscriptFocus(previous, target.key, index))
     if (target.node.kind !== 'todo') {
       const parentIndex = transcriptViewport.indexOfNode(target.node)
       setTranscriptAnchor(previous => transcriptScroll.ensureVisible(
@@ -1777,7 +1914,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     if (hit === undefined || hit.region.disabledReason !== undefined || action === undefined) return
     if (action.id === 'transcript.focus') {
       const target = focusTargets[action.index]
-      if (target?.key === action.key) focusTranscriptTarget(target, action.index)
+      if (target?.key === action.key) toggleTranscriptTargetDetail(target, action.index)
     } else if (action.id === 'footer.activate') {
       activateFooterItem(mountedFooterItems.find(item => item.id === action.itemId))
     } else if (action.id === 'work.select') {
@@ -1787,12 +1924,25 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       if (pluginHubDialog !== undefined && pluginHubDialog.view !== action.targetView) {
         setPluginHubSelection(0)
         setPluginHubDetailOffset(0)
-        void props.onPluginHubToggleView()
+        void props.onPluginHubToggleView(action.targetView)
       }
     } else if (action.id === 'pluginHub.accept') {
       activatePluginHubPointer(action.index)
     } else if (action.id === 'pluginHub.close') {
       props.onClosePluginHub()
+    } else if (action.id === 'pluginHub.sort') {
+      setPluginHubSelection(0)
+      void props.onPluginHubSort()
+    } else if (action.id === 'pluginHub.category') {
+      setPluginHubSelection(0)
+      void props.onPluginHubCategory()
+    } else if (action.id === 'pluginHub.installable') {
+      setPluginHubSelection(0)
+      void props.onPluginHubInstallable()
+    } else if (action.id === 'pluginHub.openRepository') {
+      const url = pluginHubDialog?.discoveryDetail?.repository.url
+        ?? tuiPluginHubDiscoveryUrl(pluginHubRows, pluginHubSelection)
+      if (url !== undefined) void props.onOpenUrl(url)
     } else if (action.id === 'resume.scope') {
       if (resumeDialog !== undefined && action.scope !== resumeScope) {
         setResumeScope(action.scope)
@@ -1983,7 +2133,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           return
         }
         if (pluginHubDialog !== undefined && interaction === undefined) {
-          if (pluginHubDialog.phase === 'detail' && pluginHubDialog.detail !== undefined) {
+          if (pluginHubDialog.phase === 'detail'
+            && (pluginHubDialog.detail !== undefined || pluginHubDialog.discoveryDetail !== undefined)) {
             setPluginHubDetailOffset(previous => Math.max(
               0, Math.min(Math.max(0, pluginHubDetailLines.length - pluginHubBodyRows), previous + wheelDirection),
             ))
@@ -2138,6 +2289,21 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       }
       return
     }
+    if (key.shift === true && screenSelection !== undefined
+      && (inputContext === 'Composer' || inputContext === 'Transcript' || inputContext === 'Detail')) {
+      const direction = key.leftArrow ? 'left'
+        : key.rightArrow ? 'right'
+          : key.upArrow ? 'up'
+            : key.downArrow ? 'down'
+              : key.home ? 'home'
+                : key.end ? 'end'
+                  : undefined
+      if (direction !== undefined) {
+        const range = extendTuiScreenSelection(screenSelection.map, screenSelection.range, direction)
+        copyScreenSelection(screenSelection.surface, screenSelection.map, range)
+        return
+      }
+    }
     if (helpVisible) {
       const action = matchAction('Dialog', input, key)
       if (action === 'dialog.previous') setHelpOffset(previous => Math.max(0, previous - 1))
@@ -2222,9 +2388,15 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         if (action === 'pluginHub.close') props.onClosePluginHub()
         return
       }
-      if (pluginHubDialog.phase === 'detail' && pluginHubDialog.detail !== undefined) {
+      if (pluginHubDialog.phase === 'detail'
+        && (pluginHubDialog.detail !== undefined || pluginHubDialog.discoveryDetail !== undefined)) {
         if (action === 'pluginHub.close') props.onClosePluginHub()
-        else if (action === 'pluginHub.accept' && pluginHubDialog.profileMutations !== false
+        else if ((action === 'pluginHub.accept' || action === 'pluginHub.openRepository')
+          && pluginHubDialog.discoveryDetail !== undefined) {
+          void props.onOpenUrl(pluginHubDialog.discoveryDetail.repository.url)
+        }
+        else if (action === 'pluginHub.accept' && pluginHubDialog.detail !== undefined
+          && pluginHubDialog.profileMutations !== false
           && pluginHubDialog.detail.latestVersion?.installable === true) {
           void props.onPluginHubInstall()
         }
@@ -2237,10 +2409,16 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       if (action === 'pluginHub.refresh') { void props.onPluginHubRefresh(); return }
       if (action === 'pluginHub.sort') { setPluginHubSelection(0); void props.onPluginHubSort(); return }
       if (action === 'pluginHub.category') { setPluginHubSelection(0); void props.onPluginHubCategory(); return }
+      if (action === 'pluginHub.installable') { setPluginHubSelection(0); void props.onPluginHubInstallable(); return }
+      if (action === 'pluginHub.openRepository' && pluginHubDialog.view === 'discovery') {
+        const url = pluginHubSelectedDiscovery?.repository.url
+        if (url !== undefined) void props.onOpenUrl(url)
+        return
+      }
       if (action === 'pluginHub.previous') { setPluginHubSelection(previous => Math.max(0, previous - 1)); return }
       if (action === 'pluginHub.next') {
-        if (pluginHubDialog.view === 'discover' && pluginHubDialog.phase === 'browse'
-          && pluginHubDialog.page?.nextCursor !== undefined
+        if (pluginHubDialog.view !== 'installed' && pluginHubDialog.phase === 'browse'
+          && pluginHubNextCursor !== undefined
           && pluginHubSelection >= pluginHubRows.length - 1) {
           void props.onPluginHubLoadMore()
           return
@@ -2249,8 +2427,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       }
       if (action === 'pluginHub.previousPage') { setPluginHubSelection(previous => Math.max(0, previous - pluginHubVisibleCount)); return }
       if (action === 'pluginHub.nextPage') {
-        if (pluginHubDialog.view === 'discover' && pluginHubDialog.phase === 'browse'
-          && pluginHubDialog.page?.nextCursor !== undefined
+        if (pluginHubDialog.view !== 'installed' && pluginHubDialog.phase === 'browse'
+          && pluginHubNextCursor !== undefined
           && pluginHubSelection + pluginHubVisibleCount >= pluginHubRows.length) {
           void props.onPluginHubLoadMore()
           return
@@ -2262,6 +2440,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           if (pluginHubDialog.profileMutations !== false && pluginHubInstalled !== undefined) {
             void props.onPluginHubRemove(pluginHubInstalled.packageName)
           }
+        } else if (pluginHubDialog.view === 'discovery') {
+          const selected = pluginHubDiscoveryRows[pluginHubSelection]
+          if (selected !== undefined) props.onPluginHubDiscoveryDetail(selected.id)
         } else if (pluginHubSelected !== undefined) void props.onPluginHubDetail(pluginHubSelected.id)
         return
       }
@@ -2396,6 +2577,16 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           if (candidate === undefined) setResumeError(tuiMessage(locale, 'resume.search.none.current'))
           else activateResumeCandidate(candidate)
         }
+      } else if (input === 'R') {
+        const candidate = resumeCandidates[effectiveResumeSelection]
+        if (candidate === undefined) setResumeError(tuiMessage(locale, 'resume.search.none.current'))
+        else if (candidate.disabledReason !== undefined) setResumeError(candidate.disabledReason)
+        else if (hasComposerDraft && composer.text.trim() !== '/resume') {
+          setResumeError(tuiMessage(locale, 'resume.rename.draft'))
+        } else {
+          setResumeError('')
+          void props.onResumeForRename(candidate)
+        }
       } else if (key.backspace) {
         setResumeQuery(previous => deleteComposerText(createComposerState(previous), 'backward').text)
         setResumeSelection(0)
@@ -2489,9 +2680,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         if (screenSelection?.surface === 'detail') setScreenSelection(undefined)
         else if (footerDetail !== undefined) setFooterDetail(undefined)
         else {
-          setFocus(previous => previous?.mode !== 'detail' ? previous : {
-            mode: 'browse', focusedKey: previous.focusedKey, focusedIndex: previous.focusedIndex,
-          })
+          setFocus(previous => previous?.mode !== 'detail' ? previous : previous.returnToComposer === true
+            ? undefined
+            : { mode: 'browse', focusedKey: previous.focusedKey, focusedIndex: previous.focusedIndex })
         }
         return
       }
@@ -2986,15 +3177,23 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     const title = confirmation
       ? tuiMessage(locale, 'plugin.title.confirm')
       : detail
-        ? tuiMessage(locale, 'plugin.title.detail')
+        ? tuiMessage(locale, pluginHubDialog.discoveryDetail === undefined
+          ? 'plugin.title.detail' : 'plugin.title.discoveryDetail')
         : pluginHubDialog.view === 'installed'
           ? tuiMessage(locale, 'plugin.title.installed')
-          : tuiMessage(locale, 'plugin.title.discover')
+          : pluginHubDialog.view === 'discovery'
+            ? tuiMessage(locale, 'plugin.title.discovery')
+            : tuiMessage(locale, 'plugin.title.discover')
     const statusLine = pluginHubDialog.view === 'installed'
       ? tuiMessage(locale, 'plugin.status.profile', {
         revision: pluginHubDialog.installed?.profileRevision ?? tuiMessage(locale, 'common.loading'),
       })
-      : tuiPluginHubCatalogLine(pluginHubDialog, locale)
+      : pluginHubDialog.view === 'discovery'
+        ? tuiMessage(locale, 'plugin.discovery.status', {
+          revision: pluginHubDialog.discoveryPage?.catalogRevision ?? tuiMessage(locale, 'plugin.discovery.unknown'),
+          sort: tuiPluginHubSortLabel(pluginHubDialog.sort, locale),
+        })
+        : pluginHubCatalogLine ?? tuiPluginHubCatalogLine(pluginHubDialog, locale)
     const working = pluginHubDialog.phase === 'loading' || pluginHubDialog.phase === 'detail-loading'
       ? tuiMessage(locale, 'plugin.working.loading')
       : pluginHubDialog.phase === 'planning'
@@ -3006,34 +3205,42 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             : undefined
     const footer = pluginHubDialog.phase === 'handoff'
       ? tuiMessage(locale, 'plugin.footer.handoff')
-      : pluginHubDialog.profileMutations === false && detail
-        ? pluginHubDialog.detail.latestVersion?.installable === true
-          ? tuiMessage(locale, 'plugin.footer.install', {
-            command: `dsh plugin --profile tui add --save-exact ${pluginHubDialog.detail.packageName}@${pluginHubDialog.detail.latestVersion.version}`,
-          })
-          : tuiMessage(locale, 'plugin.footer.notInstallable')
-        : pluginHubDialog.profileMutations === false && pluginHubDialog.view === 'installed'
-          ? pluginHubInstalled === undefined
-            ? tuiMessage(locale, 'plugin.footer.installed.external')
-            : tuiMessage(locale, 'plugin.footer.remove', {
-              command: `dsh plugin --profile tui remove ${pluginHubInstalled.packageName}`,
+      : pluginHubDialog.discoveryDetail !== undefined
+        ? tuiMessage(locale, 'plugin.footer.discoveryDetail')
+        : pluginHubDialog.profileMutations === false && detail && pluginHubDialog.detail !== undefined
+          ? pluginHubDialog.detail.latestVersion?.installable === true
+            ? tuiMessage(locale, 'plugin.footer.install', {
+              command: `dsh plugin --profile tui add --save-exact ${pluginHubDialog.detail.packageName}@${pluginHubDialog.detail.latestVersion.version}`,
             })
-          : confirmation
-            ? tuiMessage(locale, 'plugin.footer.confirm')
-            : detail
-              ? pluginHubDialog.detail.latestVersion?.installable === true
-                ? tuiMessage(locale, 'plugin.footer.detail.install')
-                : tuiMessage(locale, 'plugin.footer.detail.unavailable')
-              : pluginHubDialog.view === 'installed'
-                ? tuiMessage(locale, 'plugin.footer.installed')
-                : tuiMessage(locale, 'plugin.footer.discover')
+            : tuiMessage(locale, 'plugin.footer.notInstallable')
+          : pluginHubDialog.profileMutations === false && pluginHubDialog.view === 'installed'
+            ? pluginHubInstalled === undefined
+              ? tuiMessage(locale, 'plugin.footer.installed.external')
+              : tuiMessage(locale, 'plugin.footer.remove', {
+                command: `dsh plugin --profile tui remove ${pluginHubInstalled.packageName}`,
+              })
+            : confirmation
+              ? tuiMessage(locale, 'plugin.footer.confirm')
+              : detail && pluginHubDialog.detail !== undefined
+                ? pluginHubDialog.detail.latestVersion?.installable === true
+                  ? tuiMessage(locale, 'plugin.footer.detail.install')
+                  : tuiMessage(locale, 'plugin.footer.detail.unavailable')
+                : pluginHubDialog.view === 'installed'
+                  ? tuiMessage(locale, 'plugin.footer.installed')
+                  : pluginHubDialog.view === 'discovery'
+                    ? tuiMessage(locale, 'plugin.footer.discovery')
+                    : tuiMessage(locale, pluginHubHasCategories
+                      ? 'plugin.footer.discover'
+                      : 'plugin.footer.discover.noCategories')
     const progress = pluginHubDialog.progress
     return <TuiPane title={tuiMessage(locale, 'pane.plugins')} height={stdout.rows}>
       <TuiSection paddingX={2}>
         <Text>
+          <Text {...pluginHubDialog.view === 'installed' ? tuiTextStyle(theme.tokens.selection) : tuiTextStyle(theme.tokens.muted)} bold={pluginHubDialog.view === 'installed'}>{pluginHubInstalledTabLabel}</Text>
+          <Text {...tuiTextStyle(theme.tokens.muted)}> · </Text>
           <Text {...pluginHubDialog.view === 'discover' ? tuiTextStyle(theme.tokens.selection) : tuiTextStyle(theme.tokens.muted)} bold={pluginHubDialog.view === 'discover'}>{tuiMessage(locale, 'plugin.view.discover')}</Text>
           <Text {...tuiTextStyle(theme.tokens.muted)}> · </Text>
-          <Text {...pluginHubDialog.view === 'installed' ? tuiTextStyle(theme.tokens.selection) : tuiTextStyle(theme.tokens.muted)} bold={pluginHubDialog.view === 'installed'}>{tuiMessage(locale, 'plugin.view.installed')}</Text>
+          <Text {...pluginHubDialog.view === 'discovery' ? tuiTextStyle(theme.tokens.selection) : tuiTextStyle(theme.tokens.muted)} bold={pluginHubDialog.view === 'discovery'}>{tuiMessage(locale, 'plugin.view.discovery')}</Text>
           <Text {...tuiTextStyle(theme.tokens.muted)}> · </Text>
           <Text bold>{title}</Text>
         </Text>
@@ -3059,7 +3266,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
               ? lines.slice(detailWindow.start, detailWindow.end).map((line, index) => <Text
                 key={`${detailWindow.start + index}:${line.kind}:${line.text}`}
                 {...tuiPluginHubDetailTextStyle(theme, line)}
-                bold={line.kind === 'title' || line.kind === 'section'}
+                bold={line.kind === 'title' || line.kind === 'section' || line.kind === 'link'}
                 wrap="truncate-end"
               >{line.text}</Text>)
               : pluginHubRows.length === 0
@@ -3067,13 +3274,17 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                   tone="warning"
                   message={pluginHubDialog.view === 'installed'
                     ? tuiMessage(locale, 'plugin.empty.installed')
-                    : tuiMessage(locale, 'plugin.empty.discover')}
+                    : pluginHubDialog.view === 'discovery'
+                      ? tuiMessage(locale, 'plugin.empty.discovery')
+                      : tuiMessage(locale, 'plugin.empty.discover')}
                 />
                 : pluginHubRows.slice(pluginHubVisibleStart, pluginHubVisibleStart + pluginHubVisibleCount).map((row) => {
                   const layout = tuiPluginHubCardLayout(row, stdout.columns || 80, Date.now(), locale)
-                  const trailingTone = row.verificationLevel === 'curated'
-                    ? 'accent' as const
-                    : row.installable ? 'success' as const : 'muted' as const
+                  const trailingTone = row.kind === 'discovery'
+                    ? 'warning' as const
+                    : row.verificationLevel === 'curated'
+                      ? 'accent' as const
+                      : row.installable ? 'success' as const : 'muted' as const
                   return <TuiListRow
                     key={row.id}
                     selected={row.selected}
@@ -3088,14 +3299,14 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       </TuiScrollablePanel>
       <TuiSection height={2} paddingX={2}>
         <TuiHintLine>{footer}</TuiHintLine>
-        {!detail && !confirmation && pluginHubDialog.view === 'discover' && pluginHubRows.length > 0
+        {!detail && !confirmation && pluginHubDialog.view !== 'installed' && pluginHubRows.length > 0
           && <TuiHintLine>
             {tuiMessage(locale, 'common.showing.range', {
               start: pluginHubVisibleStart + 1, end: pluginHubVisibleEnd,
             })}
             {pluginHubDialog.loadingMore
               ? tuiMessage(locale, 'plugin.loading.more')
-              : pluginHubDialog.page?.nextCursor !== undefined ? tuiMessage(locale, 'plugin.more.available') : ''}
+              : pluginHubNextCursor !== undefined ? tuiMessage(locale, 'plugin.more.available') : ''}
           </TuiHintLine>}
       </TuiSection>
     </TuiPane>
@@ -3296,7 +3507,10 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                       height={resumeRowHeight}
                       title={terminalSafe(candidate.title)}
                       description={`${formatTuiRelativeTime(candidate.updatedAt, Date.now())} · ${terminalSafe(status)} · ${terminalSafe(candidate.record.header.id)}`}
-                      metadata={resumeScope === 'all' ? terminalSafe(candidate.workspaceLabel) : undefined}
+                      metadata={resumeScope === 'all'
+                        && (index === 0 || resumeCandidates[index - 1]?.workspaceLabel !== candidate.workspaceLabel)
+                        ? terminalSafe(`— ${candidate.workspaceLabel} —`)
+                        : undefined}
                       detail={detail}
                     />
                   })}
@@ -3525,7 +3739,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     <TuiSection paddingX={2} height={1}>
       {agentStatus === 'running'
         ? <Text wrap="truncate-end">
-          <Text bold {...tuiTextStyle(theme.tokens.warning)}>{tuiWorkingFrame(workingFrameTick)} {tuiMessage(locale, 'common.working')}</Text>
+          <Text bold {...tuiTextStyle(theme.tokens.warning)}>{tuiWorkingFrame(workingFrameTick, props.activityPreference)}{props.activityPreference === 'off' ? '' : ' '}{tuiMessage(locale, 'common.working')}</Text>
           <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}> · {tuiMessage(locale, 'common.esc.stop')} · {activityMetadata}</Text>
         </Text>
         : <Text wrap="truncate-end">

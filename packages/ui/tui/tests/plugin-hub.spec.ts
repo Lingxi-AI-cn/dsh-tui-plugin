@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest'
 import stringWidth from 'string-width'
 import {
   PluginChangePlanId, PluginId, PluginVersionId,
-  type InstalledPluginSnapshot, type PluginChangePlan, type PluginDetail, type PluginSearchPage,
+  type InstalledPluginSnapshot, type PluginChangePlan, type PluginDetail,
+  type PluginDiscoveryRepositoryPage, type PluginSearchPage,
 } from '@lingxi-ai-cn/dsh-plugin-hub'
 import {
   formatTuiPluginHubRelativeTime, formatTuiPluginHubStars, tuiPluginHubCardHeight,
-  tuiPluginHubCardLayout, tuiPluginHubCatalogLine, tuiPluginHubCategoryLabel, tuiPluginHubDetailLines,
-  tuiPluginHubInstalledRows, tuiPluginHubNextCategory, tuiPluginHubNextSort, tuiPluginHubPlanLines,
+  tuiPluginHubAvailableCategories, tuiPluginHubCardLayout, tuiPluginHubCatalogLine, tuiPluginHubCategoryLabel, tuiPluginHubDetailLines,
+  tuiPluginHubDiscoveryDetailLines, tuiPluginHubDiscoveryRows, tuiPluginHubDiscoveryUrl,
+  tuiPluginHubInstallableLabel, tuiPluginHubInstalledRows, tuiPluginHubLoadMoreFailure,
+  tuiPluginHubNextCategory, tuiPluginHubNextSort, tuiPluginHubPlanLines,
   tuiPluginHubQueryCursor, tuiPluginHubRows, tuiPluginHubSortLabel, tuiPluginHubViewportRows,
 } from '../src/plugin-hub.ts'
 
@@ -40,13 +43,19 @@ describe('Plugin Hub TUI projection', () => {
   })
 
   it('cycles Registry-owned categories without treating the all-categories state as a filter', () => {
+    const categories = tuiPluginHubAvailableCategories({
+      apiVersion: 'dsh.plugin-hub/v1', catalogRevision: 1,
+      items: [summary, { ...summary, categories: ['vision', 'communication'] }],
+    })
     expect(tuiPluginHubCategoryLabel(undefined)).toBe('All categories')
     expect(tuiPluginHubCategoryLabel('communication')).toBe('Communication')
-    expect(tuiPluginHubNextCategory(undefined)).toBe('communication')
-    expect(tuiPluginHubNextCategory('communication')).toBe('vision')
-    expect(tuiPluginHubNextCategory('other')).toBeNull()
+    expect(categories).toEqual(['communication', 'vision'])
+    expect(tuiPluginHubNextCategory(undefined, categories)).toBe('communication')
+    expect(tuiPluginHubNextCategory('communication', categories)).toBe('vision')
+    expect(tuiPluginHubNextCategory('vision', categories)).toBeNull()
+    expect(tuiPluginHubNextCategory(undefined, tuiPluginHubAvailableCategories(undefined))).toBeNull()
   })
-  it('anchors the Discover query cursor and clamps long suffixes inside the field', () => {
+  it('anchors the Registry query cursor and clamps long suffixes inside the field', () => {
     expect(tuiPluginHubQueryCursor('', 80)).toEqual({ row: 6, column: 11 })
     expect(tuiPluginHubQueryCursor('插件', 80)).toEqual({ row: 6, column: 15 })
     expect(tuiPluginHubQueryCursor('x'.repeat(100), 80)).toEqual({ row: 6, column: 78 })
@@ -77,6 +86,56 @@ describe('Plugin Hub TUI projection', () => {
     expect(standard.badges).toBe('★60 [TUI]')
     expect(standard.metadata).toBeUndefined()
     expect(standard.summary).toContain('回合结束后发送桌面通知')
+  })
+
+  it('projects discovery repositories as non-installable status rows', () => {
+    const page: PluginDiscoveryRepositoryPage = {
+      apiVersion: 'dsh.plugin-hub/v1' as const, catalogRevision: 7,
+      items: [{
+        id: 'repo_1', repository: { provider: 'github', fullName: 'example/discovery', url: 'https://github.com/example/discovery', primaryLanguage: 'TypeScript' },
+        stars: 900, forks: 2, topics: ['dsh-plugin'], catalogState: 'candidate' as const, stateReason: null, observedAt: '2026-08-19T00:01:00.000Z', installable: false,
+        sync: { headSha: 'a'.repeat(40), lastSeenAt: '2026-08-19T00:00:00.000Z', lastSyncedAt: '2026-08-19T00:00:00.000Z' },
+        scan: { status: 'failed' as const, scannerVersion: 'scanner/2', sourceCommit: 'b'.repeat(40), packageCount: 0, updatedAt: '2026-08-19T00:00:00.000Z', errorCode: 'JOB_FAILED', errorSummary: 'bounded failure', rejectionCodes: ['RUNTIME_ENTRY_MISSING'] },
+        packages: { total: 1, active: 0, rejected: 1 }, published: { projectionCount: 0, installableCount: 0, revision: null },
+      }],
+    }
+    const [row] = tuiPluginHubDiscoveryRows(page, 0)
+    expect(row).toMatchObject({ kind: 'discovery', displayName: 'example/discovery', repositoryUrl: 'https://github.com/example/discovery', installable: false, selected: true })
+    expect(row?.summary).toContain('failed')
+    expect(row?.summary).toContain('JOB_FAILED')
+    expect(row?.summary).toContain('RUNTIME_ENTRY_MISSING')
+    expect(row?.summary).toContain('packages 0/1 active')
+    expect(row?.summary).toContain('published 0')
+    expect(tuiPluginHubCardLayout(row!, 80).badges).toContain('[Repository]')
+    const chineseRow = tuiPluginHubDiscoveryRows(page, 0, 'zh')[0]
+    expect(chineseRow?.summary).toContain('扫描失败')
+    expect(chineseRow?.summary).toContain('包 0/1 个有效')
+    expect(tuiPluginHubCardLayout(chineseRow!, 80, Date.now(), 'zh').badges).toContain('[仓库]')
+    const discoveryDetailLines = tuiPluginHubDiscoveryDetailLines(page.items[0], 100,
+      Date.parse('2026-08-20T00:00:00.000Z'), 'zh')
+    const discoveryDetail = physicalText(discoveryDetailLines)
+    expect(discoveryDetailLines.find(line => line.text.includes('https://github.com/example/discovery')))
+      .toMatchObject({ kind: 'link', tone: 'accent' })
+    expect(discoveryDetailLines.find(line => line.text.includes('当前 SHA')))
+      .toMatchObject({ kind: 'field', tone: 'muted' })
+    expect(discoveryDetail).toContain(`当前 SHA：${'a'.repeat(40)}`)
+    expect(discoveryDetail).toContain('错误 JOB_FAILED：bounded failure')
+    expect(discoveryDetail).toContain('拒绝代码：RUNTIME_ENTRY_MISSING')
+    expect(discoveryDetail).toContain('包：共 1 个 · 0 个有效 · 1 个拒绝')
+    expect(discoveryDetail).toContain('Registry 投影：0 个 · 0 个可安装')
+    const secondPage = { ...page, items: [page.items[0]!, { ...page.items[0]!, id: 'repo_2', repository: { ...page.items[0]!.repository, fullName: 'example/second', url: 'https://github.com/example/second' } }] }
+    const rows = tuiPluginHubDiscoveryRows(secondPage, 0)
+    expect(tuiPluginHubDiscoveryUrl(rows, 1)).toBe('https://github.com/example/second')
+  })
+
+  it('closes discovery pagination loading state on request failure', () => {
+    const snapshot = {
+      generation: 1, phase: 'browse' as const, view: 'discovery' as const, initialQuery: '', sort: 'stars' as const,
+      loadingMore: true, discoveryPage: { apiVersion: 'dsh.plugin-hub/v1' as const, catalogRevision: 1, items: [], nextCursor: 'cursor' },
+    }
+    const failure = tuiPluginHubLoadMoreFailure(snapshot, new Error('network down'), 'zh')
+    expect(failure).toMatchObject({ phase: 'error', loadingMore: false })
+    expect(failure.error).toContain('Plugin Hub 目录不可用')
   })
 
   it('keeps CJK, emoji, long names, and every physical card line within narrow cells', () => {
@@ -296,7 +355,7 @@ describe('Plugin Hub TUI projection', () => {
     const page: PluginSearchPage = { apiVersion: 'dsh.plugin-hub/v1', catalogRevision: 1, items: [summary], stale: true }
     expect(tuiPluginHubCatalogLine({
       generation: 1, phase: 'browse', view: 'discover', initialQuery: '', sort: 'stars', page,
-    })).toBe('Offline · last-good catalog · All categories · Sort: Stars')
+    })).toBe('Offline · last-good Registry · All Registry entries · All categories · Sort: Stars')
   })
 
   it('labels catalog-only providers as external-CLI mutation mode', () => {
@@ -304,6 +363,11 @@ describe('Plugin Hub TUI projection', () => {
       generation: 1, phase: 'browse', view: 'discover', initialQuery: '', sort: 'stars',
       profileMutations: false,
       page: { apiVersion: 'dsh.plugin-hub/v1', catalogRevision: 7, items: [summary] },
-    })).toBe('Catalog r7 · All categories · Sort: Stars · Changes: external CLI')
+    })).toBe('Registry r7 · All Registry entries · All categories · Sort: Stars · Changes: external CLI')
+    expect(tuiPluginHubInstallableLabel(true, 'zh')).toBe('仅可安装')
+    expect(tuiPluginHubCatalogLine({
+      generation: 1, phase: 'browse', view: 'discover', initialQuery: '', sort: 'stars', installableOnly: true,
+      page: { apiVersion: 'dsh.plugin-hub/v1', catalogRevision: 7, items: [summary] },
+    }, 'zh')).toBe('Registry r7 · 仅可安装 · 全部分类 · 排序：Stars')
   })
 })

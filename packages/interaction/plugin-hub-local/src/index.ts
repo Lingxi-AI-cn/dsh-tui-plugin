@@ -10,7 +10,8 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type {} from '@lingxi-ai-cn/dsh-plugin-hub'
 import type {
   InstalledPluginSnapshot, PluginAdvisorySummary, PluginChangePlan, PluginChangePlanId, PluginCurationSummary, PluginDetail,
-  PluginCatalogSort, PluginCategory, PluginDiscoveryMetadataSource, PluginHubProvider, PluginHubStatus, PluginId,
+  PluginCatalogSort, PluginCategory, PluginDiscoveryMetadataSource, PluginDiscoveryRepository, PluginDiscoveryRepositoryPage,
+  PluginDiscoverySearchRequest, PluginHubProvider, PluginHubStatus, PluginId,
   PluginMaintenanceHandoff, PluginPackageKind,
   PluginSearchPage, PluginSearchRequest, PluginSummary, PluginTransactionId,
   PluginVersionId, StagedPluginTransaction,
@@ -117,6 +118,8 @@ export interface FixtureCatalog {
   readonly generatedAt?: string
   /** Search rows exposed by the fixture provider. */
   readonly items: readonly PluginSummary[]
+  /** Optional discovered repository rows shown by the separate discovery view. */
+  readonly repositories?: readonly PluginDiscoveryRepository[]
   /** Optional full detail records keyed by opaque plugin id. */
   readonly details?: Readonly<Record<string, PluginDetail>>
 }
@@ -142,6 +145,12 @@ export function createFixturePluginHubProvider(catalog: FixtureCatalog): PluginH
         const normalized = normalizeRequest(request)
         return filterSearchPage({ apiVersion: PLUGIN_HUB_API_VERSION, catalogRevision: catalog.revision ?? 1, items }, normalized)
       })
+    },
+    searchRepositories(request: PluginDiscoverySearchRequest): Promise<PluginDiscoveryRepositoryPage> {
+      const limit = Math.max(1, Math.min(50, request.limit ?? 20))
+      const items = catalog.repositories ?? []
+      return Promise.resolve({ apiVersion: PLUGIN_HUB_API_VERSION, catalogRevision: catalog.revision ?? 1,
+        items: Object.freeze(items.slice(0, limit)), ...(items.length > limit ? { nextCursor: 'fixture:repositories:next' } : {}) })
     },
     plugin(pluginId: PluginId): Promise<PluginDetail> {
       const detail = details.get(pluginId) ?? items.find(item => item.id === pluginId)
@@ -280,6 +289,18 @@ class LocalRegistryProvider implements PluginHubProvider {
     }
   }
 
+  async searchRepositories(request: PluginDiscoverySearchRequest, signal?: AbortSignal): Promise<PluginDiscoveryRepositoryPage> {
+    const query = new URLSearchParams()
+    if (request.query !== undefined) query.set('q', boundedQuery(request.query))
+    if (request.state !== undefined) query.set('state', request.state)
+    if (request.scanStatus !== undefined) query.set('scanStatus', request.scanStatus)
+    if (request.sort !== undefined) query.set('sort', request.sort)
+    if (request.cursor !== undefined) query.set('cursor', request.cursor)
+    query.set('limit', String(boundedLimit(request.limit)))
+    const value = await this.request('/v1/discovery/repositories', query, signal)
+    return parseDiscoveryPage(value)
+  }
+
   async plugin(pluginId: PluginId, signal?: AbortSignal): Promise<PluginDetail> {
     const cached = this.details.get(pluginId)
     try {
@@ -368,6 +389,7 @@ class LocalRegistryProvider implements PluginHubProvider {
         const init: RequestInit = { redirect: 'manual', signal: controller.signal }
         if (cached?.etag !== undefined) init.headers = { 'If-None-Match': cached.etag }
         const response = await fetch(current, init)
+        if (response.status === 304 && cached !== undefined) return cached.value
         if (response.status >= 300 && response.status < 400) {
           const location = response.headers.get('location')
           if (location === null || redirect === MAX_REDIRECTS) throw new PluginHubError('Registry redirect limit exceeded.', 'REGISTRY_UNAVAILABLE')
@@ -376,7 +398,6 @@ class LocalRegistryProvider implements PluginHubProvider {
           current = redirected
           continue
         }
-        if (response.status === 304 && cached !== undefined) return cached.value
         if (!response.ok) throw await registryResponseError(response, this.maxBytes)
         const value = parseJson(await readResponseBytes(response, this.maxBytes))
         assertApiVersion(value)
@@ -506,6 +527,40 @@ function parseSearchPage(value: unknown): PluginSearchPage {
   const nextCursor = stringOrUndefined(data.nextCursor)
   return { apiVersion: PLUGIN_HUB_API_VERSION, catalogRevision: requiredRevision(value.catalogRevision),
     items: Object.freeze(rawItems.map(parseSummary)), ...(nextCursor === undefined ? {} : { nextCursor }) }
+}
+
+function parseDiscoveryPage(value: unknown): PluginDiscoveryRepositoryPage {
+  assertApiVersion(value)
+  const data = requiredObject(value.data, 'data')
+  if (!Array.isArray(data.items) || data.items.length > 50) throw new PluginHubError('Registry discovery data.items is invalid.', 'CONTRACT_UNSUPPORTED')
+  const nextCursor = stringOrUndefined(data.nextCursor)
+  return { apiVersion: PLUGIN_HUB_API_VERSION, catalogRevision: requiredRevision(value.catalogRevision),
+    items: Object.freeze(data.items.map(parseDiscoveryRepository)), ...(nextCursor === undefined ? {} : { nextCursor }) }
+}
+
+function parseDiscoveryRepository(value: unknown): PluginDiscoveryRepository {
+  const raw = requiredObject(value, 'discovery repository')
+  const repository = requiredObject(raw.repository, 'discovery repository.repository')
+  const sync = requiredObject(raw.sync, 'discovery repository.sync')
+  const scan = requiredObject(raw.scan, 'discovery repository.scan')
+  const packages = requiredObject(raw.packages, 'discovery repository.packages')
+  const published = requiredObject(raw.published, 'discovery repository.published')
+  const catalogState = raw.catalogState
+  const scanStatus = scan.status
+  if (!isDiscoveryRepositoryState(catalogState) || !isDiscoveryScanStatus(scanStatus)) throw new PluginHubError('Registry discovery state is invalid.', 'CONTRACT_UNSUPPORTED')
+  if (raw.installable !== false) throw new PluginHubError('Registry discovery repository is installable.', 'CONTRACT_UNSUPPORTED')
+  return Object.freeze({
+    id: boundedText(requiredString(raw.id, 'discovery repository.id'), 128),
+    repository: Object.freeze({ provider: requiredString(repository.provider, 'discovery repository.provider'), providerId: stringOrUndefined(repository.providerId), fullName: boundedText(requiredString(repository.fullName, 'discovery repository.fullName'), 512), url: requiredString(repository.url, 'discovery repository.url'), primaryLanguage: optionalBoundedString(repository.primaryLanguage, 'discovery repository.primaryLanguage', 128) ?? null }),
+    stars: requiredNonNegativeNumber(raw.stars, 'discovery repository.stars'), forks: requiredNonNegativeNumber(raw.forks, 'discovery repository.forks'), topics: requiredStringArrayLimit(raw.topics, 'discovery repository.topics', 64),
+    catalogState, stateReason: optionalBoundedString(raw.stateReason, 'discovery repository.stateReason', 512) ?? null,
+    observedAt: requiredString(raw.observedAt, 'discovery repository.observedAt'),
+    installable: false,
+    sync: Object.freeze({ headSha: optionalBoundedString(sync.headSha, 'discovery repository.sync.headSha', 64) ?? null, lastSeenAt: requiredString(sync.lastSeenAt, 'discovery repository.sync.lastSeenAt'), lastSyncedAt: optionalBoundedString(sync.lastSyncedAt, 'discovery repository.sync.lastSyncedAt', 64) ?? null }),
+    scan: Object.freeze({ status: scanStatus, scannerVersion: optionalBoundedString(scan.scannerVersion, 'discovery repository.scan.scannerVersion', 128) ?? null, sourceCommit: optionalBoundedString(scan.sourceCommit, 'discovery repository.scan.sourceCommit', 64) ?? null, packageCount: requiredNonNegativeNumber(scan.packageCount, 'discovery repository.scan.packageCount'), updatedAt: optionalBoundedString(scan.updatedAt, 'discovery repository.scan.updatedAt', 64) ?? null, errorCode: optionalBoundedString(scan.errorCode, 'discovery repository.scan.errorCode', 64) ?? null, errorSummary: optionalBoundedString(scan.errorSummary, 'discovery repository.scan.errorSummary', 512) ?? null, rejectionCodes: requiredStringArrayLimit(scan.rejectionCodes, 'discovery repository.scan.rejectionCodes', 32) }),
+    packages: Object.freeze({ total: requiredNonNegativeNumber(packages.total, 'discovery repository.packages.total'), active: requiredNonNegativeNumber(packages.active, 'discovery repository.packages.active'), rejected: requiredNonNegativeNumber(packages.rejected, 'discovery repository.packages.rejected') }),
+    published: Object.freeze({ projectionCount: requiredNonNegativeNumber(published.projectionCount, 'discovery repository.published.projectionCount'), installableCount: requiredNonNegativeNumber(published.installableCount, 'discovery repository.published.installableCount'), revision: optionalNonNegativeNumber(published.revision) }),
+  })
 }
 
 function parseSnapshotPage(value: unknown): PluginSearchPage {
@@ -755,6 +810,14 @@ function requiredString(value: unknown, field: string): string { if (typeof valu
 function requiredText(value: unknown, field: string): string { if (typeof value !== 'string') throw new PluginHubError(`Registry field ${field} is invalid.`, 'CONTRACT_UNSUPPORTED'); return value }
 function stringOrUndefined(value: unknown): string | undefined { return typeof value === 'string' ? value : undefined }
 function numberOrUndefined(value: unknown): number | undefined { return typeof value === 'number' && Number.isFinite(value) ? value : undefined }
+function requiredNonNegativeNumber(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new PluginHubError(`Registry field ${field} is invalid.`, 'CONTRACT_UNSUPPORTED')
+  return value
+}
+function optionalNonNegativeNumber(value: unknown): number | null {
+  if (value === undefined || value === null) return null
+  return requiredNonNegativeNumber(value, 'discovery repository.published.revision')
+}
 function requiredRevision(value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     throw new PluginHubError('Registry catalog revision is invalid.', 'CONTRACT_UNSUPPORTED')
@@ -762,7 +825,10 @@ function requiredRevision(value: unknown): number {
   return value
 }
 function requiredStringArray(value: unknown, field: string): readonly string[] {
-  if (!Array.isArray(value) || value.length > 16) {
+  return requiredStringArrayLimit(value, field, 16)
+}
+function requiredStringArrayLimit(value: unknown, field: string, maximum: number): readonly string[] {
+  if (!Array.isArray(value) || value.length > maximum) {
     throw new PluginHubError(`Registry field ${field} is invalid.`, 'CONTRACT_UNSUPPORTED')
   }
   const items: string[] = []
@@ -815,6 +881,12 @@ function isPackageKind(value: unknown): value is PluginPackageKind {
 }
 function isMetadataSource(value: unknown): value is PluginDiscoveryMetadataSource {
   return value === 'author' || value === 'curator' || value === 'automatic'
+}
+function isDiscoveryRepositoryState(value: unknown): value is PluginDiscoveryRepository['catalogState'] {
+  return value === 'candidate' || value === 'active' || value === 'missing' || value === 'quarantined' || value === 'rejected'
+}
+function isDiscoveryScanStatus(value: unknown): value is PluginDiscoveryRepository['scan']['status'] {
+  return value === 'never' || value === 'queued' || value === 'running' || value === 'succeeded' || value === 'failed' || value === 'superseded'
 }
 function freezeSummary(summary: PluginSummary): PluginSummary { return Object.freeze(summary) }
 function freezeDetail(detail: PluginDetail): PluginDetail {

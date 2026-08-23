@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
-import { basename, extname } from 'node:path'
+import { basename, extname, resolve } from 'node:path'
 import React from 'react'
 import { render, type Instance } from 'ink'
 import {
@@ -46,6 +46,7 @@ import {
   type LlmAuthenticationEvent,
   type LlmAuthenticationInteraction,
   type LlmAuthenticationPrompt,
+  type LlmConfigurableProvider,
   type ModelSelection,
   type ModelSelectionRef,
   type PermissionSelect,
@@ -55,6 +56,7 @@ import {
   type SessionRecord,
   type SessionStatsProjection,
   type SubagentDescendantListEntry,
+  type SubagentResult,
   type SubagentRunEndInfo,
   type SubagentRunInfo,
   type TokenUsageProjection,
@@ -102,10 +104,11 @@ import {
   type TuiClipboardInsert,
 } from './clipboard.ts'
 import {
-  DEFAULT_TUI_SETTINGS, resolveTuiTheme, TUI_SETTINGS_NAMESPACE, TUI_SETTINGS_SCHEMA,
+  DEFAULT_TUI_SETTINGS, resolveTuiTheme, TUI_ACTIVITY_PREFERENCES, TUI_SETTINGS_NAMESPACE, TUI_SETTINGS_SCHEMA,
   TUI_MOUSE_PREFERENCES, TUI_THEME_PREFERENCES,
-  TuiThemeProvider, type TuiSettings, type TuiTheme,
+  TuiThemeProvider, type TuiActivityPreference, type TuiCustomThemeDefinition, type TuiSettings, type TuiTheme,
 } from './theme.tsx'
+import { listTuiCustomThemes, loadTuiCustomTheme } from './custom-theme.ts'
 import {
   TUI_LOCALES, TuiLocaleProvider, tuiCommandDescription, tuiCommandDescriptions, tuiLocaleLabel, tuiMessage,
   type TuiLocale, type TuiMessageKey,
@@ -114,7 +117,10 @@ import {
   EMPTY_TUI_WORK_SNAPSHOT, projectTuiWork,
   type TuiObservedSubagentRun, type TuiWorkAgentSnapshot, type TuiWorkItemView, type TuiWorkSnapshot,
 } from './work.ts'
-import { tuiPluginHubNextCategory, tuiPluginHubNextSort, type TuiPluginHubDialogSnapshot } from './plugin-hub.ts'
+import {
+  tuiPluginHubAvailableCategories, tuiPluginHubLoadMoreFailure, tuiPluginHubNextCategory, tuiPluginHubNextSort,
+  type TuiPluginHubDialogSnapshot,
+} from './plugin-hub.ts'
 import {
   projectTuiDiagnostics,
   tuiHostDiagnosticsFromStartup,
@@ -128,6 +134,8 @@ import {
 } from './startup-guidance.ts'
 import { projectTuiLoadedContext, type TuiLoadedContextSnapshot } from './loaded-context.ts'
 import { TuiExtensionRegistry } from './extensions.ts'
+import { tuiGroupedCommandHelpLines, tuiMcpStatusLines, tuiUsageTipLines } from './command-help.ts'
+import { checkTuiUpdate, tuiUpdateStatus, type TuiUpdateStatus } from './update.ts'
 
 export const name = 'tui'
 
@@ -202,6 +210,13 @@ interface RuntimeDisposers {
   doctorCommand?: () => void
   langCommand?: () => void
   contextCommand?: () => void
+  providerCommand?: () => void
+  updateCommand?: () => void
+  skillsCommand?: () => void
+  mcpCommand?: () => void
+  tipsCommand?: () => void
+  btwCommand?: () => void
+  workspaceCommand?: () => void
   llmAdaptersUpdated?: () => void
   resumeCommand?: () => void
   clearCommand?: () => void
@@ -263,7 +278,13 @@ interface LoadedContextSkillService {
     readonly scope?: object | undefined
     readonly cwd?: string | undefined
     readonly signal?: AbortSignal | undefined
-  }): Promise<readonly { readonly name: string }[]>
+  }): Promise<readonly {
+    readonly name: string
+    readonly description: string
+    readonly source: string
+    readonly provider: string
+    readonly invocation: { readonly userInvocable: boolean }
+  }[]>
 }
 
 type PrepareTuiAgentRequest =
@@ -291,6 +312,7 @@ class TuiController {
   private commandCatalog!: TuiHostCommandCatalog
   private readonly interactions = new InteractionStore()
   private readonly externalNotice = new ValueStore('')
+  private readonly composerPrefill = new ValueStore<{ readonly revision: number; readonly text: string } | undefined>(undefined)
   private readonly modelSelection = new ValueStore<ModelSelection | undefined>(undefined)
   private readonly agentMode = new ValueStore<AgentPreset | undefined>(undefined)
   private readonly helpOpen = new ValueStore(false)
@@ -341,9 +363,15 @@ class TuiController {
   private sessionExportGeneration = 0
   private pluginHubGeneration = 0
   private startupGuidanceGeneration = 0
+  private composerPrefillRevision = 0
+  private updateCheck: ActiveOperation | undefined
+  private themeLoad: ActiveOperation | undefined
   private settingsSource: () => TuiSettings = () => DEFAULT_TUI_SETTINGS
   private locale: TuiLocale = DEFAULT_TUI_SETTINGS.locale
   private mousePreference = DEFAULT_TUI_SETTINGS.mouse
+  private activityPreference: TuiActivityPreference = DEFAULT_TUI_SETTINGS.activity
+  private customThemeFile: string | undefined
+  private customTheme: TuiCustomThemeDefinition | undefined
   private terminalColorDepth: TuiTerminalColorDepth = 'ansi16'
   private terminalCapabilities: TuiTerminalCapabilities | undefined
   private theme: TuiTheme = resolveTuiTheme(DEFAULT_TUI_SETTINGS.theme, 'ansi16')
@@ -361,16 +389,52 @@ class TuiController {
     const settings = this.settingsSource()
     this.locale = settings.locale
     this.mousePreference = settings.mouse
+    this.activityPreference = settings.activity
     this.terminal.setMouseMode(settings.mouse === 'auto')
+    if (settings.themeFile !== this.customThemeFile) this.scheduleCustomTheme(settings.themeFile)
     this.theme = resolveTuiTheme(
       settings.theme,
       this.terminalColorDepth,
       this.terminalCapabilities?.background ?? 'unknown',
+      settings.themeFile === this.customThemeFile ? this.customTheme : undefined,
     )
     this.interactionRegistry = resolveTuiInteractionRegistry(settings.keybindings)
     const root = this.handle?.agent
     if (root === undefined || this.events === undefined || this.status === undefined || this.instance === undefined) return
     this.instance.rerender(this.appElement(root, this.events, this.status))
+  }
+
+  private scheduleCustomTheme(fileName: string | undefined): void {
+    this.themeLoad?.controller.abort(new Error('TUI custom theme selection changed'))
+    this.themeLoad = undefined
+    this.customThemeFile = fileName
+    this.customTheme = undefined
+    if (fileName === undefined) return
+    const controller = new AbortController()
+    const operation: ActiveOperation = { controller, completion: Promise.resolve() }
+    operation.completion = loadTuiCustomTheme(fileName, controller.signal).then((loaded) => {
+      if (controller.signal.aborted || this.themeLoad !== operation || this.customThemeFile !== fileName) return
+      this.customTheme = loaded.theme
+      const settings = this.settingsSource()
+      this.theme = resolveTuiTheme(
+        settings.theme,
+        this.terminalColorDepth,
+        this.terminalCapabilities?.background ?? 'unknown',
+        loaded.theme,
+      )
+      const root = this.handle?.agent
+      if (root !== undefined && this.events !== undefined && this.status !== undefined && this.instance !== undefined) {
+        this.instance.rerender(this.appElement(root, this.events, this.status))
+      }
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || this.themeLoad !== operation) return
+      this.externalNotice.set(tuiMessage(this.locale, 'config.theme.loadFailed', {
+        file: fileName, error: errorChain(error),
+      }))
+    }).finally(() => {
+      if (this.themeLoad === operation) this.themeLoad = undefined
+    })
+    this.themeLoad = operation
   }
 
   async run(): Promise<void> {
@@ -414,6 +478,7 @@ class TuiController {
       })
       await mounted
       this.inkMounted = undefined
+      this.scheduleUpdateCheck()
       const pluginHub = this.ctx.get('pluginHub')
       if (pluginHub !== undefined && pluginHub.hasProvider()) await pluginHub.markMaintenanceReady()
       await this.instance.waitUntilExit()
@@ -448,6 +513,7 @@ class TuiController {
       status: activeView?.status ?? rootStatus,
       interactions: this.interactions,
       externalNotice: this.externalNotice,
+      composerPrefill: this.composerPrefill,
       modelSelection: this.modelSelection,
       agentMode: this.agentMode,
       helpOpen: this.helpOpen,
@@ -469,6 +535,7 @@ class TuiController {
       maxResumeOptions: this.config.maxResumeOptions ?? 8,
       commands: activeView === undefined ? this.commandCatalog.list(root) : [],
       interactionRegistry: this.interactionRegistry,
+      activityPreference: this.activityPreference,
       completePaths: (query, signal) => this.completePaths(root, agent, query, signal),
       onAttachPath: path => this.attachPath(root, agent, path),
       onInputCursor: (target) => { this.terminal.setInputCursor(target) },
@@ -483,6 +550,7 @@ class TuiController {
       onClipboardPaste: () => this.pasteClipboard(root, agent),
       onActivateFooter: itemId => this.activateFooter(root, itemId),
       onResume: candidate => this.activateResume(root, candidate),
+      onResumeForRename: candidate => this.activateResume(root, candidate, 'rename'),
       onCloseResume: () => { this.closeResume() },
       onConfirmFreshSession: () => this.activateFreshSession(root),
       onCloseFreshSession: () => { this.closeFreshSession() },
@@ -493,9 +561,10 @@ class TuiController {
       ),
       onCloseSessionExport: () => { this.closeSessionExport() },
       onClosePluginHub: () => { this.closePluginHub() },
-      onPluginHubToggleView: () => this.togglePluginHubView(root),
-      onPluginHubSearch: query => this.searchPluginHub(root, query),
+      onPluginHubToggleView: targetView => this.togglePluginHubView(root, targetView),
+      onPluginHubSearch: query => this.searchPluginHubInput(root, query),
       onPluginHubDetail: pluginId => this.openPluginHubDetail(root, pluginId),
+      onPluginHubDiscoveryDetail: (repositoryId) => { this.openPluginHubDiscoveryDetail(root, repositoryId) },
       onPluginHubInstall: () => this.planPluginHubInstall(root),
       onPluginHubRemove: packageName => this.planPluginHubRemove(root, packageName),
       onPluginHubConfirm: () => this.confirmPluginHubPlan(root),
@@ -503,6 +572,7 @@ class TuiController {
       onPluginHubLoadMore: () => this.loadMorePluginHub(root),
       onPluginHubSort: () => this.sortPluginHub(root),
       onPluginHubCategory: () => this.cyclePluginHubCategory(root),
+      onPluginHubInstallable: () => this.togglePluginHubInstallable(root),
       onMounted: () => { this.inkMounted?.() },
       onOpenHelp: () => { this.helpOpen.set(true) },
       onCloseHelp: () => { this.helpOpen.set(false) },
@@ -1007,7 +1077,7 @@ class TuiController {
     })
     this.disposers.configCommand = this.commandCatalog.register({
       name: 'config',
-      description: 'Configure TUI theme, language, and keybindings',
+      description: 'Configure TUI theme, activity, language, and keybindings',
       completion: { descriptions: tuiCommandDescriptions('command.config') },
       handler: invocation => this.executeQuestionCommand(
         'config.cancelled', () => this.executeConfig(invocation),
@@ -1030,6 +1100,56 @@ class TuiController {
       description: 'Inspect loaded context facts',
       completion: { descriptions: tuiCommandDescriptions('command.context') },
       handler: invocation => this.executeLoadedContext(invocation),
+    })
+    this.disposers.providerCommand = this.commandCatalog.register({
+      name: 'provider',
+      description: 'Inspect provider setup and authentication',
+      completion: { descriptions: tuiCommandDescriptions('command.provider') },
+      handler: invocation => this.executeQuestionCommand(
+        'provider.cancelled', () => this.executeProvider(invocation),
+      ),
+    })
+    this.disposers.updateCommand = this.commandCatalog.register({
+      name: 'update',
+      description: 'Check for a compatible TUI update',
+      completion: { descriptions: tuiCommandDescriptions('command.update') },
+      handler: invocation => this.executeUpdate(invocation),
+    })
+    this.disposers.skillsCommand = this.commandCatalog.register({
+      name: 'skills',
+      description: 'Browse user-invocable skills',
+      completion: { descriptions: tuiCommandDescriptions('command.skills') },
+      handler: invocation => this.executeQuestionCommand(
+        'skills.cancelled', () => this.executeSkills(invocation),
+      ),
+    })
+    this.disposers.mcpCommand = this.commandCatalog.register({
+      name: 'mcp',
+      description: 'Inspect MCP tools visible to this Agent',
+      completion: { descriptions: tuiCommandDescriptions('command.mcp') },
+      handler: invocation => this.executeMcp(invocation),
+    })
+    this.disposers.tipsCommand = this.commandCatalog.register({
+      name: 'tips',
+      description: 'Show practical TUI usage tips',
+      completion: { descriptions: tuiCommandDescriptions('command.tips') },
+      handler: invocation => this.executeTips(invocation),
+    })
+    this.disposers.btwCommand = this.commandCatalog.register({
+      name: 'btw',
+      description: 'Ask a durable side question without interrupting the root Agent',
+      input: { hint: '<question>' },
+      completion: { descriptions: tuiCommandDescriptions('command.btw') },
+      handler: invocation => this.executeBtw(invocation),
+    })
+    this.disposers.workspaceCommand = this.commandCatalog.register({
+      name: 'workspace',
+      description: 'Start a fresh Session in an existing workspace',
+      input: { hint: '[path]' },
+      completion: { descriptions: tuiCommandDescriptions('command.workspace') },
+      handler: invocation => this.executeQuestionCommand(
+        'workspace.cancelled', () => this.executeWorkspace(invocation),
+      ),
     })
     this.disposers.langCommand = this.commandCatalog.register({
       name: 'lang',
@@ -1306,7 +1426,7 @@ class TuiController {
     }
     const generation = ++this.pluginHubGeneration
     this.helpOpen.set(false)
-    this.pluginHubDialog.set({ generation, phase: 'loading', view: 'discover', initialQuery: query, sort: 'stars',
+    this.pluginHubDialog.set({ generation, phase: 'loading', view: 'discover', initialQuery: query, sort: 'stars', installableOnly: false,
       profileMutations: pluginHub.supportsProfileMutations() })
     void this.searchPluginHub(invocation.agent, query, 'stars', null)
     return { kind: 'success', text: tuiMessage(this.locale, 'plugin.command.opened') }
@@ -1317,6 +1437,7 @@ class TuiController {
     query: string,
     requestedSort?: PluginCatalogSort,
     requestedCategory?: PluginCategory | null,
+    requestedInstallableOnly?: boolean,
   ): Promise<void> {
     const pluginHub = this.ctx.get('pluginHub')
     const snapshot = this.pluginHubDialog.getSnapshot()
@@ -1327,19 +1448,24 @@ class TuiController {
     const normalizedQuery = query.trim().slice(0, 160)
     const sort = requestedSort ?? snapshot.sort
     const category = requestedCategory === null ? undefined : requestedCategory ?? snapshot.category
+    const installableOnly = requestedInstallableOnly ?? snapshot.installableOnly === true
     this.pluginHubDialog.set({ ...snapshot, phase: 'loading', initialQuery: normalizedQuery, sort, page: undefined,
-      ...(category === undefined ? { category: undefined } : { category }), loadingMore: false,
-      detail: undefined, progress: undefined, error: undefined })
+      ...(category === undefined ? { category: undefined } : { category }), installableOnly, loadingMore: false,
+      detail: undefined, discoveryDetail: undefined, progress: undefined, error: undefined })
     const operation: ActiveOperation = { controller, completion: Promise.resolve() }
     const completion = Promise.all([
       pluginHub.status(controller.signal).catch(() => undefined),
-      pluginHub.search({ query: normalizedQuery, ...(category === undefined ? {} : { category }), sort, limit: 20 }, controller.signal),
+      pluginHub.search({ query: normalizedQuery, ...(category === undefined ? {} : { category }),
+        ...(installableOnly ? { installable: true } : {}), sort, limit: 20 }, controller.signal),
     ]).then(([status, page]) => {
       if (controller.signal.aborted || this.pluginHubOperation !== operation
         || this.handle?.agent !== root || this.pluginHubDialog.getSnapshot()?.generation !== generation) return
       this.pluginHubDialog.set({ generation, phase: 'browse', view: 'discover', initialQuery: normalizedQuery, sort,
         profileMutations: snapshot.profileMutations,
-        ...(category === undefined ? { category: undefined } : { category }), page,
+        ...(category === undefined ? { category: undefined } : { category }), installableOnly, page,
+        availableCategories: category === undefined && !installableOnly
+          ? tuiPluginHubAvailableCategories(page)
+          : snapshot.availableCategories,
         loadingMore: false,
         ...(status === undefined ? {} : { status }) })
     }).catch((error: unknown) => {
@@ -1348,12 +1474,55 @@ class TuiController {
       if (error instanceof PluginHubError && error.code === 'INVALID_CURSOR') {
         const current = this.pluginHubDialog.getSnapshot()
         if (current !== undefined) this.pluginHubDialog.set({ ...current, page: undefined, loadingMore: false, phase: 'loading', error: undefined })
-        void this.searchPluginHub(root, normalizedQuery, sort, category ?? null)
+        void this.searchPluginHub(root, normalizedQuery, sort, category ?? null, installableOnly)
         return
       }
       this.pluginHubDialog.set({ generation, phase: 'error', view: 'discover', initialQuery: normalizedQuery,
         profileMutations: snapshot.profileMutations,
-        sort, ...(category === undefined ? { category: undefined } : { category }), loadingMore: false,
+        sort, ...(category === undefined ? { category: undefined } : { category }), installableOnly, loadingMore: false,
+        error: tuiMessage(this.locale, 'plugin.error.catalog', { error: errorChain(error) }) })
+    }).finally(() => {
+      if (this.pluginHubOperation === operation) this.pluginHubOperation = undefined
+    })
+    operation.completion = completion
+    this.pluginHubOperation = operation
+    await completion
+  }
+
+  private async searchPluginHubInput(root: Agent, query: string): Promise<void> {
+    const snapshot = this.pluginHubDialog.getSnapshot()
+    if (snapshot?.view === 'discovery') {
+      await this.searchPluginHubDiscovery(root, query, snapshot.sort === 'relevance' ? 'stars' : snapshot.sort)
+      return
+    }
+    await this.searchPluginHub(root, query)
+  }
+
+  private async searchPluginHubDiscovery(
+    root: Agent, query: string, sort: 'stars' | 'updated' | 'newest' = 'stars',
+  ): Promise<void> {
+    const pluginHub = this.ctx.get('pluginHub')
+    const snapshot = this.pluginHubDialog.getSnapshot()
+    if (pluginHub === undefined || snapshot === undefined || this.handle?.agent !== root) return
+    this.pluginHubOperation?.controller.abort(new Error('Plugin Hub discovery request replaced'))
+    const controller = new AbortController()
+    const generation = snapshot.generation
+    const normalizedQuery = query.slice(0, 160)
+    this.pluginHubDialog.set({ generation, phase: 'loading', view: 'discovery', profileMutations: snapshot.profileMutations,
+      initialQuery: normalizedQuery, sort, category: snapshot.category, installableOnly: snapshot.installableOnly,
+      availableCategories: snapshot.availableCategories,
+      discoveryPage: undefined, loadingMore: false })
+    const operation: ActiveOperation = { controller, completion: Promise.resolve() }
+    const completion = pluginHub.searchRepositories({ query: normalizedQuery, sort, limit: 20 }, controller.signal).then((page) => {
+      if (!this.ownsPluginHubOperation(root, generation, operation)) return
+      this.pluginHubDialog.set({ generation, phase: 'browse', view: 'discovery', profileMutations: snapshot.profileMutations,
+        initialQuery: normalizedQuery, sort, category: snapshot.category, installableOnly: snapshot.installableOnly,
+        availableCategories: snapshot.availableCategories, discoveryPage: page, loadingMore: false })
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || !this.ownsPluginHubGeneration(root, generation)) return
+      this.pluginHubDialog.set({ generation, phase: 'error', view: 'discovery', profileMutations: snapshot.profileMutations,
+        initialQuery: normalizedQuery, sort, category: snapshot.category, installableOnly: snapshot.installableOnly,
+        availableCategories: snapshot.availableCategories, discoveryPage: undefined, loadingMore: false,
         error: tuiMessage(this.locale, 'plugin.error.catalog', { error: errorChain(error) }) })
     }).finally(() => {
       if (this.pluginHubOperation === operation) this.pluginHubOperation = undefined
@@ -1365,8 +1534,14 @@ class TuiController {
 
   private async sortPluginHub(root: Agent): Promise<void> {
     const snapshot = this.pluginHubDialog.getSnapshot()
-    if (snapshot === undefined || snapshot.view !== 'discover' || snapshot.phase === 'handoff'
+    if (snapshot === undefined || snapshot.phase === 'handoff'
       || this.handle?.agent !== root) return
+    if (snapshot.view === 'discovery') {
+      const next = tuiPluginHubNextSort(snapshot.sort)
+      await this.searchPluginHubDiscovery(root, snapshot.initialQuery, next === 'relevance' ? 'stars' : next)
+      return
+    }
+    if (snapshot.view !== 'discover') return
     await this.searchPluginHub(root, snapshot.initialQuery, tuiPluginHubNextSort(snapshot.sort))
   }
 
@@ -1374,14 +1549,25 @@ class TuiController {
     const snapshot = this.pluginHubDialog.getSnapshot()
     if (snapshot === undefined || snapshot.view !== 'discover' || snapshot.phase === 'handoff'
       || this.handle?.agent !== root) return
-    await this.searchPluginHub(root, snapshot.initialQuery, snapshot.sort, tuiPluginHubNextCategory(snapshot.category))
+    const availableCategories = snapshot.availableCategories ?? tuiPluginHubAvailableCategories(snapshot.page)
+    const nextCategory = tuiPluginHubNextCategory(snapshot.category, availableCategories)
+    if (snapshot.category === undefined && nextCategory === null) return
+    await this.searchPluginHub(root, snapshot.initialQuery, snapshot.sort, nextCategory)
+  }
+
+  private async togglePluginHubInstallable(root: Agent): Promise<void> {
+    const snapshot = this.pluginHubDialog.getSnapshot()
+    if (snapshot === undefined || snapshot.view !== 'discover' || snapshot.phase === 'handoff'
+      || this.handle?.agent !== root) return
+    await this.searchPluginHub(root, snapshot.initialQuery, snapshot.sort, snapshot.category ?? null,
+      snapshot.installableOnly !== true)
   }
 
   private async loadMorePluginHub(root: Agent): Promise<void> {
     const pluginHub = this.ctx.get('pluginHub')
     const snapshot = this.pluginHubDialog.getSnapshot()
-    const page = snapshot?.page
-    if (pluginHub === undefined || snapshot === undefined || page === undefined || snapshot.view !== 'discover'
+    const page = snapshot?.view === 'discovery' ? snapshot.discoveryPage : snapshot?.page
+    if (pluginHub === undefined || snapshot === undefined || page === undefined || (snapshot.view !== 'discover' && snapshot.view !== 'discovery')
       || snapshot.phase !== 'browse' || snapshot.loadingMore === true || page.nextCursor === undefined
       || this.handle?.agent !== root) return
     const cursor = page.nextCursor
@@ -1389,33 +1575,49 @@ class TuiController {
     const generation = snapshot.generation
     const operation: ActiveOperation = { controller, completion: Promise.resolve() }
     this.pluginHubDialog.set({ ...snapshot, loadingMore: true, progress: undefined, error: undefined })
-    const completion = pluginHub.search({ query: snapshot.initialQuery,
-      ...(snapshot.category === undefined ? {} : { category: snapshot.category }),
-      sort: snapshot.sort, cursor, limit: 20 }, controller.signal).then((nextPage) => {
-      if (!this.ownsPluginHubOperation(root, generation, operation)) return
-      const current = this.pluginHubDialog.getSnapshot()
-      const currentPage = current?.page
-      if (current === undefined || currentPage === undefined) return
-      const known = new Set(currentPage.items.map(item => String(item.id)))
-      const appended = nextPage.items.filter(item => !known.has(String(item.id)))
-      const items = Object.freeze([...currentPage.items, ...appended])
-      this.pluginHubDialog.set({ ...current, page: {
-        ...nextPage, items,
-        ...(nextPage.nextCursor === undefined ? {} : { nextCursor: nextPage.nextCursor }),
-      }, loadingMore: false })
-    }).catch((error: unknown) => {
+    const completion = (snapshot.view === 'discovery'
+      ? pluginHub.searchRepositories({ query: snapshot.initialQuery, sort: snapshot.sort === 'relevance' ? 'stars' : snapshot.sort, cursor, limit: 20 }, controller.signal).then((nextPage) => {
+        if (!this.ownsPluginHubOperation(root, generation, operation)) return
+        const current = this.pluginHubDialog.getSnapshot()
+        const currentPage = current?.discoveryPage
+        if (current === undefined || currentPage === undefined) return
+        const known = new Set(currentPage.items.map(item => item.id))
+        const appended = nextPage.items.filter(item => !known.has(item.id))
+        this.pluginHubDialog.set({ ...current,
+          discoveryPage: { ...nextPage, items: Object.freeze([...currentPage.items, ...appended]) }, loadingMore: false })
+      })
+      : pluginHub.search({ query: snapshot.initialQuery,
+        ...(snapshot.category === undefined ? {} : { category: snapshot.category }),
+        ...(snapshot.installableOnly === true ? { installable: true } : {}),
+        sort: snapshot.sort, cursor, limit: 20 }, controller.signal).then((nextPage) => {
+        if (!this.ownsPluginHubOperation(root, generation, operation)) return
+        const current = this.pluginHubDialog.getSnapshot()
+        const currentPage = current?.page
+        if (current === undefined || currentPage === undefined) return
+        const known = new Set(currentPage.items.map(item => String(item.id)))
+        const appended = nextPage.items.filter(item => !known.has(String(item.id)))
+        const items = Object.freeze([...currentPage.items, ...appended])
+        const mergedPage = {
+          ...nextPage, items,
+          ...(nextPage.nextCursor === undefined ? {} : { nextCursor: nextPage.nextCursor }),
+        }
+        this.pluginHubDialog.set({ ...current, page: mergedPage,
+          availableCategories: current.category === undefined
+            ? tuiPluginHubAvailableCategories(mergedPage)
+            : current.availableCategories,
+          loadingMore: false })
+      })).catch((error: unknown) => {
       if (controller.signal.aborted || !this.ownsPluginHubGeneration(root, generation)) return
       const current = this.pluginHubDialog.getSnapshot()
       if (current === undefined) return
+      this.pluginHubDialog.set(tuiPluginHubLoadMoreFailure(current, error, this.locale))
       if (error instanceof PluginHubError && error.code === 'INVALID_CURSOR') {
-        this.pluginHubDialog.set({ ...current, page: undefined, loadingMore: false, phase: 'loading', error: undefined })
-        void this.searchPluginHub(root, current.initialQuery, current.sort, current.category ?? null)
-        return
+        if (current.view === 'discovery') {
+          void this.searchPluginHubDiscovery(root, current.initialQuery, current.sort === 'relevance' ? 'stars' : current.sort)
+        } else {
+          void this.searchPluginHub(root, current.initialQuery, current.sort, current.category ?? null, current.installableOnly === true)
+        }
       }
-      this.pluginHubDialog.set({
-        ...current, loadingMore: false, phase: 'error',
-        error: tuiMessage(this.locale, 'plugin.error.catalog', { error: errorChain(error) }),
-      })
     }).finally(() => {
       if (this.pluginHubOperation === operation) this.pluginHubOperation = undefined
     })
@@ -1424,18 +1626,27 @@ class TuiController {
     await completion
   }
 
-  private async togglePluginHubView(root: Agent): Promise<void> {
+  private async togglePluginHubView(root: Agent, targetView?: 'discover' | 'discovery' | 'installed'): Promise<void> {
     const snapshot = this.pluginHubDialog.getSnapshot()
     if (snapshot === undefined || snapshot.phase === 'handoff' || this.handle?.agent !== root) return
-    if (snapshot.view === 'installed') {
+    const nextView = targetView ?? (snapshot.view === 'installed' ? 'discover' : snapshot.view === 'discover' ? 'discovery' : 'installed')
+    if (nextView === 'discover') {
+      if (snapshot.view === 'discover') return
       this.pluginHubDialog.set({
         generation: snapshot.generation,
         phase: 'loading',
         view: 'discover',
         profileMutations: snapshot.profileMutations,
         initialQuery: snapshot.initialQuery, sort: snapshot.sort, category: snapshot.category,
+        installableOnly: snapshot.installableOnly,
+        availableCategories: snapshot.availableCategories,
       })
       await this.searchPluginHub(root, snapshot.initialQuery)
+      return
+    }
+    if (nextView === 'discovery') {
+      if (snapshot.view === 'discovery') return
+      await this.searchPluginHubDiscovery(root, snapshot.initialQuery, snapshot.sort === 'relevance' ? 'stars' : snapshot.sort)
       return
     }
     await this.loadPluginHubInstalled(root)
@@ -1450,19 +1661,24 @@ class TuiController {
     const generation = snapshot.generation
     this.pluginHubDialog.set({ generation, phase: 'loading', view: 'installed', initialQuery: snapshot.initialQuery, sort: snapshot.sort,
       profileMutations: snapshot.profileMutations,
-      category: snapshot.category,
+      category: snapshot.category, installableOnly: snapshot.installableOnly,
+      availableCategories: snapshot.availableCategories,
       loadingMore: false })
     const operation: ActiveOperation = { controller, completion: Promise.resolve() }
     const completion = pluginHub.installed(controller.signal).then((installed) => {
       if (!this.ownsPluginHubOperation(root, generation, operation)) return
       this.pluginHubDialog.set({ generation, phase: 'browse', view: 'installed',
         profileMutations: snapshot.profileMutations,
-        initialQuery: snapshot.initialQuery, sort: snapshot.sort, category: snapshot.category, loadingMore: false, installed })
+        initialQuery: snapshot.initialQuery, sort: snapshot.sort, category: snapshot.category,
+        installableOnly: snapshot.installableOnly,
+        availableCategories: snapshot.availableCategories, loadingMore: false, installed })
     }).catch((error: unknown) => {
       if (controller.signal.aborted || !this.ownsPluginHubGeneration(root, generation)) return
       this.pluginHubDialog.set({ generation, phase: 'error', view: 'installed',
         profileMutations: snapshot.profileMutations,
-        initialQuery: snapshot.initialQuery, sort: snapshot.sort, category: snapshot.category, loadingMore: false,
+        initialQuery: snapshot.initialQuery, sort: snapshot.sort, category: snapshot.category,
+        installableOnly: snapshot.installableOnly,
+        availableCategories: snapshot.availableCategories, loadingMore: false,
         error: tuiMessage(this.locale, 'plugin.error.installed', { error: errorChain(error) }) })
     }).finally(() => {
       if (this.pluginHubOperation === operation) this.pluginHubOperation = undefined
@@ -1480,7 +1696,8 @@ class TuiController {
     this.pluginHubOperation?.controller.abort(new Error('Plugin Hub detail request superseded'))
     const controller = new AbortController()
     const generation = snapshot.generation
-    this.pluginHubDialog.set({ ...snapshot, phase: 'detail-loading', detail: undefined, progress: undefined, error: undefined })
+    this.pluginHubDialog.set({ ...snapshot, phase: 'detail-loading', detail: undefined, discoveryDetail: undefined,
+      progress: undefined, error: undefined })
     const operation: ActiveOperation = { controller, completion: Promise.resolve() }
     const completion = pluginHub.plugin(pluginId, controller.signal).then((detail) => {
       const current = this.pluginHubDialog.getSnapshot()
@@ -1500,6 +1717,16 @@ class TuiController {
     operation.completion = completion
     this.pluginHubOperation = operation
     await completion
+  }
+
+  private openPluginHubDiscoveryDetail(root: Agent, repositoryId: string): void {
+    const snapshot = this.pluginHubDialog.getSnapshot()
+    if (snapshot === undefined || snapshot.view !== 'discovery' || snapshot.phase !== 'browse'
+      || this.handle?.agent !== root || this.activeView !== undefined) return
+    const repository = snapshot.discoveryPage?.items.find(item => item.id === repositoryId)
+    if (repository === undefined) return
+    this.pluginHubDialog.set({ ...snapshot, phase: 'detail', detail: undefined,
+      discoveryDetail: repository, progress: undefined, error: undefined })
   }
 
   private async planPluginHubInstall(root: Agent): Promise<void> {
@@ -1613,6 +1840,7 @@ class TuiController {
   private async refreshPluginHub(root: Agent): Promise<void> {
     const snapshot = this.pluginHubDialog.getSnapshot()
     if (snapshot?.view === 'installed') await this.loadPluginHubInstalled(root)
+    else if (snapshot?.view === 'discovery') await this.searchPluginHubDiscovery(root, snapshot.initialQuery, snapshot.sort === 'relevance' ? 'stars' : snapshot.sort)
     else await this.searchPluginHub(root, snapshot?.initialQuery ?? '')
   }
 
@@ -1631,8 +1859,9 @@ class TuiController {
       return
     }
     if ((snapshot.phase === 'detail' || snapshot.phase === 'detail-loading' || snapshot.phase === 'error')
-      && snapshot.page !== undefined) {
-      this.pluginHubDialog.set({ ...snapshot, phase: 'browse', detail: undefined, plan: undefined, error: undefined })
+      && (snapshot.page !== undefined || snapshot.discoveryPage !== undefined)) {
+      this.pluginHubDialog.set({ ...snapshot, phase: 'browse', detail: undefined, discoveryDetail: undefined,
+        plan: undefined, error: undefined })
       return
     }
     if (snapshot.phase === 'error' && snapshot.view === 'installed' && snapshot.installed !== undefined) {
@@ -1646,9 +1875,280 @@ class TuiController {
     if (invocation.rawInput.trim() !== '') return { kind: 'error', text: tuiMessage(this.locale, 'help.usage') }
     if (invocation.agent !== this.handle?.agent) return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
     this.helpOpen.set(true)
-    const lines = this.commandCatalog.list(invocation.agent).map(command =>
-      `/${command.name}${command.input === undefined ? '' : ` ${command.input.hint}`} — ${tuiCommandDescription(command, this.locale)}`)
+    const lines = tuiGroupedCommandHelpLines(
+      this.commandCatalog.list(invocation.agent), this.locale,
+      command => tuiCommandDescription(command, this.locale),
+    )
     return { kind: 'success', text: lines.join('\n') }
+  }
+
+  private prefillComposer(text: string): void {
+    this.composerPrefill.set(Object.freeze({ revision: ++this.composerPrefillRevision, text }))
+  }
+
+  private async executeSkills(invocation: CommandInvocation): Promise<CommandResult> {
+    if (invocation.rawInput.trim() !== '') return { kind: 'error', text: tuiMessage(this.locale, 'skills.usage') }
+    if (invocation.agent !== this.handle?.agent || this.activeView !== undefined) {
+      return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
+    }
+    const skills = this.ctx.get('skills') as unknown as LoadedContextSkillService | undefined
+    if (skills === undefined) return { kind: 'error', text: tuiMessage(this.locale, 'skills.unavailable') }
+    const entries = (await skills.list({
+      scope: invocation.agent,
+      cwd: invocation.agent.session.header.cwd,
+      signal: invocation.signal,
+    })).filter(skill => skill.invocation.userInvocable)
+    invocation.signal.throwIfAborted()
+    if (entries.length === 0) return { kind: 'success', text: tuiMessage(this.locale, 'skills.none') }
+    const labels = new Map(entries.map(skill => [`/${skill.name}`, skill]))
+    const answer = await this.askOne(invocation.agent, invocation.signal, {
+      id: 'skill-selection',
+      header: tuiMessage(this.locale, 'skills.header'),
+      question: tuiMessage(this.locale, 'skills.question', { count: entries.length }),
+      options: entries.map(skill => ({
+        label: `/${skill.name}`,
+        description: `${skill.description} · ${skill.source} · ${skill.provider}`,
+      })),
+    })
+    const selected = labels.get(answer.selected[0] ?? '')
+    if (selected === undefined) return { kind: 'success', text: tuiMessage(this.locale, 'skills.cancelled') }
+    this.prefillComposer(`/${selected.name} `)
+    return { kind: 'success', text: tuiMessage(this.locale, 'skills.selected', { name: selected.name }) }
+  }
+
+  private executeMcp(invocation: CommandInvocation): CommandResult {
+    if (invocation.rawInput.trim() !== '') return { kind: 'error', text: tuiMessage(this.locale, 'mcp.usage') }
+    if (invocation.agent !== this.handle?.agent) return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
+    const names = this.ctx.tools.schemas(invocation.agent).map(schema => schema.name)
+    return { kind: 'success', text: tuiMcpStatusLines(names, this.locale).join('\n') }
+  }
+
+  private executeTips(invocation: CommandInvocation): CommandResult {
+    if (invocation.rawInput.trim() !== '') return { kind: 'error', text: tuiMessage(this.locale, 'tips.usage') }
+    if (invocation.agent !== this.handle?.agent) return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
+    return { kind: 'success', text: tuiUsageTipLines(this.locale).join('\n') }
+  }
+
+  private async executeProvider(invocation: CommandInvocation): Promise<CommandResult> {
+    if (invocation.rawInput.trim() !== '') return { kind: 'error', text: tuiMessage(this.locale, 'provider.usage') }
+    if (invocation.agent !== this.handle?.agent || this.activeView !== undefined) {
+      return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
+    }
+    const live = new Map(this.ctx.llm.listProviders().map(provider => [provider.id, provider]))
+    const directory = this.ctx.llm.listConfigurableProviders()
+    const rows: Array<{
+      entry: LlmConfigurableProvider
+      label: string
+      description: string
+      active: boolean
+    }> = []
+    const seen = new Set<string>()
+    for (const entry of directory) {
+      const provider = live.get(entry.provider)
+      let state = tuiMessage(this.locale, 'provider.dormant')
+      if (provider !== undefined) {
+        try {
+          const auth = await hostAuthentication(this.ctx.llm, entry.provider)
+          state = auth.configured
+            ? tuiMessage(this.locale, 'provider.configured', { source: auth.source ?? tuiMessage(this.locale, 'provider.source.unknown') })
+            : tuiMessage(this.locale, 'provider.authenticationRequired')
+        } catch {
+          state = tuiMessage(this.locale, 'provider.statusUnavailable')
+        }
+      }
+      rows.push({
+        entry,
+        label: `${entry.displayName} (${entry.provider})`,
+        description: `${state} · ${entry.settingsNs}${entry.settingsPath.length === 0 ? '' : `/${entry.settingsPath.join('/')}`}`,
+        active: provider !== undefined,
+      })
+      seen.add(entry.provider)
+    }
+    for (const provider of live.values()) {
+      if (seen.has(provider.id)) continue
+      rows.push({
+        entry: { provider: provider.id, displayName: provider.name, settingsNs: '', settingsPath: [] },
+        label: `${provider.name} (${provider.id})`,
+        description: tuiMessage(this.locale, 'provider.active'),
+        active: true,
+      })
+    }
+    if (rows.length === 0) return { kind: 'error', text: tuiMessage(this.locale, 'provider.none') }
+    const answer = await this.askOne(invocation.agent, invocation.signal, {
+      id: 'provider-selection', header: tuiMessage(this.locale, 'provider.header'),
+      question: tuiMessage(this.locale, 'provider.question'),
+      options: rows.map(row => ({ label: row.label, description: row.description })),
+    })
+    const selected = rows.find(row => row.label === answer.selected[0])
+    if (selected === undefined) return { kind: 'success', text: tuiMessage(this.locale, 'provider.cancelled') }
+    if (!selected.active) {
+      return { kind: 'success', text: tuiMessage(this.locale, 'provider.configure', {
+        provider: selected.entry.displayName,
+        namespace: selected.entry.settingsNs,
+        path: selected.entry.settingsPath.length === 0 ? '/' : selected.entry.settingsPath.join('/'),
+      }) }
+    }
+    const auth = await hostAuthentication(this.ctx.llm, selected.entry.provider)
+    if (!auth.configured && auth.methods.length > 0) {
+      const method = auth.methods.length === 1 ? auth.methods[0] : undefined
+      let chosen = method
+      if (chosen === undefined) {
+        const methodAnswer = await this.askOne(invocation.agent, invocation.signal, {
+          id: 'provider-auth-method', header: selected.label,
+          question: tuiMessage(this.locale, 'provider.auth.question'),
+          options: auth.methods.map(candidate => ({ label: candidate.name, description: candidate.id })),
+        })
+        chosen = auth.methods.find(candidate => candidate.name === methodAnswer.selected[0])
+      }
+      if (chosen === undefined) return { kind: 'success', text: tuiMessage(this.locale, 'provider.cancelled') }
+      await this.login(invocation.agent, selected.entry.provider, chosen.id, invocation.signal)
+      return { kind: 'success', text: tuiMessage(this.locale, 'provider.auth.complete', { provider: selected.entry.displayName }) }
+    }
+    return { kind: 'success', text: auth.configured
+      ? tuiMessage(this.locale, 'provider.ready', {
+        provider: selected.entry.displayName,
+        source: auth.source ?? tuiMessage(this.locale, 'provider.source.unknown'),
+      })
+      : tuiMessage(this.locale, 'provider.externalCredential', {
+        provider: selected.entry.displayName,
+        namespace: selected.entry.settingsNs || tuiMessage(this.locale, 'provider.source.unknown'),
+      }) }
+  }
+
+  private async executeUpdate(invocation: CommandInvocation): Promise<CommandResult> {
+    if (invocation.rawInput.trim() !== '') return { kind: 'error', text: tuiMessage(this.locale, 'update.usage') }
+    if (invocation.agent !== this.handle?.agent) return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
+    const notice = tuiMessage(this.locale, 'update.checking')
+    this.externalNotice.set(notice)
+    try {
+      const status = await checkTuiUpdate(AbortSignal.any([invocation.signal, AbortSignal.timeout(4_000)]))
+      return { kind: 'success', text: this.updateStatusText(status) }
+    } catch (error: unknown) {
+      invocation.signal.throwIfAborted()
+      return { kind: 'success', text: tuiMessage(this.locale, 'update.failed', {
+        version: tuiUpdateStatus().currentVersion,
+        error: errorChain(error),
+      }) }
+    } finally {
+      if (this.externalNotice.getSnapshot() === notice) this.externalNotice.set('')
+    }
+  }
+
+  private updateStatusText(status: TuiUpdateStatus): string {
+    if (status.updateAvailable && status.latestVersion !== undefined && status.command !== undefined) {
+      return tuiMessage(this.locale, 'update.available', {
+        current: status.currentVersion, latest: status.latestVersion, command: status.command,
+      })
+    }
+    if (status.latestVersion !== undefined && !status.compatible) {
+      return tuiMessage(this.locale, 'update.incompatible', {
+        current: status.currentVersion, latest: status.latestVersion,
+      })
+    }
+    return tuiMessage(this.locale, 'update.current', { version: status.currentVersion })
+  }
+
+  private scheduleUpdateCheck(): void {
+    this.updateCheck?.controller.abort(new Error('TUI update check superseded'))
+    const controller = new AbortController()
+    const completion = checkTuiUpdate(AbortSignal.any([controller.signal, AbortSignal.timeout(4_000)]))
+      .then((status) => {
+        if (!status.updateAvailable || status.latestVersion === undefined || controller.signal.aborted || this.isClosing()) return
+        if (this.externalNotice.getSnapshot() === '') {
+          this.externalNotice.set(tuiMessage(this.locale, 'update.notice', {
+            current: status.currentVersion, latest: status.latestVersion,
+          }))
+        }
+      }).catch(() => undefined)
+    const operation = { controller, completion }
+    this.updateCheck = operation
+    void completion.finally(() => {
+      if (this.updateCheck === operation) this.updateCheck = undefined
+    })
+  }
+
+  private async executeWorkspace(invocation: CommandInvocation): Promise<CommandResult> {
+    if (invocation.agent !== this.handle?.agent || this.activeView !== undefined) {
+      return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
+    }
+    if (invocation.agent.status !== 'idle') {
+      return { kind: 'error', text: tuiMessage(this.locale, 'fresh.error.agentBusy', { status: invocation.agent.status }) }
+    }
+    let target = invocation.rawInput.trim()
+    if (target === '') {
+      const records = await this.ctx.sessionQuery.listSessions(invocation.signal)
+      const extensionOptions = await this.ctx.tuiExtensions.listWorkspaces(invocation.signal)
+      const byPath = new Map<string, { label: string; path: string }>()
+      for (const record of records) {
+        const cwd = record.header.cwd
+        if (cwd !== undefined) byPath.set(cwd, { label: basename(cwd), path: cwd })
+      }
+      for (const option of extensionOptions) byPath.set(option.path, { label: option.label, path: option.path })
+      const options = [...byPath.values()].sort((a, b) => a.label.localeCompare(b.label) || a.path.localeCompare(b.path))
+      if (options.length === 0) return { kind: 'error', text: tuiMessage(this.locale, 'workspace.none') }
+      const answer = await this.askOne(invocation.agent, invocation.signal, {
+        id: 'workspace-selection', header: tuiMessage(this.locale, 'workspace.header'),
+        question: tuiMessage(this.locale, 'workspace.question'),
+        options: options.map(option => ({ label: `${option.label} · ${option.path}` })),
+      })
+      const selected = options.find(option => `${option.label} · ${option.path}` === answer.selected[0])
+      if (selected === undefined) return { kind: 'success', text: tuiMessage(this.locale, 'workspace.cancelled') }
+      target = selected.path
+    }
+    target = resolve(invocation.agent.session.header.cwd ?? process.cwd(), target)
+    try {
+      if (!(await stat(target)).isDirectory()) {
+        return { kind: 'error', text: tuiMessage(this.locale, 'workspace.invalid', { path: target }) }
+      }
+    } catch {
+      return { kind: 'error', text: tuiMessage(this.locale, 'workspace.invalid', { path: target }) }
+    }
+    this.freshSessionDialog.set({
+      generation: ++this.freshSessionGeneration,
+      command: 'workspace', phase: 'confirming',
+      currentSessionId: invocation.agent.session.id,
+      workspaceLabel: target,
+    })
+    return { kind: 'success', text: tuiMessage(this.locale, 'workspace.opened', { path: target }) }
+  }
+
+  private async executeBtw(invocation: CommandInvocation): Promise<CommandResult> {
+    const question = invocation.rawInput.trim()
+    if (question === '') return { kind: 'error', text: tuiMessage(this.locale, 'btw.usage') }
+    if (invocation.agent !== this.handle?.agent || this.activeView !== undefined) {
+      return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
+    }
+    const subagents = this.ctx.get('subagents')
+    if (subagents === undefined) return { kind: 'error', text: tuiMessage(this.locale, 'btw.unavailable') }
+    const provider = subagents.list().find(candidate => candidate === 'fork')
+      ?? subagents.list().find(candidate => candidate === 'spawn')
+    if (provider === undefined) return { kind: 'error', text: tuiMessage(this.locale, 'btw.unavailable') }
+    const selection = this.selection?.current ?? this.modelSelection.getSnapshot()
+    const run = await subagents.start(provider, {
+      parent: invocation.agent,
+      prompt: [{ type: 'text', text: question }],
+      label: tuiMessage(this.locale, 'btw.label'),
+      signal: invocation.signal,
+      toolFilter: { allow: [] },
+      persona: this.locale === 'zh'
+        ? '只回答用户的临时侧问。不要调用工具，不要提出后续任务，给出简洁、独立的回答。'
+        : 'Answer only the user\'s side question. Use no tools, create no follow-up work, and give a concise standalone answer.',
+      ...selection === undefined ? {} : { agentOptions: selection },
+    })
+    let result: SubagentResult
+    try {
+      result = await run.result
+    } finally {
+      await run.dispose()
+    }
+    const text = result.output.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim()
+    if (result.stopReason !== 'completed') {
+      return {
+        kind: 'error',
+        text: result.diagnostic ?? (text || tuiMessage(this.locale, 'btw.failed', { reason: result.stopReason })),
+      }
+    }
+    return { kind: 'success', text: text || tuiMessage(this.locale, 'btw.empty') }
   }
 
   private async executeLanguage(invocation: CommandInvocation): Promise<CommandResult> {
@@ -1928,12 +2428,14 @@ class TuiController {
     this.helpOpen.set(false)
     this.externalNotice.set('')
     const current = this.settingsSource()
-    const themeValue = tuiMessage(this.locale, current.theme === 'auto'
+    const themeValue = current.themeFile ?? tuiMessage(this.locale, current.theme === 'auto'
       ? 'config.theme.auto' : current.theme === 'dark'
         ? 'config.theme.dark' : current.theme === 'light' ? 'config.theme.light' : 'config.theme.no-color')
     const mouseValue = tuiMessage(this.locale, current.mouse === 'auto' ? 'config.mouse.auto' : 'config.mouse.off')
+    const activityValue = tuiMessage(this.locale, `config.activity.${current.activity}`)
     const themeLabel = tuiMessage(this.locale, 'config.theme.option', { value: themeValue })
     const mouseLabel = tuiMessage(this.locale, 'config.mouse.option', { value: mouseValue })
+    const activityLabel = tuiMessage(this.locale, 'config.activity.option', { value: activityValue })
     const actionLabel = tuiMessage(this.locale, 'config.keybindings.option')
     const resetLabel = tuiMessage(this.locale, 'config.reset.option')
     const choice = await this.askOne(invocation.agent, invocation.signal, {
@@ -1943,39 +2445,62 @@ class TuiController {
       options: [
         { label: themeLabel, description: tuiMessage(this.locale, 'config.theme.description') },
         { label: mouseLabel, description: tuiMessage(this.locale, 'config.mouse.description') },
+        { label: activityLabel, description: tuiMessage(this.locale, 'config.activity.description') },
         { label: actionLabel, description: tuiMessage(this.locale, 'config.keybindings.description') },
         { label: resetLabel, description: tuiMessage(this.locale, 'config.reset.description') },
       ],
     })
     const selected = choice.selected[0]
     if (selected === themeLabel) {
-      const themeChoices = TUI_THEME_PREFERENCES.map(theme => ({
-        value: theme,
-        label: tuiMessage(this.locale, theme === current.theme ? 'config.current' : theme === 'auto'
-          ? 'config.theme.auto' : theme === 'dark' ? 'config.theme.dark'
-            : theme === 'light' ? 'config.theme.light' : 'config.theme.no-color', {
-          value: tuiMessage(this.locale, theme === 'auto'
+      const customThemes = await listTuiCustomThemes(invocation.signal)
+      const themeChoices = [
+        ...TUI_THEME_PREFERENCES.map(theme => ({
+          kind: 'builtin' as const,
+          value: theme,
+          label: tuiMessage(this.locale, current.themeFile === undefined && theme === current.theme ? 'config.current' : theme === 'auto'
             ? 'config.theme.auto' : theme === 'dark' ? 'config.theme.dark'
-              : theme === 'light' ? 'config.theme.light' : 'config.theme.no-color'),
-        }),
-      }))
+              : theme === 'light' ? 'config.theme.light' : 'config.theme.no-color', {
+            value: tuiMessage(this.locale, theme === 'auto'
+              ? 'config.theme.auto' : theme === 'dark' ? 'config.theme.dark'
+                : theme === 'light' ? 'config.theme.light' : 'config.theme.no-color'),
+          }),
+        })),
+        ...customThemes.map(file => ({
+          kind: 'custom' as const,
+          value: file.fileName,
+          label: tuiMessage(this.locale, current.themeFile === file.fileName ? 'config.current' : 'config.theme.custom', {
+            value: tuiMessage(this.locale, 'config.theme.custom', {
+              name: file.theme.name, file: file.fileName,
+            }),
+            name: file.theme.name,
+            file: file.fileName,
+          }),
+        })),
+      ]
       const themeAnswer = await this.askOne(invocation.agent, invocation.signal, {
         id: 'tui-config-theme',
         header: tuiMessage(this.locale, 'config.theme.header'),
         question: tuiMessage(this.locale, 'config.theme.question'),
         options: themeChoices.map(theme => ({ label: theme.label })),
       })
-      const selectedTheme = themeChoices.find(theme => theme.label === themeAnswer.selected[0])?.value
+      const selectedTheme = themeChoices.find(theme => theme.label === themeAnswer.selected[0])
       if (selectedTheme === undefined) return { kind: 'success', text: tuiMessage(this.locale, 'config.theme.cancelled') }
       try {
-        await settings.update(TUI_SETTINGS_NAMESPACE, { theme: selectedTheme })
+        await settings.mutate(TUI_SETTINGS_NAMESPACE, selectedTheme.kind === 'builtin'
+          ? [
+            { op: 'set', path: ['theme'], value: selectedTheme.value },
+            { op: 'unset', path: ['themeFile'] },
+          ]
+          : [{ op: 'set', path: ['themeFile'], value: selectedTheme.value }])
       } catch (error: unknown) {
         return { kind: 'error', text: tuiMessage(this.locale, 'config.theme.failed', { error: errorChain(error) }) }
       }
       return { kind: 'success', text: tuiMessage(this.locale, 'config.theme.updated', {
-        value: tuiMessage(this.locale, selectedTheme === 'auto'
-          ? 'config.theme.auto' : selectedTheme === 'dark' ? 'config.theme.dark'
-            : selectedTheme === 'light' ? 'config.theme.light' : 'config.theme.no-color'),
+        value: selectedTheme.kind === 'custom'
+          ? selectedTheme.value
+          : tuiMessage(this.locale, selectedTheme.value === 'auto'
+            ? 'config.theme.auto' : selectedTheme.value === 'dark' ? 'config.theme.dark'
+              : selectedTheme.value === 'light' ? 'config.theme.light' : 'config.theme.no-color'),
       }) }
     }
     if (selected === mouseLabel) {
@@ -2006,6 +2531,32 @@ class TuiController {
       }
       return { kind: 'success', text: tuiMessage(this.locale, 'config.mouse.updated', {
         value: tuiMessage(this.locale, selectedMouse === 'auto' ? 'config.mouse.auto' : 'config.mouse.off'),
+      }) }
+    }
+    if (selected === activityLabel) {
+      const activityChoices = TUI_ACTIVITY_PREFERENCES.map(activity => ({
+        value: activity,
+        label: tuiMessage(this.locale, activity === current.activity ? 'config.current' : `config.activity.${activity}`, {
+          value: tuiMessage(this.locale, `config.activity.${activity}`),
+        }),
+      }))
+      const activityAnswer = await this.askOne(invocation.agent, invocation.signal, {
+        id: 'tui-config-activity',
+        header: tuiMessage(this.locale, 'config.activity.header'),
+        question: tuiMessage(this.locale, 'config.activity.question'),
+        options: activityChoices.map(activity => ({ label: activity.label })),
+      })
+      const selectedActivity = activityChoices.find(activity => activity.label === activityAnswer.selected[0])?.value
+      if (selectedActivity === undefined) {
+        return { kind: 'success', text: tuiMessage(this.locale, 'config.activity.cancelled') }
+      }
+      try {
+        await settings.update(TUI_SETTINGS_NAMESPACE, { activity: selectedActivity })
+      } catch (error: unknown) {
+        return { kind: 'error', text: tuiMessage(this.locale, 'config.activity.failed', { error: errorChain(error) }) }
+      }
+      return { kind: 'success', text: tuiMessage(this.locale, 'config.activity.updated', {
+        value: tuiMessage(this.locale, `config.activity.${selectedActivity}`),
       }) }
     }
     if (selected === actionLabel) {
@@ -2751,7 +3302,11 @@ class TuiController {
     return (await cache.coldSnapshot(record.header.id, signal)).values.title
   }
 
-  private async activateResume(agent: Agent, candidate: TuiResumeCandidate): Promise<void> {
+  private async activateResume(
+    agent: Agent,
+    candidate: TuiResumeCandidate,
+    followup?: 'rename',
+  ): Promise<void> {
     const dialog = this.resumeDialog.getSnapshot()
     if (dialog?.phase !== 'ready' || this.handle?.agent !== agent || this.activeAgentSwitch !== undefined) return
     const current = dialog.candidates?.find(item => item.record.header.id === candidate.record.header.id)
@@ -2786,7 +3341,7 @@ class TuiController {
       ...dialog.candidates === undefined ? {} : { candidates: dialog.candidates },
       resumingId: current.record.header.id,
     })
-    const completion = this.resumeCandidate(agent, current, controller.signal).catch((error: unknown) => {
+    const completion = this.resumeCandidate(agent, current, controller.signal, followup).catch((error: unknown) => {
       if (controller.signal.aborted || this.isClosing()) return
       const latest = this.resumeDialog.getSnapshot()
       if (latest?.generation !== dialog.generation) return
@@ -2809,6 +3364,7 @@ class TuiController {
     oldAgent: Agent,
     candidate: TuiResumeCandidate,
     signal: AbortSignal,
+    followup?: 'rename',
   ): Promise<void> {
     if (!this.ownsAgent(oldAgent)) throw new Error('the active TUI Session changed')
     const initialStatus = this.agentStatus(oldAgent)
@@ -2841,6 +3397,7 @@ class TuiController {
     this.externalNotice.set(retirementError === undefined
       ? `Resumed ${candidate.title}.`
       : `Resumed ${candidate.title}; previous Session cleanup failed: ${errorChain(retirementError)}`)
+    if (followup === 'rename') this.prefillComposer('/rename ')
   }
 
   private closeFreshSession(): void {
@@ -2864,12 +3421,10 @@ class TuiController {
       this.freshSessionDialog.set({ ...dialog, error: tuiMessage(this.locale, 'session.error.interaction') })
       return
     }
-    const cwd = agent.session.header.cwd
+    const cwd = dialog.workspaceLabel
     const selectedModel = this.selection?.current ?? this.modelSelection.getSnapshot()
-    if (cwd === undefined || selectedModel === undefined) {
-      this.freshSessionDialog.set({ ...dialog, error: cwd === undefined
-        ? tuiMessage(this.locale, 'session.error.workspace')
-        : tuiMessage(this.locale, 'session.error.model') })
+    if (selectedModel === undefined) {
+      this.freshSessionDialog.set({ ...dialog, error: tuiMessage(this.locale, 'session.error.model') })
       return
     }
     const switchDecision = await this.ctx.tuiExtensions.decide({
@@ -3455,6 +4010,8 @@ class TuiController {
     const activeAgentSwitch = this.activeAgentSwitch
     const workRefresh = this.workRefresh
     const externalEditor = this.externalEditor
+    const updateCheck = this.updateCheck
+    const themeLoad = this.themeLoad
     this.externalEditorHandoff?.cancel()
     this.activeCommand = undefined
     this.startupGuidanceRefresh = undefined
@@ -3465,6 +4022,8 @@ class TuiController {
     this.activeAgentSwitch = undefined
     this.workRefresh = undefined
     this.externalEditor = undefined
+    this.updateCheck = undefined
+    this.themeLoad = undefined
     activeCommand?.controller.abort(new Error('TUI command cancelled during shutdown'))
     startupGuidanceRefresh?.controller.abort(new Error('TUI startup guidance refresh cancelled during shutdown'))
     activeSessionExport?.controller.abort(new Error('TUI Session export cancelled during shutdown'))
@@ -3473,6 +4032,8 @@ class TuiController {
     activeAgentSwitch?.controller.abort(new Error('TUI Agent switch cancelled during shutdown'))
     workRefresh?.controller.abort(new Error('TUI work catalog refresh cancelled during shutdown'))
     externalEditor?.controller.abort(new Error('TUI external editor cancelled during shutdown'))
+    updateCheck?.controller.abort(new Error('TUI update check cancelled during shutdown'))
+    themeLoad?.controller.abort(new Error('TUI custom theme load cancelled during shutdown'))
     this.resumeDialog.set(undefined)
     this.freshSessionDialog.set(undefined)
     this.rewindDialog.set(undefined)
@@ -3483,6 +4044,14 @@ class TuiController {
     this.disposers.helpCommand?.()
     this.disposers.doctorCommand?.()
     this.disposers.contextCommand?.()
+    this.disposers.configCommand?.()
+    this.disposers.providerCommand?.()
+    this.disposers.updateCommand?.()
+    this.disposers.skillsCommand?.()
+    this.disposers.mcpCommand?.()
+    this.disposers.tipsCommand?.()
+    this.disposers.btwCommand?.()
+    this.disposers.workspaceCommand?.()
     this.disposers.langCommand?.()
     this.disposers.resumeCommand?.()
     this.disposers.clearCommand?.()
@@ -3516,6 +4085,8 @@ class TuiController {
       activeAgentSwitch?.completion.catch(() => undefined),
       workRefresh?.completion.catch(() => undefined),
       externalEditor?.completion.catch(() => undefined),
+      updateCheck?.completion.catch(() => undefined),
+      themeLoad?.completion.catch(() => undefined),
     ])
     const handle = this.handle
     this.handle = undefined
@@ -3606,12 +4177,15 @@ export type { TuiPluginLocalStorage, TuiPluginLocalStorageInfo, TuiStorageJson }
 export { TuiExtensionGrantLedger } from './grant-ledger.ts'
 export type { TuiGrantIdentity, TuiGrantLedgerRecord, TuiGrantRef, TuiManagedCapability } from './grant-ledger.ts'
 export {
-  DEFAULT_TUI_SETTINGS, resolveTuiTheme, TUI_SETTINGS_NAMESPACE, TUI_SETTINGS_SCHEMA,
+  DEFAULT_TUI_SETTINGS, resolveTuiTheme, TUI_ACTIVITY_PREFERENCES, TUI_SETTINGS_NAMESPACE, TUI_SETTINGS_SCHEMA,
   TUI_MOUSE_PREFERENCES, TUI_THEME_PREFERENCES, TuiThemeProvider, useTuiTheme,
 } from './theme.tsx'
 export type {
-  TuiMousePreference, TuiResolvedThemePreference, TuiSemanticThemeTokens, TuiSettings, TuiTheme, TuiThemePreference,
+  TuiActivityPreference, TuiCustomThemeDefinition, TuiMousePreference, TuiResolvedThemePreference,
+  TuiSemanticThemeTokens, TuiSettings, TuiTheme, TuiThemePreference,
 } from './theme.tsx'
+export { listTuiCustomThemes, loadTuiCustomTheme } from './custom-theme.ts'
+export type { TuiCustomThemeFile } from './custom-theme.ts'
 export {
   TUI_LOCALE_CATALOG, TUI_LOCALE_CATALOG_VERSION, TUI_LOCALES, TuiLocaleProvider,
   tuiCommandDescription, tuiCommandDescriptions, tuiLocaleLabel, tuiMessage, useTuiLocale,
@@ -3639,11 +4213,13 @@ export type {
 } from './transcript-search.ts'
 export {
   moveTuiFooterSelection, tuiFooterItems, tuiFooterPointerTargets, tuiFooterStatusLine, tuiSelectedFooterLine,
-  visibleTuiFooterItems,
+  tuiContextSegmentBar, visibleTuiFooterItems,
 } from './footer.ts'
 export type {
   TuiFooterItemDescriptor, TuiFooterItemId, TuiFooterPointerTarget, TuiFooterSources, TuiFooterTranscriptPosition,
 } from './footer.ts'
+export { projectTuiLatestSpeed, projectTuiSettledSpeed } from './live-feedback.ts'
+export type { TuiSpeedProjection } from './live-feedback.ts'
 export { tuiAgentModeName, tuiAgentModeOptions } from './mode.ts'
 export type { TuiAgentModeOption } from './mode.ts'
 export { terminalMarkdownText } from './markdown.ts'
@@ -3681,7 +4257,8 @@ export type {
   TuiKeypress,
 } from './keybindings.ts'
 export {
-  formatTuiPluginHubRelativeTime, formatTuiPluginHubStars, tuiPluginHubCardHeight,
+  formatTuiPluginHubRelativeTime, formatTuiPluginHubStars, tuiPluginHubAvailableCategories, tuiPluginHubCardHeight,
+  tuiPluginHubDiscoveryRows,
   tuiPluginHubCardLayout, tuiPluginHubDetailLines, tuiPluginHubInstalledRows, tuiPluginHubNextSort,
   tuiPluginHubCategoryLabel, tuiPluginHubNextCategory, tuiPluginHubPlanLines, tuiPluginHubRows, tuiPluginHubSortLabel,
 } from './plugin-hub.ts'
@@ -3735,10 +4312,12 @@ export type { TuiBidiGrapheme } from './bidi.ts'
 export { tuiFindHyperlinks, tuiHyperlinkAt, tuiOsc8Text, tuiSafeHyperlinkUrl } from './hyperlink.ts'
 export type { TuiHyperlinkRange } from './hyperlink.ts'
 export {
-  advanceTuiScreenClick, resolveTuiScreenSelection, tuiScreenSelectionText, tuiScreenTextSegments,
+  advanceTuiScreenClick, extendTuiScreenSelection, resolveTuiScreenSelection,
+  tuiScreenSelectionText, tuiScreenTextSegments,
 } from './selection.ts'
 export type {
-  TuiScreenClick, TuiScreenPosition, TuiScreenSelection, TuiScreenSelectionGesture, TuiScreenTextSegment,
+  TuiScreenClick, TuiScreenPosition, TuiScreenSelection, TuiScreenSelectionDirection,
+  TuiScreenSelectionGesture, TuiScreenTextSegment,
 } from './selection.ts'
 export {
   TuiPointerRegionRegistry, tuiApprovalPointerRegions, tuiFooterPointerRegions, tuiModalClosePointerRegions,

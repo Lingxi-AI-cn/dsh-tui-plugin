@@ -14,6 +14,12 @@ export const TUI_THEME_PREFERENCES = ['auto', 'dark', 'light', 'no-color'] as co
 /** One persisted built-in terminal theme name. */
 export type TuiThemePreference = typeof TUI_THEME_PREFERENCES[number]
 
+/** Persisted running-Agent indicator preferences. */
+export const TUI_ACTIVITY_PREFERENCES = ['dots', 'pulse', 'minimal', 'off'] as const
+
+/** One persisted running-Agent indicator preference. */
+export type TuiActivityPreference = typeof TUI_ACTIVITY_PREFERENCES[number]
+
 /** Persisted terminal pointer ownership preferences. */
 export const TUI_MOUSE_PREFERENCES = ['auto', 'off'] as const
 
@@ -34,10 +40,14 @@ export const TUI_SETTINGS_NAMESPACE = settingsNamespace('tui')
 export interface TuiSettings {
   /** Built-in semantic terminal theme. */
   theme: TuiThemePreference
+  /** Optional JSON file name under the Harness home `themes` directory. */
+  themeFile?: string
   /** Runtime catalog selected for first-party TUI messages. */
   locale: TuiLocale
   /** Whether the TUI or the outer terminal owns pointer reports. */
   mouse: TuiMousePreference
+  /** Running-Agent animation rendered beside the status label. */
+  activity: TuiActivityPreference
   /** Per-action replacements for built-in key gestures. */
   keybindings: TuiKeybindingOverrides
 }
@@ -47,13 +57,16 @@ export const DEFAULT_TUI_SETTINGS: TuiSettings = Object.freeze({
   theme: 'auto',
   locale: 'en',
   mouse: 'auto',
+  activity: 'dots',
   keybindings: Object.freeze({}),
 })
 
 const TUI_SETTINGS_FIELDS = z.object({
   theme: z.union([...TUI_THEME_PREFERENCES]).default(DEFAULT_TUI_SETTINGS.theme),
+  themeFile: z.string(),
   locale: z.union([...TUI_LOCALES]).default(DEFAULT_TUI_SETTINGS.locale),
   mouse: z.union([...TUI_MOUSE_PREFERENCES]).default(DEFAULT_TUI_SETTINGS.mouse),
+  activity: z.union([...TUI_ACTIVITY_PREFERENCES]).default(DEFAULT_TUI_SETTINGS.activity),
   keybindings: TUI_KEYBINDING_OVERRIDES_SCHEMA.default(DEFAULT_TUI_SETTINGS.keybindings),
 })
 
@@ -61,10 +74,16 @@ const TUI_SETTINGS_FIELDS = z.object({
 export const TUI_SETTINGS_SCHEMA = z.transform(TUI_SETTINGS_FIELDS, (settings) => {
   const keybindings = settings.keybindings ?? DEFAULT_TUI_SETTINGS.keybindings
   validateTuiKeybindingOverrides(keybindings)
+  const themeFile = settings.themeFile?.trim()
+  if (themeFile !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/u.test(themeFile)) {
+    throw new Error('TUI themeFile must be one JSON file name under the Harness themes directory')
+  }
   return {
     theme: settings.theme ?? DEFAULT_TUI_SETTINGS.theme,
+    ...themeFile === undefined || themeFile === '' ? {} : { themeFile },
     locale: settings.locale ?? DEFAULT_TUI_SETTINGS.locale,
     mouse: settings.mouse ?? DEFAULT_TUI_SETTINGS.mouse,
+    activity: settings.activity ?? DEFAULT_TUI_SETTINGS.activity,
     keybindings,
   }
 }, true) as unknown as z<TuiSettings>
@@ -91,8 +110,22 @@ export interface TuiTheme {
   readonly resolvedPreference: TuiResolvedThemePreference
   readonly colorDepth: TuiTerminalColorDepth
   readonly tokens: TuiSemanticThemeTokens
+  /** Validated custom palette name, when a file augments the built-in base. */
+  readonly customName?: string
   /** Whether secondary text may use ANSI dim styling. */
   readonly dim: boolean
+}
+
+/** Validated custom palette loaded from one JSON file. */
+export interface TuiCustomThemeDefinition {
+  /** User-facing theme name. */
+  readonly name: string
+  /** Built-in extended-color palette inherited before overrides. */
+  readonly base: 'dark' | 'light'
+  /** Whether semantic muted text may use ANSI dim styling. */
+  readonly dim?: boolean
+  /** Validated semantic-color overrides. */
+  readonly tokens: Partial<Record<keyof TuiSemanticThemeTokens, string>>
 }
 
 const EMPTY_STYLE = Object.freeze({})
@@ -195,24 +228,34 @@ const LIGHT_EXTENDED_TOKENS: TuiSemanticThemeTokens = Object.freeze({
  * @param preference - selected built-in theme.
  * @param colorDepth - color precision negotiated for the active output stream.
  * @param background - normalized OSC 11 background class; unknown falls back to dark.
+ * @param custom - validated extended-color overrides, when selected.
  * @returns immutable tokens that never emit colors when either input requires no color.
  */
 export function resolveTuiTheme(
   preference: TuiThemePreference,
   colorDepth: TuiTerminalColorDepth,
   background: TuiTerminalBackground = 'unknown',
+  custom?: TuiCustomThemeDefinition,
 ): TuiTheme {
   if (preference === 'no-color' || colorDepth === 'none') {
     return Object.freeze({
       preference, resolvedPreference: 'no-color', colorDepth: 'none', tokens: NO_COLOR_TOKENS, dim: false,
     })
   }
-  const resolvedPreference = preference === 'auto' ? background === 'light' ? 'light' : 'dark' : preference
+  const resolvedPreference = custom?.base
+    ?? (preference === 'auto' ? background === 'light' ? 'light' : 'dark' : preference)
   const ansi16 = colorDepth === 'ansi16'
-  const tokens = resolvedPreference === 'light'
+  const baseTokens = resolvedPreference === 'light'
     ? ansi16 ? LIGHT_ANSI16_TOKENS : LIGHT_EXTENDED_TOKENS
     : ansi16 ? DARK_ANSI16_TOKENS : DARK_EXTENDED_TOKENS
-  return Object.freeze({ preference, resolvedPreference, colorDepth, tokens, dim: true })
+  const tokens = custom === undefined || ansi16
+    ? baseTokens
+    : Object.freeze({ ...baseTokens, ...custom.tokens })
+  return Object.freeze({
+    preference, resolvedPreference, colorDepth, tokens,
+    ...custom === undefined || ansi16 ? {} : { customName: custom.name },
+    dim: custom?.dim ?? true,
+  })
 }
 
 const DEFAULT_TUI_THEME = resolveTuiTheme(DEFAULT_TUI_SETTINGS.theme, 'ansi16')
