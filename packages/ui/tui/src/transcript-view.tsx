@@ -13,6 +13,8 @@ import type { TuiScreenMap, TuiScreenMapLine } from './screen-map.ts'
 import { tuiScreenTextSegments, type TuiScreenSelection } from './selection.ts'
 import { tuiOsc8Text } from './hyperlink.ts'
 import { tuiBidiVisualText } from './bidi.ts'
+import { formatTuiDeliverablesRow } from './deliverables.ts'
+import { useTuiLocale } from './locale.ts'
 
 function toneColor(theme: TuiTheme, tone: TranscriptTextNode['tone']): string | undefined {
   if (tone === 'user') return theme.tokens.accent
@@ -34,6 +36,7 @@ interface TuiTranscriptViewProps {
   searchQuery?: string | undefined
   selectionMap?: TuiScreenMap | undefined
   selection?: TuiScreenSelection | undefined
+  columns?: number | undefined
 }
 
 function transcriptTextLabel(node: TranscriptTextNode): string {
@@ -63,6 +66,7 @@ export function tuiTranscriptScreenMapLines(
   entries: readonly TranscriptWindowEntry[],
   width: number,
   workspace?: string,
+  locale: 'en' | 'zh' = 'en',
 ): readonly TuiScreenMapLine[] {
   const lines: TuiScreenMapLine[] = []
   const columns = Math.max(1, Math.floor(width))
@@ -104,6 +108,15 @@ export function tuiTranscriptScreenMapLines(
       })
       if (entry.node.summary !== undefined) lines.push({
         semanticBlockKey: key, gutter: ' '.repeat(3), text: entry.node.summary.split('\n')[0] ?? '', selectable: true,
+      })
+      continue
+    }
+    if (entry.node.kind === 'deliverables') {
+      lines.push({
+        semanticBlockKey: key,
+        gutter: ' '.repeat(3),
+        text: formatTuiDeliverablesRow(entry.node, columns, locale).text,
+        selectable: true,
       })
       continue
     }
@@ -181,6 +194,19 @@ function CompactionCard({
   </Box>
 }
 
+function DeliverablesCard({
+  node,
+  columns,
+}: {
+  node: Extract<TranscriptNode, { kind: 'deliverables' }>
+  columns: number
+}): React.ReactElement {
+  const theme = useTuiTheme()
+  const locale = useTuiLocale()
+  const row = formatTuiDeliverablesRow(node, columns, locale)
+  return <Text wrap="truncate-end" {...tuiTextStyle(theme.tokens.success)}>{row.text}</Text>
+}
+
 /**
  * Highlight the first normalized transcript-search match inside display text.
  * @param props - visible text and active query.
@@ -241,6 +267,7 @@ export function TuiTranscriptView({
   searchQuery,
   selectionMap,
   selection,
+  columns = 80,
 }: TuiTranscriptViewProps): React.ReactElement {
   const theme = useTuiTheme()
   if (entries.length === 0) {
@@ -250,12 +277,13 @@ export function TuiTranscriptView({
   }
   return <>
     {overscanBefore.length > 0 && <Box height={0} overflow="hidden" flexDirection="column">
-      <TuiTranscriptView entries={overscanBefore} workspace={workspace} />
+      <TuiTranscriptView entries={overscanBefore} workspace={workspace} columns={columns} />
     </Box>}
-    {entries.map(entry => <Box
+    {entries.map((entry, index) => <Box
       key={entry.node.key}
       flexDirection="row"
-      marginBottom={entry.node.kind === 'tool' ? 0 : 1}
+      marginBottom={entry.node.kind === 'tool' || entry.node.kind === 'deliverables'
+        || entries[index + 1]?.node.kind === 'deliverables' ? 0 : 1}
       flexShrink={0}
     >
       <Text {...tuiTextStyle(theme.tokens.selection)}>{
@@ -278,19 +306,21 @@ export function TuiTranscriptView({
               && focusedCallId !== undefined ? { focusedCallId } : {}} selectionMap={selectionMap} selection={selection} />
             : entry.node.kind === 'compaction'
               ? <CompactionCard node={entry.node} selectionMap={selectionMap} selection={selection} />
-              : entry.node.kind === 'todo'
-                ? <TodoPanel node={entry.node} />
-                : <>
-                  <Text bold {...tuiTextStyle(toneColor(theme, entry.node.tone))}>{entry.node.label}{entry.node.tone === 'reasoning' && entry.node.key.startsWith('event:') && entry.node.durationMs !== undefined
-                    ? ` · ${(entry.node.durationMs / 1000).toFixed(1)}s` : ''}</Text>
-                  {entry.text !== '' && <Text wrap="wrap">{transcriptBodyView(
-                    theme, entry, selectionMap, selection, searchSelectedKey, searchQuery,
-                  )}</Text>}
-                </>}
+              : entry.node.kind === 'deliverables'
+                ? <DeliverablesCard node={entry.node} columns={columns} />
+                : entry.node.kind === 'todo'
+                  ? <TodoPanel node={entry.node} />
+                  : <>
+                    <Text bold {...tuiTextStyle(toneColor(theme, entry.node.tone))}>{entry.node.label}{entry.node.tone === 'reasoning' && entry.node.key.startsWith('event:') && entry.node.durationMs !== undefined
+                      ? ` · ${(entry.node.durationMs / 1000).toFixed(1)}s` : ''}</Text>
+                    {entry.text !== '' && <Text wrap="wrap">{transcriptBodyView(
+                      theme, entry, selectionMap, selection, searchSelectedKey, searchQuery,
+                    )}</Text>}
+                  </>}
       </Box>
     </Box>)}
     {overscanAfter.length > 0 && <Box height={0} overflow="hidden" flexDirection="column">
-      <TuiTranscriptView entries={overscanAfter} workspace={workspace} />
+      <TuiTranscriptView entries={overscanAfter} workspace={workspace} columns={columns} />
     </Box>}
   </>
 }

@@ -156,6 +156,9 @@ function transcriptNodeSearchText(node: TranscriptNode): string {
       ...node.todos.map(todo => `${todo.status} ${todo.content}`),
     ])
   }
+  if (node.kind === 'deliverables') {
+    return compactSearchText(['Files', ...node.items.map(item => `${item.operation} ${item.path}`)])
+  }
   return compactSearchText([
     node.activity,
     ...node.tools.map(toolSearchText),

@@ -5,8 +5,10 @@ import { Box, Text, useStdout } from 'ink'
 import stringWidth from 'string-width'
 import type {
   Agent, AgentPreset, ApprovalPresentation, AskUserQuestionAnswer, AskUserQuestionAnswerItem,
-  CommandDescriptor, ContextBreakdownProjection, ContextPressureProjection, FsPathCompletionResult,
+  CommandDescriptor, ContextBreakdownProjection, ContextPressureProjection,
   ImageAttachmentRef, ModelSelection, PermissionSelect, SessionStatsProjection, TokenUsageProjection,
+  TuiGoalProjection, TuiPlanProjection,
+  TuiDirectoryPickerCapability, TuiDirectoryListing,
 } from './host.ts'
 import {
   AgentStatusStore, InteractionStore, SessionEventStore, ValueStore, type PendingQuestion,
@@ -35,7 +37,7 @@ import {
   createComposerState, deleteComposerText, insertComposerPasteReference, insertComposerText,
   insertComposerClipboard, isLargeComposerPaste, layoutComposer, materializeComposerText, moveComposerCursor,
   redoComposerEdit, replaceComposerText, restoreTuiComposerDraft, toggleTuiComposerStash,
-  addComposerImageAttachment, removeLastComposerImageAttachment,
+  addComposerImageAttachment, removeComposerImageAttachment, removeLastComposerImageAttachment,
   traverseComposerHistory, tuiComposerDraft, undoComposerEdit,
   type ComposerLayout, type ComposerState, type TuiComposerDraft, type TuiComposerImageAttachment,
 } from './composer.ts'
@@ -44,9 +46,14 @@ import {
   updateTuiHistorySearchQuery, type TuiHistorySearchState,
 } from './history-search.ts'
 import {
-  acceptTuiSuggestion, commandSuggestionState, moveTuiSuggestion, pathSuggestionQuery,
-  pathSuggestionState, visibleTuiSuggestions, type TuiSuggestionState,
+  acceptTuiSuggestion, commandSuggestionState, moveTuiSuggestion,
+  visibleTuiSuggestions, type TuiSuggestionState,
 } from './suggestion.ts'
+import {
+  tuiReferenceQuery, tuiReferenceSuggestionState, type TuiReferenceResolution,
+} from './references.ts'
+import { projectTuiGoalPlan, tuiGoalPlanMutationErrorMessage } from './goal-plan.ts'
+import { formatTuiDeliverableDetailLines, tuiDeliverableInlineReferences } from './deliverables.ts'
 import {
   effectiveTuiInteractionDescriptors, matchTuiInteractionAction, resolveTuiInteractionContext,
   tuiInteractionHelpLines, type TuiInteractionContext, type TuiInteractionDescriptor, type TuiKeypress,
@@ -62,6 +69,40 @@ import {
   filterTuiResumeCandidates, formatTuiRelativeTime,
   type TuiResumeCandidate, type TuiResumeDialogSnapshot, type TuiResumeScope,
 } from './resume.ts'
+import {
+  projectTuiSessionManager,
+  TUI_SESSION_MANAGER_QUERY_LIMIT,
+  type TuiSessionArchiveFilter,
+  type TuiSessionManagerPreferences,
+  type TuiSessionScope,
+  type TuiSessionSort,
+  type TuiSessionManagerDialogSnapshot,
+  type TuiSessionManagerRow,
+  type TuiWorkspaceManagerRow,
+} from './session-manager.ts'
+import { projectTuiDirectoryBrowser, type TuiDirectoryBrowserPage } from './directory-browser.ts'
+import {
+  type TuiPresetCompositionPreview, type TuiPresetManagerSnapshot, type TuiPresetManagerRow,
+  tuiPresetMutationErrorMessage, validateTuiPresetId, TuiPresetIdError,
+} from './preset-manager.ts'
+import {
+  filterTuiHostPlugins, planTuiHostSettingsMutation, tuiHostSettingsErrorMessage,
+  type TuiHostPluginCenterSnapshot,
+  type TuiHostPluginRow, type TuiHostPluginFilter, type TuiHostSettingsMutation,
+  type TuiHostSettingsRow,
+} from './host-plugin-center.ts'
+import {
+  createTuiTrajectoryTimelineScale, formatTuiTrajectoryTimeline,
+  type TuiTrajectoryEntry, type TuiTrajectorySnapshot,
+  reconcileTuiTrajectorySelection, trajectoryKindLabel, formatTrajectoryDuration,
+  trajectoryTimingFacts, visibleTuiTrajectoryEntries,
+} from './trajectory.ts'
+import {
+  feedbackRatingLabel, findMessageFeedback,
+  tuiMessageFeedbackErrorMessage,
+  type TuiMessageFeedbackSnapshot, type TuiMessageFeedbackMutationState,
+} from './message-feedback.ts'
+import { formatRailEntry, parseTuiTerminalPathPaste, projectAttachmentRail } from './attachment-intake.ts'
 import type { TuiFreshSessionDialogSnapshot } from './session-lifecycle.ts'
 import type { TuiSessionExportDialogSnapshot, TuiSessionExportFormat } from './session-export.ts'
 import type { TuiRewindCandidate, TuiRewindDialogSnapshot } from './rewind.ts'
@@ -82,10 +123,18 @@ import {
   tuiTerminalMouseReportKind, useTuiTerminalInput, type TuiTerminalInputEvent,
 } from './terminal-input.ts'
 import {
-  TuiPointerRegionRegistry, tuiApprovalPointerRegions, tuiFooterPointerRegions, tuiModalClosePointerRegions,
+  TuiPointerRegionRegistry, tuiApprovalPointerRegions, tuiFooterPointerRegions,
   tuiPluginHubPointerRegions, tuiQuestionPointerRegions, tuiResumePointerRegions, tuiSuggestionPointerRegions,
-  tuiWorkPointerRegions,
-  type TuiPointerRegion,
+  tuiHostPluginCenterPointerRegions, tuiAttachmentRailPointerRegions,
+  tuiPresetManagerPointerRegions,
+  tuiTrajectoryPointerRegions,
+  tuiFeedbackPointerRegions,
+  tuiDeliverableActionPointerRegions, tuiDeliverableInlinePointerRegions, tuiDeliverablesPointerRegions,
+  tuiDialogFooterPointerRegions,
+  tuiRewindCandidatePointerRegions,
+  tuiProviderPointerRegions, tuiQueuePointerRegions, tuiSessionManagerPointerRegions, tuiWorkPointerRegions,
+  tuiGoalPlanDialogPointerRegions, tuiGoalPlanPointerRegions,
+  type TuiPointerFooterAction, type TuiPointerRegion,
 } from './pointer.ts'
 import {
   tuiBorderStyle, tuiTextStyle, useTuiTheme, type TuiActivityPreference, type TuiTheme,
@@ -107,7 +156,7 @@ import {
   type TuiStartupGuidanceSnapshot,
 } from './startup-guidance.ts'
 import {
-  TuiEmptyState, TuiHintLine, TuiListRow, TuiLoadingState, TuiPane, TuiScrollablePanel,
+  TuiActionFooter, TuiEmptyState, TuiHintLine, TuiListRow, TuiLoadingState, TuiPane, TuiScrollablePanel,
   TuiSection, tuiScrollableWindow,
 } from './design-system.tsx'
 import { resolveTuiComposerDelivery, tuiRunningDeliveryHelpLines, type TuiSubmitMode } from './delivery.ts'
@@ -117,6 +166,56 @@ import { consumeTuiDoubleEscape } from './double-escape.ts'
 import type { TuiExternalEditorResult } from './external-editor.ts'
 import type { TuiClipboardInsert } from './clipboard.ts'
 import type { TuiExtensionRegistry, TuiKnownSessionEvent } from './extensions.ts'
+import {
+  canRemoveTuiProvider, formatTuiProviderModelDrafts, parseTuiProviderModelDrafts,
+  TuiCustomProviderError, TuiProviderApiKeyError, TuiProviderEndpointError,
+  TuiProviderProfileError, TuiProviderRemoveError,
+  validateTuiProviderApiKey, validateTuiProviderEndpoint,
+  type TuiCustomProviderDraft, type TuiCustomProviderModelDraft,
+  type TuiProviderProfileDraft,
+  type TuiProviderCenterDialogSnapshot, type TuiProviderCenterRow, type TuiProviderCreationTarget,
+} from './provider-center.ts'
+import {
+  deleteTuiQueueItem, editTuiQueueItem, formatTuiQueueAge, readTuiQueue,
+} from './queue.ts'
+
+type TuiProviderWizardStep = 'id' | 'name' | 'endpoint' | 'protocol' | 'key' | 'models' | 'picker' | 'confirm'
+
+interface TuiProviderWizardState {
+  readonly target: TuiProviderCreationTarget
+  readonly step: TuiProviderWizardStep
+  readonly id: string
+  readonly displayName: string
+  readonly endpoint: string
+  readonly protocolIndex: number
+  readonly modelText: string
+  readonly models: readonly TuiCustomProviderModelDraft[]
+  readonly candidates: readonly TuiCustomProviderModelDraft[]
+  readonly picked: ReadonlySet<string>
+  readonly candidateIndex: number
+  readonly error: string
+}
+
+type TuiProviderProfileField = 'displayName' | 'protocol' | 'models'
+
+interface TuiProviderProfileEditorState {
+  readonly providerId: string
+  readonly field: TuiProviderProfileField
+  readonly displayName: string
+  readonly protocols: readonly string[]
+  readonly protocolIndex: number
+  readonly modelsText: string
+  readonly error: string
+}
+
+interface TuiDirectoryBrowserState {
+  readonly phase: 'loading' | 'ready' | 'error'
+  readonly listing?: TuiDirectoryListing
+  readonly requestedPath?: string
+  readonly selection: number
+  readonly showHidden: boolean
+  readonly error: string
+}
 
 export interface TuiAppProps {
   agent: Agent
@@ -137,11 +236,16 @@ export interface TuiAppProps {
   tokenUsage: ValueStore<TokenUsageProjection | undefined>
   contextBreakdown: ValueStore<ContextBreakdownProjection | undefined>
   sessionStats: ValueStore<SessionStatsProjection | undefined>
+  goalProjection: ValueStore<TuiGoalProjection | null | undefined>
+  planProjection: ValueStore<TuiPlanProjection | undefined>
   resumeDialog: ValueStore<TuiResumeDialogSnapshot | undefined>
+  sessionManager: ValueStore<TuiSessionManagerDialogSnapshot | undefined>
+  directoryPicker?: TuiDirectoryPickerCapability
   freshSessionDialog: ValueStore<TuiFreshSessionDialogSnapshot | undefined>
   rewindDialog: ValueStore<TuiRewindDialogSnapshot | undefined>
   sessionExportDialog: ValueStore<TuiSessionExportDialogSnapshot | undefined>
   pluginHubDialog: ValueStore<TuiPluginHubDialogSnapshot | undefined>
+  providerCenter: ValueStore<TuiProviderCenterDialogSnapshot | undefined>
   work: ValueStore<TuiWorkSnapshot>
   extensions: TuiExtensionRegistry
   maxResumeOptions: number
@@ -149,8 +253,10 @@ export interface TuiAppProps {
   interactionRegistry: readonly TuiInteractionDescriptor[]
   /** Optional running-Agent activity animation selected by the user. */
   activityPreference: TuiActivityPreference
-  completePaths(query: string, signal: AbortSignal): Promise<FsPathCompletionResult>
+  completeReferences(query: string, signal: AbortSignal): Promise<TuiReferenceResolution>
   onAttachPath(path: string): Promise<ImageAttachmentRef>
+  /** Resolve one terminal file-drag paste through image attachment and file-reference owners. */
+  onTerminalPathPaste(paths: readonly string[]): Promise<TuiClipboardInsert | undefined>
   onInputCursor(target: InputCursorTarget | undefined): void
   /** Enable only button-motion reports while a text drag is active. */
   onSelectionMouseMode?: (enabled: boolean) => boolean
@@ -167,10 +273,55 @@ export interface TuiAppProps {
   onCopy(text: string): { readonly ok: boolean; readonly message?: string }
   /** Open one safe HTTP(S) hyperlink through the host browser hand-off. */
   onOpenUrl(url: string): Promise<void>
+  /** Open one filesystem path through the Host native launcher. */
+  onOpenPath(path: string): Promise<void>
+  /** False on a headless/remote Host where only copying the path is actionable. */
+  pathOpenerAvailable: boolean
   onActivateFooter(itemId: TuiFooterItemId): Promise<void>
   onResume(candidate: TuiResumeCandidate): Promise<void>
   onResumeForRename(candidate: TuiResumeCandidate): Promise<void>
   onCloseResume(): void
+  onCloseSessionManager(): void
+  onRefreshSessionManager(): Promise<void>
+  sessionManagerPreferences: TuiSessionManagerPreferences
+  onUpdateSessionManagerPreferences(patch: Partial<TuiSessionManagerPreferences>): Promise<void>
+  presetManager: ValueStore<TuiPresetManagerSnapshot | undefined>
+  onClosePresetManager(): void
+  onRefreshPresetManager(): Promise<void>
+  hostPluginCenter: ValueStore<TuiHostPluginCenterSnapshot | undefined>
+  onCloseHostPluginCenter(): void
+  onRefreshHostPluginCenter(): Promise<void>
+  onMutateHostSettings(mutation: TuiHostSettingsMutation): Promise<void>
+  trajectory: ValueStore<TuiTrajectorySnapshot | undefined>
+  onCloseTrajectory(): void
+  onRefreshTrajectory(): void
+  onLoadOlderTrajectory(): void
+  messageFeedback: ValueStore<TuiMessageFeedbackSnapshot | undefined>
+  feedbackMutation: ValueStore<TuiMessageFeedbackMutationState>
+  onSubmitFeedback(messageId: string, rating: 'positive' | 'negative', note?: string): Promise<void>
+  onClearFeedback(messageId: string): Promise<void>
+  onRefreshFeedback(): Promise<void>
+  onCopyPreset(sourceId: string, newId: string, displayName?: string): Promise<void>
+  onDeletePreset(id: string): Promise<void>
+  onSetDefaultPreset(id: string, expectedRevision: number | undefined): Promise<void>
+  onReadPresetComposition(id: string): Promise<TuiPresetCompositionPreview>
+  onOpenPresetFile(id: string): Promise<void>
+  onOpenPresetLocation(id: string): Promise<void>
+  onResumeManagedSession(candidate: TuiResumeCandidate): Promise<void>
+  onForkManagedSession(candidate: TuiResumeCandidate): Promise<void>
+  onRenameManagedSession(candidate: TuiResumeCandidate, title: string): Promise<void>
+  onArchiveManagedSession(candidate: TuiResumeCandidate, archived: boolean): Promise<void>
+  /** Newer Workspace owner capability; official rc.8 keeps archived Sessions read-only. */
+  canUnarchiveManagedSessions?: boolean
+  onCreateManagedWorkspace(path: string): Promise<void>
+  onRenameManagedWorkspace(workspace: TuiWorkspaceManagerRow, title: string): Promise<void>
+  onMoveManagedWorkspace(workspace: TuiWorkspaceManagerRow, direction: -1 | 1): Promise<void>
+  onDeleteManagedWorkspace(workspace: TuiWorkspaceManagerRow): Promise<void>
+  onEditGoal(objective: string): Promise<void>
+  onPauseGoal(): Promise<void>
+  onResumeGoal(): Promise<void>
+  onClearGoal(): Promise<void>
+  onExitPlan(): Promise<void>
   onConfirmFreshSession(): Promise<void>
   onCloseFreshSession(): void
   onRewind(candidate: TuiRewindCandidate): Promise<void>
@@ -190,6 +341,19 @@ export interface TuiAppProps {
   onPluginHubSort(): Promise<void>
   onPluginHubCategory(): Promise<void>
   onPluginHubInstallable(): Promise<void>
+  onCloseProviderCenter(): void
+  onRefreshProviderCenter(): Promise<void>
+  onAuthenticateProvider(provider: string): Promise<void>
+  onLogoutProvider(provider: string): Promise<void>
+  onSaveProviderApiKey(provider: string, key: string): Promise<void>
+  onSaveProviderEndpoint(provider: string, endpoint: string | undefined): Promise<void>
+  onSaveProviderProfile(provider: string, draft: TuiProviderProfileDraft): Promise<void>
+  onRemoveProvider(provider: string): Promise<void>
+  onDiscoverCustomProviderModels(
+    target: TuiProviderCreationTarget,
+    draft: TuiCustomProviderDraft,
+  ): Promise<readonly TuiCustomProviderModelDraft[]>
+  onCreateCustomProvider(target: TuiProviderCreationTarget, draft: TuiCustomProviderDraft): Promise<void>
   onMounted: () => void
   onOpenHelp(): void
   onCloseHelp(): void
@@ -223,6 +387,216 @@ function diagnosticLineColor(theme: TuiTheme, line: TuiDiagnosticPanelLine): str
   if (line.severity === 'warning') return theme.tokens.warning
   if (line.severity === 'error') return theme.tokens.error
   return theme.tokens.accent
+}
+
+function providerAuthenticationLabel(row: TuiProviderCenterRow, locale: TuiLocale): string {
+  const key = row.authentication === 'configured'
+    ? 'provider.auth.configured'
+    : row.authentication === 'sign-in-required'
+      ? 'provider.auth.signIn'
+      : row.authentication === 'credential-required'
+        ? 'provider.auth.credential'
+        : row.authentication === 'dormant'
+          ? 'provider.auth.dormant'
+          : 'provider.auth.unavailable'
+  return tuiMessage(locale, key)
+}
+
+function providerIssueLabel(issue: TuiProviderCenterRow['issues'][number], locale: TuiLocale): string {
+  if (issue === 'authentication-unavailable') return tuiMessage(locale, 'provider.issue.authentication')
+  if (issue === 'models-unavailable') return tuiMessage(locale, 'provider.issue.models')
+  if (issue === 'settings-unavailable') return tuiMessage(locale, 'provider.issue.settings')
+  return tuiMessage(locale, 'provider.issue.credential')
+}
+
+function providerDetailLines(row: TuiProviderCenterRow, locale: TuiLocale): readonly string[] {
+  const yes = tuiMessage(locale, 'provider.detail.yes')
+  const no = tuiMessage(locale, 'provider.detail.no')
+  const state = tuiMessage(locale, row.active ? 'provider.state.active' : 'provider.state.dormant')
+  const custom = row.declared ? tuiMessage(locale, 'provider.detail.custom') : ''
+  const lines = [
+    tuiMessage(locale, 'provider.detail.identity', { name: row.name, id: row.id }),
+    tuiMessage(locale, 'provider.detail.route', { state, custom }),
+    tuiMessage(locale, 'provider.detail.authentication', { state: providerAuthenticationLabel(row, locale) }),
+    ...(row.authenticationSource === undefined ? [] : [
+      tuiMessage(locale, 'provider.detail.source', { source: row.authenticationSource }),
+    ]),
+    ...(row.authenticationMethods.length === 0 ? [] : [
+      tuiMessage(locale, 'provider.detail.methods', {
+        methods: row.authenticationMethods.map(method => method.name).join(', '),
+      }),
+    ]),
+    ...(row.modelCount === undefined ? [] : [
+      tuiMessage(locale, 'provider.detail.models', { count: row.modelCount }),
+    ]),
+  ]
+  const settings = row.settings
+  if (settings !== undefined) {
+    const path = settings.path.length === 0 ? '/' : `/${settings.path.join('/')}`
+    const access = settings.registered
+      ? tuiMessage(locale, settings.writable ? 'provider.settings.writable' : 'provider.settings.readonly')
+      : tuiMessage(locale, 'provider.settings.unregistered')
+    lines.push(tuiMessage(locale, 'provider.detail.settings', {
+      namespace: settings.namespace, path, access, applies: settings.applies ?? '?',
+    }))
+    lines.push(tuiMessage(locale, 'provider.detail.override', {
+      state: settings.userOverride ? yes : no, revision: settings.revision ?? '?',
+    }))
+    if (settings.endpoint !== undefined) {
+      lines.push(tuiMessage(locale, 'provider.detail.endpoint', { endpoint: settings.endpoint }))
+    }
+    if (settings.editable?.displayNameSupported) {
+      lines.push(tuiMessage(locale, 'provider.detail.displayName', {
+        value: settings.editable.displayName ?? row.id,
+      }))
+    }
+    if (settings.editable?.protocolSupported) {
+      lines.push(tuiMessage(locale, 'provider.detail.protocol', {
+        value: settings.editable.protocol ?? tuiMessage(locale, 'provider.profile.inherited'),
+      }))
+    }
+    if (settings.editable?.modelsSupported) {
+      lines.push(tuiMessage(locale, 'provider.detail.modelTable', {
+        value: settings.editable.models?.map(model => model.id).join(', ')
+          || tuiMessage(locale, 'provider.profile.modelsEmpty'),
+      }))
+    }
+    if (settings.credential !== undefined) {
+      const credential = settings.credential
+      lines.push(tuiMessage(locale, 'provider.detail.credential', {
+        ref: credential.ref,
+        configured: credential.configured ? yes : no,
+        access: credential.writable
+          ? tuiMessage(locale, 'provider.settings.writable')
+          : tuiMessage(locale, 'provider.settings.readonly'),
+        source: credential.source === undefined ? '' : tuiMessage(locale, 'provider.detail.credentialSource', {
+          source: credential.source,
+        }),
+      }))
+    }
+  }
+  if (row.issues.length > 0) {
+    lines.push(tuiMessage(locale, 'provider.detail.issue', {
+      issues: row.issues.map(issue => providerIssueLabel(issue, locale)).join(', '),
+    }))
+  }
+  return Object.freeze(lines)
+}
+
+function createProviderWizard(target: TuiProviderCreationTarget): TuiProviderWizardState {
+  return Object.freeze({
+    target,
+    step: 'id',
+    id: '',
+    displayName: '',
+    endpoint: '',
+    protocolIndex: 0,
+    modelText: '',
+    models: Object.freeze([]),
+    candidates: Object.freeze([]),
+    picked: new Set<string>(),
+    candidateIndex: 0,
+    error: '',
+  })
+}
+
+function providerWizardModels(
+  text: string,
+  previous: readonly TuiCustomProviderModelDraft[],
+): readonly TuiCustomProviderModelDraft[] {
+  const known = new Map(previous.map(model => [model.id, model]))
+  const seen = new Set<string>()
+  return Object.freeze(text.split(/[\s,]+/u).flatMap((raw) => {
+    const id = raw.trim()
+    if (id === '' || seen.has(id)) return []
+    seen.add(id)
+    return [known.get(id) ?? Object.freeze({ id })]
+  }))
+}
+
+function providerWizardDraft(
+  wizard: TuiProviderWizardState,
+  apiKey: string,
+): TuiCustomProviderDraft {
+  return Object.freeze({
+    id: wizard.id,
+    displayName: wizard.displayName,
+    baseURL: wizard.endpoint,
+    protocol: wizard.target.protocols[wizard.protocolIndex] ?? '',
+    ...(apiKey.trim() === '' ? {} : { apiKey }),
+    models: wizard.models,
+  })
+}
+
+function providerWizardFailure(error: unknown, locale: TuiLocale): string {
+  if (!(error instanceof TuiCustomProviderError)) return tuiMessage(locale, 'provider.custom.error.failed')
+  const fieldErrors: Partial<Record<TuiCustomProviderError['code'], string>> = {
+    'invalid-id': tuiMessage(locale, 'provider.custom.error.id'),
+    'id-taken': tuiMessage(locale, 'provider.custom.error.taken'),
+    'invalid-display-name': tuiMessage(locale, 'provider.custom.error.name'),
+    'invalid-endpoint': tuiMessage(locale, 'provider.custom.error.endpoint'),
+    'invalid-protocol': tuiMessage(locale, 'provider.custom.error.protocol'),
+    'models-required': tuiMessage(locale, 'provider.custom.error.models'),
+    'invalid-model': tuiMessage(locale, 'provider.custom.error.model'),
+    'duplicate-model': tuiMessage(locale, 'provider.custom.error.duplicateModel'),
+    'invalid-key': tuiMessage(locale, 'provider.custom.error.key'),
+    'settings-conflict': tuiMessage(locale, 'provider.custom.error.conflict'),
+    'settings-read-only': tuiMessage(locale, 'provider.custom.error.readonly'),
+    'credential-write-failed': tuiMessage(locale, 'provider.custom.error.credentialPartial'),
+    'credentials-unavailable': tuiMessage(locale, 'provider.custom.error.credentialPartial'),
+    'discovery-unavailable': tuiMessage(locale, 'provider.custom.error.discoveryUnavailable'),
+    'discovery-failed': tuiMessage(locale, 'provider.custom.error.discoveryFailed'),
+  }
+  return fieldErrors[error.code] ?? tuiMessage(locale, 'provider.custom.error.failed')
+}
+
+function providerWizardEndpointLabel(value: string): string {
+  try {
+    const url = new URL(value)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+    return terminalSafe(url.toString().replace(/\/$/u, ''))
+  } catch {
+    return terminalSafe(value)
+  }
+}
+
+function providerProfileFields(row: TuiProviderCenterRow): readonly TuiProviderProfileField[] {
+  const editable = row.settings?.editable
+  if (editable === undefined) return Object.freeze([])
+  return Object.freeze([
+    ...(editable.displayNameSupported ? ['displayName' as const] : []),
+    ...(editable.protocolSupported ? ['protocol' as const] : []),
+    ...(editable.modelsSupported ? ['models' as const] : []),
+  ])
+}
+
+function createProviderProfileEditor(row: TuiProviderCenterRow): TuiProviderProfileEditorState | undefined {
+  const editable = row.settings?.editable
+  const fields = providerProfileFields(row)
+  const firstField = fields.at(0)
+  if (editable === undefined || firstField === undefined) return undefined
+  const protocols = Object.freeze(row.declared ? [...editable.protocols] : ['', ...editable.protocols])
+  const protocolIndex = Math.max(0, protocols.indexOf(editable.protocol ?? ''))
+  return Object.freeze({
+    providerId: row.id,
+    field: firstField,
+    displayName: editable.displayName ?? '',
+    protocols,
+    protocolIndex,
+    modelsText: formatTuiProviderModelDrafts(editable.models ?? []),
+    error: '',
+  })
+}
+
+function providerProfileDraft(editor: TuiProviderProfileEditorState): TuiProviderProfileDraft {
+  return Object.freeze({
+    displayName: editor.displayName,
+    protocol: editor.protocols[editor.protocolIndex] ?? '',
+    models: parseTuiProviderModelDrafts(editor.modelsText),
+  })
 }
 
 function detailLineView(
@@ -368,23 +742,6 @@ function pointerTextWidth(value: string): number {
   return Math.max(1, ...value.split('\n').map(line => stringWidth(line)))
 }
 
-function composerAttachmentBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  const kib = bytes / 1024
-  if (kib < 1024) return `${kib >= 10 ? Math.round(kib) : Math.round(kib * 10) / 10} KiB`
-  return `${Math.round(kib / 1024 * 10) / 10} MiB`
-}
-
-function composerAttachmentLine(
-  attachments: readonly TuiComposerImageAttachment[] | undefined,
-): string | undefined {
-  if (attachments === undefined || attachments.length === 0) return undefined
-  return attachments.map(({ ref }: { ref: ImageAttachmentRef }) => {
-    const label = ref.name ?? ref.attachmentId
-    return `[${terminalSafe(label)} · ${terminalSafe(ref.mediaType)} · ${composerAttachmentBytes(ref.bytes)} · ${terminalSafe(ref.attachmentId)}]`
-  }).join(' ')
-}
-
 function isImagePath(path: string): boolean {
   return /\.(?:png|jpe?g|webp|gif)$/iu.test(path)
 }
@@ -437,7 +794,7 @@ function transcriptPointerRegions(
   columns: number,
   width: number,
   workspace: string | undefined,
-  context: Extract<TuiInteractionContext, 'Composer' | 'Transcript'>,
+  context: Extract<TuiInteractionContext, 'Composer' | 'Transcript' | 'Dialog'>,
   locale: TuiLocale,
 ): readonly TuiPointerRegion[] {
   const targetByKey = new Map(targets.map((target, index) => [target.key, { target, index }]))
@@ -598,6 +955,39 @@ export function tuiWorkingFrame(tick: number, preference: TuiActivityPreference 
   return frames[Math.abs(Math.trunc(tick)) % frames.length] ?? frames[0] ?? ''
 }
 
+/** Whether the global status items are the content visible on the last terminal row. */
+export function tuiFooterItemsOwnPointerRow(state: {
+  readonly workOpen: boolean
+  readonly footerDetail: boolean
+  readonly footerSelection: boolean
+  readonly notice: boolean
+  readonly externalNotice: boolean
+  readonly runningDeliveryHint: boolean
+  readonly rewindBrowsing: boolean
+  readonly helpVisible: boolean
+  readonly transcriptSearch: boolean
+  readonly historySearch: boolean
+  readonly focus: boolean
+}): boolean {
+  return !state.workOpen
+    && !state.footerDetail
+    && !state.footerSelection
+    && !state.notice
+    && !state.externalNotice
+    && !state.runningDeliveryHint
+    && !state.rewindBrowsing
+    && !state.helpVisible
+    && !state.transcriptSearch
+    && !state.historySearch
+    && !state.focus
+}
+
+/** Keep extension footer hints while making the Host-owned fullscreen close action explicit. */
+export function tuiFullscreenFooterLine(footer: string | undefined, closeLabel: string): string {
+  if (footer === undefined || footer.trim() === '') return closeLabel
+  return footer.includes(closeLabel) ? footer : `${footer} · ${closeLabel}`
+}
+
 function answerFor(question: PendingQuestion['request']['questions'][number], draft: string): AskUserQuestionAnswerItem {
   const tokens = draft.split(',').map(token => token.trim()).filter(Boolean)
   const options = question.options ?? []
@@ -652,7 +1042,15 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const tokenUsage = useSyncExternalStore(props.tokenUsage.subscribe, props.tokenUsage.getSnapshot)
   const contextBreakdown = useSyncExternalStore(props.contextBreakdown.subscribe, props.contextBreakdown.getSnapshot)
   const sessionStats = useSyncExternalStore(props.sessionStats.subscribe, props.sessionStats.getSnapshot)
+  const goalProjection = useSyncExternalStore(props.goalProjection.subscribe, props.goalProjection.getSnapshot)
+  const planProjection = useSyncExternalStore(props.planProjection.subscribe, props.planProjection.getSnapshot)
   const resumeDialog = useSyncExternalStore(props.resumeDialog.subscribe, props.resumeDialog.getSnapshot)
+  const sessionManager = useSyncExternalStore(props.sessionManager.subscribe, props.sessionManager.getSnapshot)
+  const presetManager = useSyncExternalStore(props.presetManager.subscribe, props.presetManager.getSnapshot)
+  const hostPluginCenter = useSyncExternalStore(props.hostPluginCenter.subscribe, props.hostPluginCenter.getSnapshot)
+  const trajectory = useSyncExternalStore(props.trajectory.subscribe, props.trajectory.getSnapshot)
+  const messageFeedbackSnap = useSyncExternalStore(props.messageFeedback.subscribe, props.messageFeedback.getSnapshot)
+  const feedbackMutationSnap = useSyncExternalStore(props.feedbackMutation.subscribe, props.feedbackMutation.getSnapshot)
   const freshSessionDialog = useSyncExternalStore(
     props.freshSessionDialog.subscribe,
     props.freshSessionDialog.getSnapshot,
@@ -663,6 +1061,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     props.sessionExportDialog.getSnapshot,
   )
   const pluginHubDialog = useSyncExternalStore(props.pluginHubDialog.subscribe, props.pluginHubDialog.getSnapshot)
+  const providerCenter = useSyncExternalStore(props.providerCenter.subscribe, props.providerCenter.getSnapshot)
   const work = useSyncExternalStore(props.work.subscribe, props.work.getSnapshot)
   const transcriptProjection = useMemo(() => new TuiTranscriptProjectionCache(), [props.agent])
   const transcriptDetailCache = useMemo(() => new TuiTranscriptDetailCache(), [props.agent])
@@ -691,9 +1090,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const [composer, setComposer] = useState<ComposerState>(createComposerState)
   const appliedComposerPrefill = useRef(0)
   const [suggestionOverride, setSuggestionOverride] = useState<SuggestionOverride | undefined>()
-  const [pathResolution, setPathResolution] = useState<{
+  const [referenceResolution, setReferenceResolution] = useState<{
     key: string
-    result?: FsPathCompletionResult
+    result?: TuiReferenceResolution
   } | undefined>()
   const [history, setHistory] = useState<TuiComposerDraft[]>([])
   const [historySearch, setHistorySearch] = useState<TuiHistorySearchState | undefined>()
@@ -706,6 +1105,12 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const [questionCursor, setQuestionCursor] = useState(0)
   const [approvalOffset, setApprovalOffset] = useState(0)
   const [focus, setFocus] = useState<TuiTranscriptFocusState | undefined>()
+  const [feedbackNoteDraft, setFeedbackNoteDraft] = useState<{
+    readonly messageId: string
+    readonly rating: 'positive' | 'negative'
+    readonly text: string
+  } | undefined>()
+  const [deliverableSelection, setDeliverableSelection] = useState(0)
   const [transcriptAnchor, setTranscriptAnchor] = useState<TuiTranscriptViewportAnchor | undefined>()
   const [transcriptSearch, setTranscriptSearch] = useState<TranscriptSearchState | undefined>()
   const [helpOffset, setHelpOffset] = useState(0)
@@ -724,6 +1129,65 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const [resumeSelection, setResumeSelection] = useState(0)
   const [resumeError, setResumeError] = useState('')
   const [resumeConfirmation, setResumeConfirmation] = useState<TuiResumeCandidate | undefined>()
+  const [sessionManagerTab, setSessionManagerTab] = useState<'sessions' | 'workspaces'>('sessions')
+  const [sessionManagerScope, setSessionManagerScope] = useState<TuiSessionScope>(props.sessionManagerPreferences.scope)
+  const [sessionManagerArchive, setSessionManagerArchive] = useState<TuiSessionArchiveFilter>(props.sessionManagerPreferences.archive)
+  const [sessionManagerSort, setSessionManagerSort] = useState<TuiSessionSort>(props.sessionManagerPreferences.sort)
+  const [sessionManagerGroup, setSessionManagerGroup] = useState(props.sessionManagerPreferences.groupByWorkspace)
+  const [sessionManagerQuery, setSessionManagerQuery] = useState('')
+  const [sessionManagerSelection, setSessionManagerSelection] = useState(0)
+  const [sessionManagerDetail, setSessionManagerDetail] = useState(false)
+  const [sessionManagerEdit, setSessionManagerEdit] = useState<{
+    readonly kind: 'session-rename' | 'workspace-add' | 'workspace-rename'
+    readonly draft: string
+  } | undefined>()
+  const [sessionManagerConfirm, setSessionManagerConfirm] = useState<
+    'session-archive' | 'session-unarchive' | 'workspace-delete' | undefined
+  >()
+  const [sessionManagerError, setSessionManagerError] = useState('')
+  const [directoryBrowser, setDirectoryBrowser] = useState<TuiDirectoryBrowserState | undefined>()
+  const [presetManagerSelection, setPresetManagerSelection] = useState(0)
+  const [presetManagerDetail, setPresetManagerDetail] = useState<TuiPresetManagerRow | undefined>()
+  const [presetManagerCopyDraft, setPresetManagerCopyDraft] = useState<{
+    readonly sourceId: string
+    readonly idDraft: string
+    readonly nameDraft: string
+    readonly step: 'id' | 'name'
+  } | undefined>()
+  const [presetManagerDeleteConfirm, setPresetManagerDeleteConfirm] = useState<TuiPresetManagerRow | undefined>()
+  const [presetManagerComposition, setPresetManagerComposition] = useState<{
+    readonly id: string
+    readonly phase: 'loading' | 'ready'
+    readonly text?: string
+    readonly truncated?: boolean
+  } | undefined>()
+  const [presetManagerError, setPresetManagerError] = useState('')
+  const [trajectorySelection, setTrajectorySelection] = useState(0)
+  const [trajectoryDetailKey, setTrajectoryDetailKey] = useState<string | undefined>()
+  const [trajectoryQuery, setTrajectoryQuery] = useState('')
+  const [trajectorySearchEditing, setTrajectorySearchEditing] = useState(false)
+  const [trajectoryCollapsedTurns, setTrajectoryCollapsedTurns] = useState<ReadonlySet<number>>(new Set())
+  const [trajectoryCollapsedSteps, setTrajectoryCollapsedSteps] = useState<ReadonlySet<string>>(new Set())
+  const [trajectoryInspectorTab, setTrajectoryInspectorTab] = useState<'summary' | 'input' | 'output' | 'timing'>('summary')
+  const [trajectoryTailFollow, setTrajectoryTailFollow] = useState(true)
+  const [hostPluginTab, setHostPluginTab] = useState<'plugins' | 'settings'>('plugins')
+  const [hostPluginSelection, setHostPluginSelection] = useState(0)
+  const [hostPluginFilter, setHostPluginFilter] = useState<TuiHostPluginFilter>('all')
+  const [hostPluginQuery, setHostPluginQuery] = useState('')
+  const [hostPluginDetail, setHostPluginDetail] = useState<TuiHostPluginRow | undefined>()
+  const [hostSettingsDetailNs, setHostSettingsDetailNs] = useState<string | undefined>()
+  const [hostSettingsFieldSelection, setHostSettingsFieldSelection] = useState(0)
+  const [hostSettingsDrafts, setHostSettingsDrafts] = useState<Readonly<Record<string, {
+    readonly text: string
+    readonly reset?: boolean
+  }>>>({})
+  const [hostSettingsEditing, setHostSettingsEditing] = useState(false)
+  const [hostSettingsSaving, setHostSettingsSaving] = useState(false)
+  const [hostSettingsError, setHostSettingsError] = useState('')
+  const [goalPlanOpen, setGoalPlanOpen] = useState(false)
+  const [goalEditDraft, setGoalEditDraft] = useState<string | undefined>()
+  const [goalClearConfirmation, setGoalClearConfirmation] = useState(false)
+  const [goalPlanError, setGoalPlanError] = useState('')
   const [rewindSelection, setRewindSelection] = useState(0)
   const [rewindConfirmation, setRewindConfirmation] = useState<TuiRewindCandidate | undefined>()
   const [rewindError, setRewindError] = useState('')
@@ -732,11 +1196,32 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const [pluginHubQuery, setPluginHubQuery] = useState('')
   const [pluginHubSelection, setPluginHubSelection] = useState(0)
   const [pluginHubDetailOffset, setPluginHubDetailOffset] = useState(0)
+  const [providerSelection, setProviderSelection] = useState(0)
+  const [providerDetail, setProviderDetail] = useState(false)
+  const [providerDetailOffset, setProviderDetailOffset] = useState(0)
+  const [providerSecretDraft, setProviderSecretDraft] = useState<string | undefined>()
+  const [providerSecretError, setProviderSecretError] = useState('')
+  const [providerEndpointDraft, setProviderEndpointDraft] = useState<string | undefined>()
+  const [providerEndpointError, setProviderEndpointError] = useState('')
+  const [providerProfileEditor, setProviderProfileEditor] = useState<TuiProviderProfileEditorState | undefined>()
+  const [providerDeleteConfirmation, setProviderDeleteConfirmation] = useState<string | undefined>()
+  const [providerLogoutConfirmation, setProviderLogoutConfirmation] = useState<string | undefined>()
+  const [providerWizard, setProviderWizard] = useState<TuiProviderWizardState | undefined>()
+  const [providerWizardSecret, setProviderWizardSecret] = useState('')
+  const [queueOpen, setQueueOpen] = useState(false)
+  const [queueSelection, setQueueSelection] = useState(0)
+  const [queueDetail, setQueueDetail] = useState(false)
+  const [queueDetailOffset, setQueueDetailOffset] = useState(0)
+  const [queueEditDraft, setQueueEditDraft] = useState<string | undefined>()
+  const [queueDeleteConfirmation, setQueueDeleteConfirmation] = useState(false)
+  const [queueError, setQueueError] = useState('')
+  const [queueClock, setQueueClock] = useState(Date.now)
   const agentViewStates = useRef(new TuiAgentViewStateCache<TuiAgentViewLocalState>())
   const submittedPendingIds = useRef<string[]>([])
   const selectionPending = useRef<TuiSelectionPending | undefined>()
   const lastScreenClick = useRef<TuiScreenClick | undefined>()
   const lastEscapeAt = useRef<number | undefined>()
+  const directoryBrowserAbort = useRef<AbortController | undefined>()
   const currentAgentViewId = useRef(props.view.id)
   const currentAgentViewState = useRef<TuiAgentViewLocalState>({
     composer, history, historySearch, focus, transcriptAnchor, transcriptSearch,
@@ -751,10 +1236,19 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     selectionPending.current = undefined
     lastScreenClick.current = undefined
     setScreenSelection(undefined)
+    setFeedbackNoteDraft(undefined)
     props.onSelectionMouseMode?.(false)
+    setQueueOpen(false)
+    setQueueSelection(0)
+    setQueueDetail(false)
+    setQueueEditDraft(undefined)
+    setQueueDeleteConfirmation(false)
+    setQueueError('')
   }, [props.agent])
-  const completePathsRef = useRef<TuiAppProps['completePaths']>((query, signal) => props.completePaths(query, signal))
-  completePathsRef.current = (query, signal) => props.completePaths(query, signal)
+  const completeReferencesRef = useRef<TuiAppProps['completeReferences']>(
+    (query, signal) => props.completeReferences(query, signal),
+  )
+  completeReferencesRef.current = (query, signal) => props.completeReferences(query, signal)
   const previousTodos = useRef(currentTodo?.todos)
   const emphasizedTodos = new Set(currentTodo?.todos.filter((todo) => {
     const previous = previousTodos.current?.find(item => item.content === todo.content)
@@ -799,6 +1293,61 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   }, [resumeDialog?.generation])
 
   useEffect(() => {
+    setSessionManagerTab(sessionManager?.initialTab ?? 'sessions')
+    setSessionManagerScope(props.sessionManagerPreferences.scope)
+    setSessionManagerArchive(props.sessionManagerPreferences.archive)
+    setSessionManagerSort(props.sessionManagerPreferences.sort)
+    setSessionManagerGroup(props.sessionManagerPreferences.groupByWorkspace)
+    setSessionManagerQuery('')
+    setSessionManagerSelection(0)
+    setSessionManagerDetail(false)
+    setSessionManagerEdit(undefined)
+    setSessionManagerConfirm(undefined)
+    setSessionManagerError('')
+    directoryBrowserAbort.current?.abort(new Error('TUI directory browser reset'))
+    directoryBrowserAbort.current = undefined
+    setDirectoryBrowser(undefined)
+  }, [sessionManager?.generation, props.sessionManagerPreferences])
+
+  useEffect(() => () => {
+    directoryBrowserAbort.current?.abort(new Error('TUI directory browser unmounted'))
+  }, [])
+
+  useEffect(() => {
+    setPresetManagerSelection(0)
+    setPresetManagerDetail(undefined)
+    setPresetManagerCopyDraft(undefined)
+    setPresetManagerDeleteConfirm(undefined)
+    setPresetManagerComposition(undefined)
+    setPresetManagerError('')
+  }, [presetManager === undefined])
+
+  useEffect(() => {
+    setTrajectorySelection(0)
+    setTrajectoryDetailKey(undefined)
+    setTrajectoryQuery('')
+    setTrajectorySearchEditing(false)
+    setTrajectoryCollapsedTurns(new Set())
+    setTrajectoryCollapsedSteps(new Set())
+    setTrajectoryInspectorTab('summary')
+    setTrajectoryTailFollow(true)
+  }, [trajectory === undefined])
+
+  useEffect(() => {
+    setHostPluginTab('plugins')
+    setHostPluginSelection(0)
+    setHostPluginFilter('all')
+    setHostPluginQuery('')
+    setHostPluginDetail(undefined)
+    setHostSettingsDetailNs(undefined)
+    setHostSettingsFieldSelection(0)
+    setHostSettingsDrafts({})
+    setHostSettingsEditing(false)
+    setHostSettingsSaving(false)
+    setHostSettingsError('')
+  }, [hostPluginCenter === undefined])
+
+  useEffect(() => {
     setExportDirectory(createComposerState('.'))
     setExportDescendants(true)
   }, [sessionExportDialog?.generation])
@@ -814,6 +1363,38 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     setPluginHubSelection(0)
     setPluginHubDetailOffset(0)
   }, [pluginHubDialog?.generation, pluginHubDialog?.view])
+
+  useEffect(() => {
+    if (providerCenter === undefined) {
+      setProviderSelection(0)
+      setProviderDetail(false)
+      setProviderDetailOffset(0)
+      setProviderSecretDraft(undefined)
+      setProviderSecretError('')
+      setProviderEndpointDraft(undefined)
+      setProviderEndpointError('')
+      setProviderProfileEditor(undefined)
+      setProviderDeleteConfirmation(undefined)
+      setProviderLogoutConfirmation(undefined)
+      setProviderWizard(undefined)
+      setProviderWizardSecret('')
+      return
+    }
+    const count = providerCenter.snapshot?.providers.length ?? 0
+    setProviderSelection(previous => count === 0 ? 0 : Math.min(previous, count - 1))
+  }, [providerCenter])
+
+  useEffect(() => {
+    if (!providerDetail) {
+      setProviderSecretDraft(undefined)
+      setProviderSecretError('')
+      setProviderEndpointDraft(undefined)
+      setProviderEndpointError('')
+      setProviderProfileEditor(undefined)
+      setProviderDeleteConfirmation(undefined)
+      setProviderLogoutConfirmation(undefined)
+    }
+  }, [providerDetail])
 
   useLayoutEffect(() => {
     const previousId = currentAgentViewId.current
@@ -835,7 +1416,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     setTranscriptAnchor(next.transcriptAnchor)
     setTranscriptSearch(next.transcriptSearch)
     setSuggestionOverride(undefined)
-    setPathResolution(undefined)
+    setReferenceResolution(undefined)
     setFooterSelection(undefined)
     setFooterDetail(undefined)
     setWorkOpen(false)
@@ -871,7 +1452,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           key: node.key,
           label: node.kind === 'todo' ? tuiMessage(locale, 'transcript.tasks.title')
             : node.kind === 'text' ? node.label
-              : node.kind === 'compaction' ? tuiMessage(locale, 'transcript.compaction.title') : node.name,
+              : node.kind === 'compaction' ? tuiMessage(locale, 'transcript.compaction.title')
+                : node.kind === 'deliverables' ? tuiMessage(locale, 'deliverables.title') : node.name,
           node,
         }]
       }
@@ -891,14 +1473,79 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const focusedTarget = focusTargets[focusedIndex]
   const focusedTargetKey = focus?.mode === 'browse' ? focusedTarget?.key : undefined
   const focusedTargetNodeKind = focus?.mode === 'browse' ? focusedTarget?.node.kind : undefined
+  const focusedFeedbackMessageId = props.view.kind === 'root' && focus?.mode === 'detail'
+    && focusedTarget?.node.kind === 'text' && focusedTarget.node.tone === 'assistant'
+    && focusedTarget.node.closing === true
+    ? focusedTarget.node.messageId
+    : undefined
+  const activeMessageFeedback = messageFeedbackSnap?.sessionId === props.agent.session.id
+    ? messageFeedbackSnap
+    : undefined
+  const focusedFeedback = focusedFeedbackMessageId === undefined
+    ? undefined
+    : findMessageFeedback(activeMessageFeedback, focusedFeedbackMessageId)
+  const focusedFeedbackMutation = focusedFeedbackMessageId !== undefined
+    && feedbackMutationSnap.status !== 'idle'
+    && feedbackMutationSnap.sessionId === props.agent.session.id
+    && feedbackMutationSnap.targetMessageId === focusedFeedbackMessageId
+    ? feedbackMutationSnap
+    : undefined
+  useEffect(() => {
+    if (feedbackNoteDraft !== undefined && focusedFeedbackMutation?.status === 'success'
+      && focusedFeedbackMutation.targetMessageId === feedbackNoteDraft.messageId) {
+      setFeedbackNoteDraft(undefined)
+    }
+  }, [feedbackNoteDraft, focusedFeedbackMutation])
+  const feedbackActionsVisible = focusedFeedbackMessageId !== undefined && feedbackNoteDraft === undefined
+  const feedbackActionLabels = {
+    like: tuiMessage(locale, 'feedback.action.like'),
+    dislike: tuiMessage(locale, 'feedback.action.dislike'),
+    note: tuiMessage(locale, 'feedback.action.note'),
+    clear: tuiMessage(locale, 'feedback.action.clear'),
+  }
+  const feedbackActionLine = [
+    feedbackActionLabels.like,
+    feedbackActionLabels.dislike,
+    ...(focusedFeedback === undefined ? [] : [feedbackActionLabels.note, feedbackActionLabels.clear]),
+  ].join(' · ')
+  const focusedDeliverables = focus?.mode === 'detail' && focusedTarget?.node.kind === 'deliverables'
+    ? focusedTarget.node
+    : undefined
+  const selectedDeliverable = focusedDeliverables?.items[Math.min(
+    deliverableSelection,
+    Math.max(0, focusedDeliverables.items.length - 1),
+  )]
+  const deliverableActionsVisible = focusedDeliverables !== undefined
+  const deliverableActionLine = tuiMessage(locale, props.pathOpenerAvailable
+    ? 'deliverables.actions' : 'deliverables.actions.copyOnly')
   const detailHeight = (focus?.mode === 'detail' && focusedTarget !== undefined) || footerDetail !== undefined
     ? Math.min(12, Math.max(7, Math.floor(terminalRows / 3)))
     : 0
-  const detailRows = Math.max(1, detailHeight - 4)
+  const detailRows = Math.max(1, detailHeight - (feedbackActionsVisible || deliverableActionsVisible ? 5 : 4))
   const detailColumns = Math.max(1, (stdout.columns || 80) - 4)
-  const transcriptDetailLines = focusedTarget === undefined
+  const transcriptDetailRawLines = focusedTarget === undefined
     ? []
-    : transcriptDetailCache.lines(focusedTarget.node, detailColumns, focusedTarget.child)
+    : focusedDeliverables === undefined
+      ? transcriptDetailCache.lines(focusedTarget.node, detailColumns, focusedTarget.child)
+      : formatTuiDeliverableDetailLines(focusedDeliverables, Math.max(1, detailColumns - 2), locale)
+  const transcriptDetailBaseLines = focusedDeliverables === undefined
+    ? transcriptDetailRawLines
+    : transcriptDetailRawLines.map((line, index) => index === deliverableSelection ? `› ${line}` : `  ${line}`)
+  const feedbackDetailLines = focusedFeedbackMessageId === undefined ? [] : [
+    `${tuiMessage(locale, 'feedback.command')}: ${feedbackRatingLabel(focusedFeedback?.rating, locale)}`,
+    ...(feedbackNoteDraft === undefined
+      ? focusedFeedback?.note === undefined ? [] : [terminalSafe(focusedFeedback.note)]
+      : [`${tuiMessage(locale, 'feedback.note.placeholder')}: ${terminalSafe(feedbackNoteDraft.text)}█`]),
+    ...(focusedFeedbackMutation?.status === 'pending'
+      ? [tuiMessage(locale, 'feedback.status.pending')]
+      : focusedFeedbackMutation?.status === 'success'
+        ? [tuiMessage(locale, 'feedback.status.success')]
+        : focusedFeedbackMutation?.status === 'error'
+          ? [tuiMessageFeedbackErrorMessage(focusedFeedbackMutation.errorCode, locale)]
+          : []),
+  ]
+  const transcriptDetailLines = [...transcriptDetailBaseLines, ...feedbackDetailLines]
+  useEffect(() => { setDeliverableSelection(0) }, [focusedTarget?.key])
   const tasksHeight = todoPanelRows(currentTodo)
   const approvalLines = interaction?.kind === 'approval'
     ? approvalPresentationLines(interaction.request.presentation)
@@ -911,6 +1558,10 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const visibleApprovalOffset = Math.min(approvalOffset, Math.max(0, approvalLines.length - approvalBodyRows))
   const workspace = props.agent.session.header.cwd
   const columns = stdout.columns || 80
+  const goalPlanSurface = props.view.kind === 'root'
+    ? projectTuiGoalPlan(goalProjection, planProjection)
+    : undefined
+  const compactGoalPlan = columns < 76
   const resumeCandidates = filterTuiResumeCandidates(
     resumeDialog?.candidates ?? [],
     resumeScope,
@@ -935,6 +1586,155 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const selectedResumeCandidate = resumeCandidates[effectiveResumeSelection]
   const narrowResume = columns < 100
   const resumePreviewVisible = !narrowResume || resumeView === 'preview'
+  const sessionManagerProjection = projectTuiSessionManager(
+    sessionManager?.candidates ?? [],
+    sessionManager?.workspaces ?? [],
+    sessionManager?.archivedSessionIds ?? [],
+    {
+      query: sessionManagerQuery,
+      archive: sessionManagerArchive,
+      scope: sessionManagerScope,
+      sort: sessionManagerSort,
+      groupByWorkspace: sessionManagerGroup,
+      ...(sessionManager === undefined ? {} : { currentSessionId: sessionManager.currentSessionId }),
+    },
+  )
+  const normalizedManagerQuery = sessionManagerQuery.normalize('NFKC').trim().toLocaleLowerCase()
+  const sessionManagerWorkspaces = normalizedManagerQuery === ''
+    ? sessionManagerProjection.workspaces
+    : sessionManagerProjection.workspaces.filter(row => [row.title, row.path, row.id].some(value =>
+      value.normalize('NFKC').toLocaleLowerCase().includes(normalizedManagerQuery)))
+  const sessionManagerItems: readonly (TuiSessionManagerRow | TuiWorkspaceManagerRow)[] = sessionManagerTab === 'sessions'
+    ? sessionManagerProjection.sessions
+    : sessionManagerWorkspaces
+  const effectiveSessionManagerSelection = sessionManagerItems.length === 0
+    ? 0
+    : Math.min(sessionManagerSelection, sessionManagerItems.length - 1)
+  const selectedManagedSession = sessionManagerTab === 'sessions'
+    ? sessionManagerProjection.sessions[effectiveSessionManagerSelection]
+    : undefined
+  const selectedManagedWorkspace = sessionManagerTab === 'workspaces'
+    ? sessionManagerWorkspaces[effectiveSessionManagerSelection]
+    : undefined
+  const canToggleManagedSessionArchive = selectedManagedSession !== undefined
+    && !selectedManagedSession.current
+    && (!selectedManagedSession.archived || props.canUnarchiveManagedSessions === true)
+  const sessionDetailFooterKey = selectedManagedSession?.archived
+    ? props.canUnarchiveManagedSessions === true
+      ? 'sessions.footer.sessionDetailArchived'
+      : 'sessions.footer.sessionDetailArchivedReadOnly'
+    : 'sessions.footer.sessionDetailActive'
+  const sessionManagerRowHeight = 3
+  const sessionManagerVisibleCount = Math.max(1, Math.floor((terminalRows - 10) / sessionManagerRowHeight))
+  const sessionManagerVisibleStart = Math.min(
+    Math.max(0, effectiveSessionManagerSelection - Math.floor(sessionManagerVisibleCount / 2)),
+    Math.max(0, sessionManagerItems.length - sessionManagerVisibleCount),
+  )
+  const visibleSessionManagerItems = sessionManagerItems.slice(
+    sessionManagerVisibleStart, sessionManagerVisibleStart + sessionManagerVisibleCount,
+  )
+  const directoryBrowserPage: TuiDirectoryBrowserPage | undefined = directoryBrowser?.listing === undefined
+    ? undefined
+    : projectTuiDirectoryBrowser(directoryBrowser.listing, directoryBrowser.showHidden)
+  const effectiveDirectorySelection = directoryBrowserPage === undefined || directoryBrowserPage.rows.length === 0
+    ? 0
+    : Math.min(directoryBrowser?.selection ?? 0, directoryBrowserPage.rows.length - 1)
+  const directoryVisibleCount = Math.max(1, terminalRows - 9)
+  const directoryVisibleStart = directoryBrowserPage === undefined
+    ? 0
+    : Math.min(
+      Math.max(0, effectiveDirectorySelection - Math.floor(directoryVisibleCount / 2)),
+      Math.max(0, directoryBrowserPage.rows.length - directoryVisibleCount),
+    )
+  const visibleDirectoryRows = directoryBrowserPage?.rows.slice(
+    directoryVisibleStart, directoryVisibleStart + directoryVisibleCount,
+  ) ?? Object.freeze([])
+  const presetManagerRows = presetManager?.rows ?? []
+  const effectivePresetManagerSelection = presetManagerRows.length === 0
+    ? 0
+    : Math.min(presetManagerSelection, presetManagerRows.length - 1)
+  const selectedPresetManagerRow = presetManagerRows[effectivePresetManagerSelection]
+  const currentPresetPermission = permissions?.options.find(option => option.value === permissions.currentValue)?.name
+    ?? permissions?.currentValue
+  const currentPresetModel = modelSelection === undefined
+    ? undefined
+    : `${modelSelection.provider}/${modelSelection.model}`
+  const presetManagerRowHeight = 2
+  const presetManagerVisibleCount = Math.max(1, Math.floor((terminalRows - 10) / presetManagerRowHeight))
+  const presetManagerVisibleStart = Math.min(
+    Math.max(0, effectivePresetManagerSelection - Math.floor(presetManagerVisibleCount / 2)),
+    Math.max(0, presetManagerRows.length - presetManagerVisibleCount),
+  )
+  const visiblePresetManagerItems = presetManagerRows.slice(
+    presetManagerVisibleStart, presetManagerVisibleStart + presetManagerVisibleCount,
+  )
+
+  const trajectoryEntries = useMemo(() => visibleTuiTrajectoryEntries(
+    trajectory?.entries ?? [], trajectoryQuery, trajectoryCollapsedTurns, trajectoryCollapsedSteps,
+  ), [trajectory?.entries, trajectoryQuery, trajectoryCollapsedTurns, trajectoryCollapsedSteps])
+  const previousTrajectoryEntries = useRef<readonly TuiTrajectoryEntry[]>(trajectoryEntries)
+  const trajectoryDetail = trajectoryDetailKey === undefined
+    ? undefined
+    : trajectory?.entries.find(entry => entry.key === trajectoryDetailKey)
+  useEffect(() => {
+    if (trajectoryDetailKey !== undefined && trajectory !== undefined && trajectoryDetail === undefined) {
+      setTrajectoryDetailKey(undefined)
+    }
+  }, [trajectory?.firstSeq, trajectoryDetail, trajectoryDetailKey])
+  const effectiveTrajectorySelection = trajectoryEntries.length === 0
+    ? 0
+    : Math.min(trajectorySelection, trajectoryEntries.length - 1)
+  const trajectoryRowHeight = 2
+  const trajectoryVisibleCount = Math.max(1, Math.floor((terminalRows - 10) / trajectoryRowHeight))
+  const trajectoryVisibleStart = Math.min(
+    Math.max(0, effectiveTrajectorySelection - Math.floor(trajectoryVisibleCount / 2)),
+    Math.max(0, trajectoryEntries.length - trajectoryVisibleCount),
+  )
+  const visibleTrajectoryItems = trajectoryEntries.slice(
+    trajectoryVisibleStart, trajectoryVisibleStart + trajectoryVisibleCount,
+  )
+  const trajectoryTimeline = useMemo(() => createTuiTrajectoryTimelineScale(
+    trajectoryEntries, Math.max(6, Math.min(16, Math.floor(columns / 8))),
+  ), [columns, trajectoryEntries])
+  useEffect(() => {
+    const previous = previousTrajectoryEntries.current
+    setTrajectorySelection(current => reconcileTuiTrajectorySelection(
+      previous,
+      trajectoryEntries,
+      current,
+      trajectoryTailFollow && trajectoryDetail === undefined && trajectoryQuery === '',
+    ))
+    previousTrajectoryEntries.current = trajectoryEntries
+  }, [trajectory?.firstSeq, trajectory?.lastSeq, trajectoryDetail, trajectoryEntries, trajectoryQuery, trajectoryTailFollow])
+
+  const hostPluginRows = hostPluginCenter === undefined ? []
+    : hostPluginTab === 'plugins'
+      ? filterTuiHostPlugins(hostPluginCenter.plugins, hostPluginFilter, hostPluginQuery)
+      : []
+  const hostSettingsRows = hostPluginCenter?.settingsNamespaces ?? []
+  const hostSettingsDetail = hostSettingsDetailNs === undefined
+    ? undefined
+    : hostSettingsRows.find(row => String(row.ns) === hostSettingsDetailNs)
+  const hostSettingsFields = hostSettingsDetail?.fields ?? []
+  const effectiveHostSettingsFieldSelection = hostSettingsFields.length === 0
+    ? 0
+    : Math.min(hostSettingsFieldSelection, hostSettingsFields.length - 1)
+  const selectedHostSettingsField = hostSettingsFields[effectiveHostSettingsFieldSelection]
+  const hostSettingsCanEdit = hostPluginCenter?.settingsWritable === true && hostSettingsFields.length > 0
+  const hostPluginItems = hostPluginTab === 'plugins' ? hostPluginRows : hostSettingsRows
+  const effectiveHostPluginSelection = hostPluginItems.length === 0
+    ? 0
+    : Math.min(hostPluginSelection, hostPluginItems.length - 1)
+  const hostPluginRowHeight = 2
+  const hostPluginVisibleCount = Math.max(1, Math.floor((terminalRows - 10) / hostPluginRowHeight))
+  const hostPluginVisibleStart = Math.min(
+    Math.max(0, effectiveHostPluginSelection - Math.floor(hostPluginVisibleCount / 2)),
+    Math.max(0, hostPluginItems.length - hostPluginVisibleCount),
+  )
+  const visibleHostPluginItems = hostPluginItems.slice(
+    hostPluginVisibleStart, hostPluginVisibleStart + hostPluginVisibleCount,
+  )
+
   const rewindCandidates = rewindDialog?.candidates ?? []
   const effectiveRewindSelection = rewindCandidates.length === 0
     ? 0
@@ -972,11 +1772,157 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     model,
     reasoningEffort === undefined ? undefined : tuiMessage(locale, 'startup.thinking', { effort: reasoningEffort }),
   ].filter(value => value !== undefined && value !== '').join(' · ')
+  const providerCenterVisible = providerCenter !== undefined && interaction === undefined
+    && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
+    && diagnostics === undefined && loadedContext === undefined && rewindDialog === undefined
+    && sessionExportDialog === undefined && pluginHubDialog === undefined && !goalPlanOpen
+  const providerRows = providerCenter?.snapshot?.providers ?? []
+  const providerCreationTarget = providerCenter?.snapshot?.creationTargets.find(target => target.writable)
+  const effectiveProviderSelection = providerRows.length === 0
+    ? 0
+    : Math.min(providerSelection, providerRows.length - 1)
+  const selectedProvider = providerRows[effectiveProviderSelection]
+  const providerRowHeight = 2
+  const providerVisibleCount = Math.max(1, Math.floor((terminalRows - 5) / providerRowHeight))
+  const providerVisibleStart = Math.min(
+    Math.max(0, effectiveProviderSelection - Math.floor(providerVisibleCount / 2)),
+    Math.max(0, providerRows.length - providerVisibleCount),
+  )
+  const visibleProviderRows = providerRows.slice(
+    providerVisibleStart, providerVisibleStart + providerVisibleCount,
+  )
+  const selectedProviderDetailLines = selectedProvider === undefined
+    ? Object.freeze([]) as readonly string[]
+    : providerDetailLines(selectedProvider, locale).flatMap(line => terminalWrappedLines(
+      line, Math.max(1, columns - 6),
+    ))
+  const providerDetailBodyRows = Math.max(1, terminalRows - 6)
+  const providerDetailWindow = tuiScrollableWindow(
+    selectedProviderDetailLines.length, providerDetailOffset, providerDetailBodyRows,
+  )
+  const providerCandidateVisibleCount = Math.max(1, terminalRows - 7)
+  const providerCandidateStart = providerWizard?.step !== 'picker' || providerWizard.candidates.length === 0
+    ? 0
+    : Math.min(
+      Math.max(0, providerWizard.candidateIndex - Math.floor(providerCandidateVisibleCount / 2)),
+      Math.max(0, providerWizard.candidates.length - providerCandidateVisibleCount),
+    )
+  const visibleProviderCandidates = providerWizard?.step === 'picker'
+    ? providerWizard.candidates.slice(
+      providerCandidateStart, providerCandidateStart + providerCandidateVisibleCount,
+    )
+    : Object.freeze([]) as readonly TuiCustomProviderModelDraft[]
+  const providerCanAuthenticate = selectedProvider?.authentication === 'sign-in-required'
+    && selectedProvider.authenticationMethods.length > 0
+  const providerCanStoreKey = selectedProvider?.settings?.credential?.writable === true
+    && (selectedProvider.settings.credentialReferenceStored || selectedProvider.settings.writable)
+  const providerCanEditProfile = selectedProvider?.settings?.writable === true
+    && providerProfileFields(selectedProvider).length > 0
+  const providerCanRemove = selectedProvider !== undefined && canRemoveTuiProvider(selectedProvider)
+  const providerCanLogout = selectedProvider?.active === true
+    && selectedProvider.authentication === 'configured' && selectedProvider.canLogout
+  const providerDetailPointerActions = (() => {
+    if (providerProfileEditor !== undefined) return Object.freeze([
+      { id: 'provider.profileSave' as const, label: tuiMessage(locale, 'provider.action.save') },
+      { id: 'provider.close' as const, label: tuiMessage(locale, 'provider.action.back') },
+    ])
+    if (providerEndpointDraft !== undefined) return Object.freeze([
+      { id: 'provider.confirm' as const, label: tuiMessage(locale, 'provider.action.confirm') },
+      { id: 'provider.endpointReset' as const, label: tuiMessage(locale, 'provider.action.reset') },
+      { id: 'provider.close' as const, label: tuiMessage(locale, 'provider.action.back') },
+    ])
+    if (providerDeleteConfirmation !== undefined || providerLogoutConfirmation !== undefined
+      || providerSecretDraft !== undefined) return Object.freeze([
+      { id: 'provider.confirm' as const, label: tuiMessage(locale, 'provider.action.confirm') },
+      { id: 'provider.close' as const, label: tuiMessage(locale, 'provider.action.back') },
+    ])
+    return Object.freeze([
+      ...(providerCanEditProfile
+        ? [{ id: 'provider.editProfile' as const, label: tuiMessage(locale, 'provider.action.profile') }] : []),
+      ...(selectedProvider?.settings?.writable === true
+        ? [{ id: 'provider.editEndpoint' as const, label: tuiMessage(locale, 'provider.action.endpoint') }] : []),
+      ...(providerCanStoreKey
+        ? [{ id: 'provider.editApiKey' as const, label: tuiMessage(locale, 'provider.action.key') }] : []),
+      ...(providerCanAuthenticate
+        ? [{ id: 'provider.authenticate' as const, label: tuiMessage(locale, 'provider.action.login') }] : []),
+      ...(providerCanLogout
+        ? [{ id: 'provider.logout' as const, label: tuiMessage(locale, 'provider.action.logout') }] : []),
+      ...(providerCanRemove
+        ? [{ id: 'provider.remove' as const, label: tuiMessage(locale, 'provider.action.remove') }] : []),
+      { id: 'provider.refresh' as const, label: tuiMessage(locale, 'provider.action.refresh') },
+      { id: 'provider.close' as const, label: tuiMessage(locale, 'provider.action.back') },
+    ])
+  })()
+  const providerDetailActionHint = providerDetailPointerActions.map(action => action.label).join(' · ')
+  const providerProfilePointerFields = (() => {
+    if (providerProfileEditor === undefined) return Object.freeze([])
+    const row = providerRows.find(candidate => candidate.id === providerProfileEditor.providerId)
+    if (row === undefined) return Object.freeze([])
+    let top = 5
+    return Object.freeze(providerProfileFields(row).map((field) => {
+      const height = field === 'models'
+        ? Math.max(1, terminalWrappedLines(tuiMessage(locale, 'provider.profile.models', {
+          value: `${terminalSafe(providerProfileEditor.modelsText || tuiMessage(locale, 'provider.profile.modelsEmpty'))}█`,
+        }), Math.max(1, columns - 8)).length)
+        : 1
+      const result = Object.freeze({ field, top, bottom: top + height - 1 })
+      top += height
+      return result
+    }))
+  })()
+  const queue = readTuiQueue(props.agent)
+  const effectiveQueueSelection = queue.items.length === 0
+    ? 0
+    : Math.min(queueSelection, queue.items.length - 1)
+  const selectedQueueItem = queue.items[effectiveQueueSelection]
+  const queueVisibleCount = Math.max(1, terminalRows - 7)
+  const queueVisibleStart = Math.min(
+    Math.max(0, effectiveQueueSelection - Math.floor(queueVisibleCount / 2)),
+    Math.max(0, queue.items.length - queueVisibleCount),
+  )
+  const visibleQueueItems = queue.items.slice(queueVisibleStart, queueVisibleStart + queueVisibleCount)
+  const selectedQueueDetailLines = selectedQueueItem === undefined ? Object.freeze([]) as readonly string[] : [
+    tuiMessage(locale, 'queue.detail.lane', {
+      lane: tuiMessage(locale, selectedQueueItem.lane === 'next-step' ? 'queue.lane.step' : 'queue.lane.turn'),
+    }),
+    tuiMessage(locale, 'queue.detail.source', { source: selectedQueueItem.source }),
+    tuiMessage(locale, 'queue.detail.attachments', { count: selectedQueueItem.attachmentCount }),
+    ...(queue.canMoveLane || queue.canSendEarly
+      ? []
+      : [tuiMessage(locale, 'queue.detail.ownerBoundary')]),
+    '',
+    ...terminalWrappedLines(selectedQueueItem.text, Math.max(1, columns - 6)),
+  ]
+  const queueDetailBodyRows = Math.max(1, terminalRows - 6)
+  const queueDetailWindow = tuiScrollableWindow(
+    selectedQueueDetailLines.length, queueDetailOffset, queueDetailBodyRows,
+  )
+  useEffect(() => {
+    if (queue.items.length === 0) {
+      setQueueOpen(false)
+      setQueueSelection(0)
+      setQueueDetail(false)
+      setQueueEditDraft(undefined)
+      setQueueDeleteConfirmation(false)
+      setQueueError('')
+      return
+    }
+    setQueueSelection(previous => Math.min(previous, queue.items.length - 1))
+  }, [queue.revision, queue.items.length])
+  useEffect(() => {
+    if (!queueOpen) return
+    setQueueClock(Date.now())
+    const timer = setInterval(() => { setQueueClock(Date.now()) }, 1_000)
+    return () => { clearInterval(timer) }
+  }, [queueOpen])
   const startupSurface = props.view.kind === 'root'
     && rows.length === 0 && currentTodo === undefined && agentStatus === 'idle' && !busy
     && interaction === undefined && !helpOpen && diagnostics === undefined && loadedContext === undefined
-    && resumeDialog === undefined && freshSessionDialog === undefined
+    && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
     && rewindDialog === undefined && sessionExportDialog === undefined && pluginHubDialog === undefined
+    && providerCenter === undefined && !queueOpen
     && !workOpen && work.items.length === 0
     && focus === undefined && transcriptSearch === undefined && historySearch === undefined
     && footerSelection === undefined && footerDetail === undefined && stashedDraft === undefined
@@ -998,10 +1944,22 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       ? createComposerState(transcriptSearch.query)
       : historySearch === undefined ? composer : createComposerState(historySearch.query)
   const composerLayout = layoutComposer(editorComposer, composerWidth)
-  const attachmentLine = sessionExportDialog?.phase === 'selecting'
-    ? undefined
-    : composerAttachmentLine(composer.attachments)
-  const composerRows = composerLayout.lines.length + (attachmentLine === undefined ? 0 : 1)
+  const attachmentRail = projectAttachmentRail(sessionExportDialog?.phase === 'selecting'
+    ? undefined : composer.attachments)
+  const attachmentRailView = attachmentRail.entries.map((entry, index) => <Box
+    key={entry.attachmentId}
+    justifyContent="space-between"
+    overflow="hidden"
+  >
+    <Text wrap="truncate-end" {...tuiTextStyle(theme.tokens.accent)}>
+      {index + 1}. {terminalSafe(formatRailEntry(entry))}
+    </Text>
+    <Text {...tuiTextStyle(theme.tokens.success)}>
+      {' '}{tuiMessage(locale, 'attachment.rail.ready')}
+      <Text {...tuiTextStyle(theme.tokens.error)}> [×]</Text>
+    </Text>
+  </Box>)
+  const composerRows = composerLayout.lines.length + attachmentRail.count
   const hasComposerDraft = composer.text.trim() !== '' || (composer.attachments?.length ?? 0) > 0
   const suggestionLimit = Math.max(1, Math.min(6, stdout.rows - 12))
   const question = interaction?.kind === 'question'
@@ -1014,42 +1972,46 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     Math.max(0, questionOptions.length - optionLimit),
   )
   const visibleOptions = questionOptions.slice(optionStart, optionStart + optionLimit)
-  const pathQuery = historySearch === undefined && transcriptSearch === undefined
+  const referenceQuery = historySearch === undefined && transcriptSearch === undefined
     && diagnostics === undefined && loadedContext === undefined && rewindDialog === undefined
-    && sessionExportDialog === undefined && pluginHubDialog === undefined
-    ? pathSuggestionQuery(composer.text, composer.cursor)
+    && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
+    && sessionExportDialog === undefined && pluginHubDialog === undefined && providerCenter === undefined
+    && !helpOpen && !workOpen && !queueOpen && !goalPlanOpen
+    ? tuiReferenceQuery(composer.text, composer.cursor)
     : undefined
-  const pathQueryText = pathQuery?.query
-  const pathKey = pathQuery === undefined
+  const referenceQueryText = referenceQuery?.query
+  const referenceKey = referenceQuery === undefined
     ? undefined
-    : `${props.view.id}:${pathQuery.queryStart}:${pathQuery.queryEnd}:${pathQuery.query}`
+    : `${props.view.id}:${referenceQuery.queryStart}:${referenceQuery.queryEnd}:${referenceQuery.quoted}:${referenceQuery.query}`
   useEffect(() => {
-    if (pathQueryText === undefined || pathKey === undefined) {
-      setPathResolution(undefined)
+    if (referenceQueryText === undefined || referenceKey === undefined) {
+      setReferenceResolution(undefined)
       return
     }
     const controller = new AbortController()
-    const key = pathKey
-    setPathResolution({ key })
-    void completePathsRef.current(pathQueryText, controller.signal).then((result) => {
-      setPathResolution(previous => previous?.key === key ? { key, result } : previous)
+    const key = referenceKey
+    setReferenceResolution({ key })
+    void completeReferencesRef.current(referenceQueryText, controller.signal).then((result) => {
+      setReferenceResolution(previous => previous?.key === key ? { key, result } : previous)
     }).catch(() => {
-      if (!controller.signal.aborted) setPathResolution(previous => previous?.key === key ? {
-        key, result: { entries: [], truncated: false },
+      if (!controller.signal.aborted) setReferenceResolution(previous => previous?.key === key ? {
+        key, result: { files: [], sessions: [], errors: ['file', 'session'] },
       } : previous)
     })
     return () => { controller.abort() }
-  }, [pathKey, pathQueryText, props.view.id])
-  const pathResult = pathResolution?.key === pathKey ? pathResolution?.result : undefined
-  const pathSuggestion = pathQuery === undefined
+  }, [referenceKey, referenceQueryText, props.view.id])
+  const referenceResult = referenceResolution?.key === referenceKey ? referenceResolution?.result : undefined
+  const referenceSuggestion = referenceQuery === undefined
     ? undefined
-    : pathSuggestionState(pathQuery, pathResult)
+    : tuiReferenceSuggestionState(referenceQuery, referenceResult, locale)
   const baseSuggestion = historySearch === undefined && transcriptSearch === undefined
     && footerSelection === undefined && footerDetail === undefined
-    && !workOpen
+    && !workOpen && !queueOpen && !goalPlanOpen
     && diagnostics === undefined && loadedContext === undefined && rewindDialog === undefined
-    && sessionExportDialog === undefined && pluginHubDialog === undefined
-    ? pathSuggestion ?? commandSuggestionState(composer.text, composer.cursor, props.commands, locale)
+    && sessionExportDialog === undefined && pluginHubDialog === undefined && providerCenter === undefined
+    && sessionManager === undefined && presetManager === undefined && hostPluginCenter === undefined && trajectory === undefined
+    ? referenceSuggestion ?? commandSuggestionState(composer.text, composer.cursor, props.commands, locale)
     : undefined
   const suggestionKey = baseSuggestion === undefined ? undefined
     : `${baseSuggestion.kind}:${baseSuggestion.queryStart}:${baseSuggestion.queryEnd}:${composer.text.slice(
@@ -1062,21 +2024,28 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const effectiveWorkSelection = work.items.length === 0 ? 0 : Math.min(workSelection, work.items.length - 1)
   const selectedWorkItem = work.items[effectiveWorkSelection]
   const helpVisible = helpOpen && interaction === undefined
-    && resumeDialog === undefined && freshSessionDialog === undefined
+    && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
     && diagnostics === undefined && loadedContext === undefined && rewindDialog === undefined
-    && sessionExportDialog === undefined && pluginHubDialog === undefined
+    && sessionExportDialog === undefined && pluginHubDialog === undefined && providerCenter === undefined
+    && !queueOpen && !goalPlanOpen
   const doctorVisible = diagnostics !== undefined && interaction === undefined
-    && resumeDialog === undefined && freshSessionDialog === undefined
+    && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
     && rewindDialog === undefined && sessionExportDialog === undefined && pluginHubDialog === undefined
+    && providerCenter === undefined && !queueOpen && !goalPlanOpen
   const loadedContextVisible = loadedContext !== undefined && interaction === undefined
-    && resumeDialog === undefined && freshSessionDialog === undefined
+    && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
     && diagnostics === undefined && rewindDialog === undefined
-    && sessionExportDialog === undefined && pluginHubDialog === undefined
+    && sessionExportDialog === undefined && pluginHubDialog === undefined && providerCenter === undefined
+    && !queueOpen && !goalPlanOpen
   const inputContext = resolveTuiInteractionContext({
     approval: interaction?.kind === 'approval',
-    dialog: resumeDialog !== undefined || freshSessionDialog !== undefined
+    dialog: resumeDialog !== undefined || sessionManager !== undefined || freshSessionDialog !== undefined
       || rewindDialog !== undefined || sessionExportDialog !== undefined
-      || helpVisible || doctorVisible || loadedContextVisible || interaction?.kind === 'question',
+      || helpVisible || doctorVisible || loadedContextVisible || providerCenterVisible || queueOpen || goalPlanOpen
+      || presetManager !== undefined || hostPluginCenter !== undefined || trajectory !== undefined || interaction?.kind === 'question',
     pluginHub: pluginHubDialog !== undefined,
     work: workOpen,
     detail: focus?.mode === 'detail' || footerDetail !== undefined,
@@ -1103,11 +2072,19 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     && !helpVisible
     && !doctorVisible
     && !loadedContextVisible
+    && !providerCenterVisible
+    && !queueOpen
+    && !goalPlanOpen
     && resumeDialog === undefined
+    && sessionManager === undefined
+    && presetManager === undefined
+    && hostPluginCenter === undefined
+    && trajectory === undefined
     && freshSessionDialog === undefined
     && rewindDialog === undefined
     && sessionExportDialog === undefined
     && pluginHubDialog === undefined
+    && providerCenter === undefined
   const helpDescriptors = effectiveTuiInteractionDescriptors({
     modelPicker: props.commands.some(command => command.name === 'models'),
     resumePicker: props.commands.some(command => command.name === 'resume'),
@@ -1218,24 +2195,150 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const pluginHubNextCursor = pluginHubDialog?.view === 'discovery'
     ? pluginHubDialog.discoveryPage?.nextCursor
     : pluginHubDialog?.page?.nextCursor
+  const pluginHubFooterLine = pluginHubDialog === undefined
+    ? ''
+    : pluginHubDialog.phase === 'handoff'
+      ? tuiMessage(locale, 'plugin.footer.handoff')
+      : pluginHubDialog.discoveryDetail !== undefined
+        ? tuiMessage(locale, 'plugin.footer.discoveryDetail')
+        : pluginHubDialog.profileMutations === false && pluginHubDetailOpen && pluginHubDialog.detail !== undefined
+          ? pluginHubDialog.detail.latestVersion?.installable === true
+            ? tuiMessage(locale, 'plugin.footer.install', {
+              command: `dsh plugin --profile tui add --save-exact ${pluginHubDialog.detail.packageName}@${pluginHubDialog.detail.latestVersion.version}`,
+            })
+            : tuiMessage(locale, 'plugin.footer.notInstallable')
+          : pluginHubDialog.profileMutations === false && pluginHubDialog.view === 'installed'
+            ? pluginHubInstalled === undefined
+              ? tuiMessage(locale, 'plugin.footer.installed.external')
+              : tuiMessage(locale, 'plugin.footer.remove', {
+                command: `dsh plugin --profile tui remove ${pluginHubInstalled.packageName}`,
+              })
+            : pluginHubPlanOpen
+              ? tuiMessage(locale, 'plugin.footer.confirm')
+              : pluginHubDetailOpen && pluginHubDialog.detail !== undefined
+                ? pluginHubDialog.detail.latestVersion?.installable === true
+                  ? tuiMessage(locale, 'plugin.footer.detail.install')
+                  : tuiMessage(locale, 'plugin.footer.detail.unavailable')
+                : pluginHubDialog.view === 'installed'
+                  ? tuiMessage(locale, 'plugin.footer.installed')
+                  : pluginHubDialog.view === 'discovery'
+                    ? tuiMessage(locale, 'plugin.footer.discovery')
+                    : tuiMessage(locale, pluginHubHasCategories
+                      ? 'plugin.footer.discover'
+                      : 'plugin.footer.discover.noCategories')
+  const pluginHubFooterActions: readonly TuiPointerFooterAction[] = (() => {
+    if (pluginHubDialog === undefined || pluginHubDialog.phase === 'handoff') return Object.freeze([])
+    const labels = pluginHubFooterLine.split(' · ')
+    if (pluginHubDialog.phase === 'error') return Object.freeze([
+      { action: { id: 'pluginHub.refresh' as const }, label: labels.at(-2) ?? '' },
+      { action: { id: 'pluginHub.close' as const }, label: labels.at(-1) ?? '' },
+    ])
+    if (pluginHubDialog.phase !== 'browse' && pluginHubDialog.phase !== 'detail'
+      && pluginHubDialog.phase !== 'confirm') return Object.freeze([
+      { action: { id: 'pluginHub.close' as const }, label: labels.at(-1) ?? '' },
+    ])
+    if (pluginHubDialog.discoveryDetail !== undefined) return Object.freeze([
+      { action: { id: 'pluginHub.openRepository' as const }, label: labels[0] ?? '' },
+      { action: { id: 'pluginHub.close' as const }, label: labels.at(-1) ?? '' },
+    ])
+    if (pluginHubDialog.profileMutations === false && pluginHubDetailOpen) return Object.freeze([
+      { action: { id: 'pluginHub.close' as const }, label: labels.at(-1) ?? '' },
+    ])
+    if (pluginHubDialog.profileMutations === false && pluginHubDialog.view === 'installed') {
+      return Object.freeze([
+        { action: { id: 'pluginHub.toggleView' as const, targetView: 'discover' as const }, label: labels[pluginHubInstalled === undefined ? 0 : 1] ?? '' },
+        ...(pluginHubInstalled === undefined
+          ? [{ action: { id: 'pluginHub.refresh' as const }, label: labels[2] ?? '' }] : []),
+        { action: { id: 'pluginHub.close' as const }, label: labels.at(-1) ?? '' },
+      ])
+    }
+    if (pluginHubPlanOpen) return Object.freeze([
+      { action: { id: 'pluginHub.accept' as const }, label: labels[0] ?? '' },
+      { action: { id: 'pluginHub.close' as const }, label: labels.at(-1) ?? '' },
+    ])
+    if (pluginHubDetailOpen) return Object.freeze([
+      ...(pluginHubDialog.detail?.latestVersion?.installable === true
+        ? [{ action: { id: 'pluginHub.accept' as const }, label: labels[0] ?? '' }] : []),
+      { action: { id: 'pluginHub.toggleView' as const, targetView: 'installed' as const }, label: labels[2] ?? '' },
+      { action: { id: 'pluginHub.close' as const }, label: labels.at(-1) ?? '' },
+    ])
+    if (pluginHubDialog.view === 'installed') return Object.freeze([
+      { action: { id: 'pluginHub.toggleView' as const, targetView: 'discover' as const }, label: labels[0] ?? '' },
+      ...(pluginHubInstalled === undefined
+        ? [] : [{ action: { id: 'pluginHub.accept' as const }, label: labels[2] ?? '' }]),
+      { action: { id: 'pluginHub.refresh' as const }, label: labels[3] ?? '' },
+      { action: { id: 'pluginHub.close' as const }, label: labels[4] ?? '' },
+    ])
+    if (pluginHubDialog.view === 'discovery') return Object.freeze([
+      { action: { id: 'pluginHub.toggleView' as const, targetView: 'installed' as const }, label: labels[0] ?? '' },
+      { action: { id: 'pluginHub.sort' as const }, label: labels[1] ?? '' },
+      ...(pluginHubSelectedDiscovery === undefined ? [] : [
+        { action: { id: 'pluginHub.accept' as const }, label: labels[3] ?? '' },
+        { action: { id: 'pluginHub.openRepository' as const }, label: labels[4] ?? '' },
+      ]),
+      { action: { id: 'pluginHub.refresh' as const }, label: labels[5] ?? '' },
+      { action: { id: 'pluginHub.close' as const }, label: labels[6] ?? '' },
+    ])
+    const categoryOffset = pluginHubHasCategories ? 1 : 0
+    return Object.freeze([
+      { action: { id: 'pluginHub.toggleView' as const, targetView: 'discovery' as const }, label: labels[0] ?? '' },
+      { action: { id: 'pluginHub.installable' as const }, label: labels[1] ?? '' },
+      { action: { id: 'pluginHub.sort' as const }, label: labels[2] ?? '' },
+      ...(pluginHubHasCategories
+        ? [{ action: { id: 'pluginHub.category' as const }, label: labels[3] ?? '' }] : []),
+      ...(pluginHubSelected === undefined
+        ? [] : [{ action: { id: 'pluginHub.accept' as const }, label: labels[4 + categoryOffset] ?? '' }]),
+      { action: { id: 'pluginHub.refresh' as const }, label: labels[5 + categoryOffset] ?? '' },
+      { action: { id: 'pluginHub.close' as const }, label: labels[6 + categoryOffset] ?? '' },
+    ])
+  })()
   const pluginHubDetailPageSize = pluginHubBodyRows
+  const scrollingDialogFooterLine = `${tuiMessage(locale, 'common.updown')} · ${tuiMessage(locale, 'common.page')} · ${tuiMessage(locale, 'common.esc.close')}`
+  const helpFooterLine = tuiMessage(locale, 'footer.help')
+  const transcriptDetailFooterLine = tuiMessage(locale,
+    footerDetail !== undefined ? 'footer.detail' : 'footer.detail.close')
+  const workFooterLine = [
+    tuiMessage(locale, 'footer.work.title', {
+      position: work.items.length === 0 ? '0/0' : `${effectiveWorkSelection + 1}/${work.items.length}`,
+    }),
+    tuiMessage(locale, 'footer.work.select'),
+    ...(selectedWorkItem?.inspectable === true ? [tuiMessage(locale, 'footer.work.open')] : []),
+    ...(selectedWorkItem?.action === undefined || selectedWorkItem.action === 'none'
+      ? [] : [tuiMessage(locale, 'footer.work.stop')]),
+    tuiMessage(locale, 'common.esc.close'),
+  ].join(' · ')
   const helpHeight = helpVisible ? Math.min(Math.max(7, terminalRows - 6), 18) : 0
   const helpBodyRows = Math.max(1, helpHeight - 4)
   const visibleHelpOffset = Math.min(helpOffset, Math.max(0, helpLines.length - helpBodyRows))
   const visibleDetailHeight = helpVisible ? 0 : detailHeight
   const visibleTasksHeight = helpVisible || workOpen ? 0 : tasksHeight
   const suggestionRows = helpVisible || suggestion === undefined ? 0
-    : suggestion.status === 'loading' || suggestion.status === 'empty' ? 1
+    : suggestion.status === 'loading' || suggestion.status === 'empty' || suggestion.status === 'error' ? 1
       : visibleSuggestions.length
         + (suggestion.items.length > visibleSuggestions.length ? 1 : 0)
         + (suggestion.status === 'truncated' ? 1 : 0)
+        + (suggestion.error === undefined ? 0 : 1)
   const historySearchRows = helpVisible || historySearch === undefined ? 0 : 1
   const transcriptSearchRows = helpVisible || interaction !== undefined || transcriptSearch === undefined ? 0 : 1
   const stashRows = helpVisible || stashedDraft === undefined ? 0 : 1
+  const queueCardVisible = agentStatus === 'running' && queue.items.length > 0
+    && !queueOpen && !helpVisible && !workOpen && interaction === undefined
+    && rewindDialog === undefined && sessionExportDialog === undefined
+    && pluginHubDialog === undefined && providerCenter === undefined && !goalPlanOpen
+  const queueCardRows = queueCardVisible ? 1 : 0
+  const goalPlanRowVisible = goalPlanSurface !== undefined && !compactGoalPlan && !goalPlanOpen
+    && !helpVisible && !workOpen && interaction === undefined && !queueOpen
+    && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
+    && rewindDialog === undefined && sessionExportDialog === undefined
+    && pluginHubDialog === undefined && providerCenter === undefined
+  const visibleGoalPlanSurface = goalPlanRowVisible ? goalPlanSurface : undefined
+  const goalPlanRows = visibleGoalPlanSurface === undefined ? 0 : 1
   const transcriptRows = viewportRows(
     stdout,
     visibleDetailHeight + helpHeight + visibleTasksHeight + approvalHeight + (helpVisible ? -1 : composerRows - 1)
-      + suggestionRows + historySearchRows + transcriptSearchRows + stashRows,
+      + suggestionRows + historySearchRows + transcriptSearchRows + stashRows
+      + queueCardRows + goalPlanRows,
   )
   const transcriptColumns = Math.max(1, (stdout.columns || 80) - (focus === undefined ? 2 : 4))
   transcriptViewport.update(rows, transcriptColumns)
@@ -1245,7 +2348,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const transcriptContentRows = visible.length === 0
     ? 1
     : visible.reduce((total, entry) => total + tuiTranscriptWindowEntryRows(entry, transcriptColumns), 0)
-  const transcriptScreenMapLines = tuiTranscriptScreenMapLines(visible, transcriptColumns, workspace)
+  const transcriptScreenMapLines = tuiTranscriptScreenMapLines(visible, transcriptColumns, workspace, locale)
   const visibleTranscriptFingerprint = transcriptScreenMapLines.map(line => `${line.semanticBlockKey}\u0000${line.text}\u0000${line.gutter ?? ''}\u0000${line.selectable === false ? '0' : '1'}`).join('\u0001')
   const transcriptScreenMap = useMemo(() => {
     if (visible.length === 0) return undefined
@@ -1254,6 +2357,16 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       { columns: transcriptColumns + 3, maxRows: transcriptRows, bidi: 'visual' },
     )
   }, [columns, transcriptColumns, transcriptRows, visibleTranscriptFingerprint])
+  const inlineDeliverableReferences = visible.flatMap((entry) => {
+    if (entry.node.kind !== 'text' || entry.node.tone !== 'assistant' || entry.node.closing !== true) return []
+    const turn = entry.node.turn
+    const deliverables = rows.find(node => node.kind === 'deliverables' && node.turn === turn)
+    if (deliverables?.kind !== 'deliverables') return []
+    return tuiDeliverableInlineReferences(entry.node, deliverables).map(reference => Object.freeze({
+      ...reference,
+      semanticBlockKey: entry.node.key,
+    }))
+  })
   const transcriptScreenTopRow = Math.max(1, 1 + transcriptRows - transcriptContentRows)
   const tasksScreenMapLines = visibleTasksHeight === 0 || currentTodo === undefined
     ? [] : todoPanelScreenMapLines(currentTodo)
@@ -1282,6 +2395,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       ? projectTuiLatestSpeed(eventSnapshot, Date.now()) ?? projectTuiSettledSpeed(sessionStats)
       : undefined,
     work: work.summary,
+    goalPlan: compactGoalPlan ? goalPlanSurface : undefined,
     workspace,
     transcript: {
       startIndex: transcriptPage.startIndex,
@@ -1292,12 +2406,82 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     },
   }, locale)
   const mountedFooterItems = visibleTuiFooterItems(completeFooterItems, Math.max(1, columns - 2))
+  const queueCardRow = queueCardVisible ? Math.max(1, terminalRows - composerRows - 4) : undefined
+  const goalPlanRow = goalPlanRowVisible
+    ? Math.max(1, terminalRows - composerRows - 4 - queueCardRows)
+    : undefined
+  const goalPlanDialogActions = goalEditDraft !== undefined
+    ? [
+      { action: { id: 'goalPlan.accept' as const }, label: tuiMessage(locale, 'goalPlan.action.save') },
+      { action: { id: 'goalPlan.close' as const }, label: tuiMessage(locale, 'goalPlan.action.cancel') },
+    ]
+    : goalClearConfirmation
+      ? [
+        { action: { id: 'goalPlan.accept' as const }, label: tuiMessage(locale, 'goalPlan.action.confirm') },
+        { action: { id: 'goalPlan.close' as const }, label: tuiMessage(locale, 'goalPlan.action.cancel') },
+      ]
+      : [
+        ...goalPlanSurface?.goal === undefined ? [] : [{
+          action: { id: 'goalPlan.edit' as const }, label: tuiMessage(locale, 'goalPlan.action.edit'),
+        }],
+        ...goalPlanSurface?.goal?.phase === 'active' ? [{
+          action: { id: 'goalPlan.pause' as const }, label: tuiMessage(locale, 'goalPlan.action.pause'),
+        }] : [],
+        ...goalPlanSurface?.goal?.phase === 'paused' || goalPlanSurface?.goal?.phase === 'blocked' ? [{
+          action: { id: 'goalPlan.resume' as const }, label: tuiMessage(locale, 'goalPlan.action.resume'),
+        }] : [],
+        ...goalPlanSurface?.goal === undefined ? [] : [{
+          action: { id: 'goalPlan.clear' as const }, label: tuiMessage(locale, 'goalPlan.action.clear'),
+        }],
+        ...goalPlanSurface?.plan?.effective === true ? [{
+          action: { id: 'goalPlan.exitPlan' as const }, label: tuiMessage(locale, 'goalPlan.action.exitPlan'),
+        }] : [],
+        { action: { id: 'goalPlan.close' as const }, label: tuiMessage(locale, 'goalPlan.action.close') },
+      ]
+  const runningDeliveryHint = props.view.kind === 'root'
+    && agentStatus === 'running'
+    && hasComposerDraft
+    && interaction === undefined
+    && focus === undefined
+    && suggestion === undefined
+    ? tuiMessage(locale, 'status.running.delivery')
+    : undefined
+  // The global footer item row is pointer-owned only while those items are the
+  // text actually rendered on the last physical row. Notices and browse/search
+  // hints must never retain invisible model/permission hit targets.
+  const footerItemsPointerVisible = tuiFooterItemsOwnPointerRow({
+    workOpen,
+    footerDetail: footerDetail !== undefined,
+    footerSelection: footerSelection !== undefined,
+    notice: notice !== '',
+    externalNotice: externalNotice !== '',
+    runningDeliveryHint: runningDeliveryHint !== undefined,
+    rewindBrowsing: rewindDialog?.phase === 'browsing',
+    helpVisible,
+    transcriptSearch: transcriptSearch !== undefined,
+    historySearch: historySearch !== undefined,
+    focus: focus !== undefined,
+  })
   const pointerRegions: readonly TuiPointerRegion[] = (() => {
     if (extensionSnapshot.fullscreenScene !== undefined) {
       return Object.freeze([])
     }
     if (startupSurface) {
-      return tuiFooterPointerRegions(mountedFooterItems, columns, terminalRows, 'Composer')
+      const pointerStartupFrame = tuiStartupComposerFrame(
+        stdout, composerRows, suggestionRows, Math.max(0, startupGuidanceLines.length - 1),
+      )
+      return Object.freeze([
+        ...tuiAttachmentRailPointerRegions({
+          columns,
+          startRow: pointerStartupFrame.firstInputRow + composerLayout.lines.length,
+          count: attachmentRail.count,
+          left: pointerStartupFrame.leftColumn + 2,
+          right: pointerStartupFrame.leftColumn + pointerStartupFrame.width - 1,
+          context: 'Composer',
+        }),
+        ...(footerItemsPointerVisible
+          ? tuiFooterPointerRegions(mountedFooterItems, columns, terminalRows, 'Composer') : []),
+      ])
     }
     if (interaction?.kind === 'approval') {
       const hintStart = 2
@@ -1326,31 +2510,564 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       ).length)
       const questionBodyRows = 3 + questionTextRows + questionDetailRows
         + visibleOptions.length + (questionOptions.length > optionLimit ? 1 : 0)
-        + composerRows + (attachmentLine === undefined ? 0 : 1)
+        + composerRows
       const questionTop = terminalRows - 2 - questionBodyRows + 1
-      return tuiQuestionPointerRegions({
+      return Object.freeze([
+        ...tuiQuestionPointerRegions({
+          columns,
+          optionTop: questionTop + 2 + questionTextRows + questionDetailRows,
+          optionStart,
+          visibleCount: visibleOptions.length,
+          rowHeight: 1,
+          context: 'Dialog',
+        }),
+        ...tuiAttachmentRailPointerRegions({
+          columns,
+          startRow: questionTop + 2 + questionTextRows + questionDetailRows
+            + visibleOptions.length + (questionOptions.length > optionLimit ? 1 : 0)
+            + composerLayout.lines.length,
+          count: attachmentRail.count,
+          context: 'Dialog',
+        }),
+      ])
+    }
+    if (goalPlanOpen) {
+      return tuiGoalPlanDialogPointerRegions(columns, terminalRows, goalPlanDialogActions)
+    }
+    if (trajectory !== undefined) {
+      const trajectoryHeaderRows = trajectoryQuery !== '' || trajectorySearchEditing ? 4 : 3
+      const trajectoryFooterLabels = tuiMessage(locale, trajectoryDetail === undefined
+        ? 'trajectory.footer.list' : 'trajectory.footer.detail').split(' · ')
+      const footerActions: TuiPointerFooterAction[] = trajectoryDetail
+        ? [
+          { action: { id: 'trajectory.cycleTab' as const }, label: trajectoryFooterLabels[0] ?? '' },
+          { action: { id: 'trajectory.close' as const }, label: trajectoryFooterLabels[1] ?? '' },
+        ]
+        : [
+          { action: { id: 'trajectory.accept' as const }, label: trajectoryFooterLabels[0] ?? '' },
+          { action: { id: 'trajectory.fold' as const }, label: trajectoryFooterLabels[1] ?? '' },
+          { action: { id: 'trajectory.search' as const }, label: trajectoryFooterLabels[2] ?? '' },
+          { action: { id: 'trajectory.older' as const }, label: trajectoryFooterLabels[3] ?? '' },
+          { action: { id: 'trajectory.tail' as const }, label: trajectoryFooterLabels[4] ?? '' },
+          { action: { id: 'trajectory.close' as const }, label: trajectoryFooterLabels[5] ?? '' },
+        ]
+      return tuiTrajectoryPointerRegions({
         columns,
-        optionTop: questionTop + 2 + questionTextRows + questionDetailRows,
-        optionStart,
-        visibleCount: visibleOptions.length,
-        rowHeight: 1,
+        rows: terminalRows,
+        listVisible: trajectoryDetail === undefined,
+        visibleStart: trajectoryVisibleStart,
+        visibleCount: visibleTrajectoryItems.length,
+        rowHeight: trajectoryRowHeight,
+        listTop: 3 + trajectoryHeaderRows,
+        ...(trajectoryDetail === undefined ? {} : {
+          inspectorTabs: {
+            row: 5 + trajectoryHeaderRows,
+            left: 5,
+            labels: {
+              summary: tuiMessage(locale, 'trajectory.tab.summary'),
+              input: tuiMessage(locale, 'trajectory.tab.input'),
+              output: tuiMessage(locale, 'trajectory.tab.output'),
+              timing: tuiMessage(locale, 'trajectory.tab.timing'),
+            },
+          },
+        }),
+        footerActions,
+        footerLine: tuiMessage(locale, trajectoryDetail === undefined
+          ? 'trajectory.footer.list' : 'trajectory.footer.detail'),
+        context: 'Dialog',
+      })
+    }
+    if (hostPluginCenter !== undefined) {
+      const hostPluginQueryRows = hostPluginTab === 'plugins' && hostPluginQuery.length > 0 ? 3 : 0
+      const hostPluginSourceWarningRows = ((hostPluginTab === 'plugins'
+        && hostPluginCenter.inventoryState !== 'ready') || (hostPluginTab === 'settings'
+        && hostPluginCenter.settingsState !== 'ready'))
+        && hostPluginDetail === undefined && hostSettingsDetail === undefined ? 1 : 0
+      const hostFooterKey = hostSettingsDetail !== undefined
+        ? hostSettingsCanEdit ? 'hostPlugins.footer.settingsDetail' : 'hostPlugins.footer.settingsReadOnly'
+        : hostPluginDetail !== undefined ? 'hostPlugins.footer.detail'
+          : hostPluginTab === 'plugins' ? 'hostPlugins.footer.plugins' : 'hostPlugins.footer.settings'
+      const hostFooterLabels = tuiMessage(locale, hostFooterKey).split(' · ')
+      const footerActions: TuiPointerFooterAction[] = hostSettingsDetail !== undefined
+        ? hostSettingsCanEdit ? [
+          { action: { id: 'hostPlugins.edit' as const }, label: hostFooterLabels[0] ?? '' },
+          ...(selectedHostSettingsField?.kind === 'enum'
+            ? [{ action: { id: 'hostPlugins.cycle' as const }, label: hostFooterLabels[1] ?? '' }] : []),
+          { action: { id: 'hostPlugins.reset' as const }, label: hostFooterLabels[2] ?? '' },
+          { action: { id: 'hostPlugins.save' as const }, label: hostFooterLabels[3] ?? '' },
+          { action: { id: 'hostPlugins.discard' as const }, label: hostFooterLabels[4] ?? '' },
+          { action: { id: 'hostPlugins.close' as const }, label: hostFooterLabels[5] ?? '' },
+        ] : [{ action: { id: 'hostPlugins.close' as const }, label: hostFooterLabels.at(-1) ?? '' }]
+        : hostPluginDetail
+          ? [{ action: { id: 'hostPlugins.close' as const }, label: hostFooterLabels[0] ?? '' }]
+          : hostPluginTab === 'plugins' ? [
+            { action: { id: 'hostPlugins.accept' as const }, label: hostFooterLabels[0] ?? '' },
+            { action: { id: 'hostPlugins.filter' as const }, label: hostFooterLabels[1] ?? '' },
+            { action: { id: 'hostPlugins.refresh' as const }, label: hostFooterLabels[2] ?? '' },
+            { action: { id: 'hostPlugins.close' as const }, label: hostFooterLabels[3] ?? '' },
+          ] : [
+            { action: { id: 'hostPlugins.accept' as const }, label: hostFooterLabels[0] ?? '' },
+            { action: { id: 'hostPlugins.refresh' as const }, label: hostFooterLabels[1] ?? '' },
+            { action: { id: 'hostPlugins.close' as const }, label: hostFooterLabels[2] ?? '' },
+          ]
+      return tuiHostPluginCenterPointerRegions({
+        columns,
+        rows: terminalRows,
+        listVisible: hostPluginDetail === undefined && hostSettingsDetail === undefined,
+        visibleStart: hostPluginVisibleStart,
+        visibleCount: visibleHostPluginItems.length,
+        rowHeight: hostPluginRowHeight,
+        listTop: 6 + hostPluginQueryRows + hostPluginSourceWarningRows,
+        tabs: {
+          row: 4,
+          left: 3,
+          labels: {
+            plugins: tuiMessage(locale, 'hostPlugins.tab.plugins'),
+            settings: tuiMessage(locale, 'hostPlugins.tab.settings'),
+          },
+        },
+        ...(hostSettingsDetail === undefined || hostSettingsFields.length === 0 ? {} : {
+          settingsFields: { rowTop: 10, count: hostSettingsFields.length, rowHeight: 2 },
+        }),
+        footerActions,
+        footerLine: tuiMessage(locale, hostFooterKey),
+        context: 'Dialog',
+      })
+    }
+    if (presetManager !== undefined) {
+      const presetLayerLabels = tuiMessage(locale, presetManagerCopyDraft !== undefined
+        ? 'sessions.footer.edit' : 'sessions.footer.confirm').split(' · ')
+      const footerActions: TuiPointerFooterAction[] = presetManagerCopyDraft !== undefined
+        || presetManagerDeleteConfirm !== undefined
+        ? [
+          { action: { id: 'presetManager.accept' as const }, label: presetLayerLabels[0] ?? '' },
+          { action: { id: 'presetManager.close' as const }, label: presetLayerLabels[1] ?? '' },
+        ]
+        : presetManagerDetail
+          ? [
+            ...(presetManagerDetail.canSetDefault ? [{ action: { id: 'presetManager.setDefault' as const }, label: tuiMessage(locale, 'presets.action.setDefault') }] : []),
+            ...(presetManagerDetail.canCopy ? [{ action: { id: 'presetManager.copy' as const }, label: tuiMessage(locale, 'presets.action.copy') }] : []),
+            ...(presetManagerDetail.canDelete ? [{ action: { id: 'presetManager.delete' as const }, label: tuiMessage(locale, 'presets.action.delete') }] : []),
+            { action: { id: 'presetManager.view' as const }, label: tuiMessage(locale, 'presets.action.view') },
+            ...(props.pathOpenerAvailable ? [
+              { action: { id: 'presetManager.openFile' as const }, label: tuiMessage(locale, 'presets.action.openFile') },
+              { action: { id: 'presetManager.open' as const }, label: tuiMessage(locale, 'presets.action.open') },
+            ] : []),
+            { action: { id: 'presetManager.close' as const }, label: tuiMessage(locale, 'presets.action.close') },
+          ]
+          : [{ action: { id: 'presetManager.close' as const }, label: tuiMessage(locale, 'presets.action.close') }]
+      return tuiPresetManagerPointerRegions({
+        columns,
+        rows: terminalRows,
+        listVisible: !presetManagerDetail && presetManagerCopyDraft === undefined
+          && presetManagerDeleteConfirm === undefined,
+        visibleStart: presetManagerVisibleStart,
+        visibleCount: visiblePresetManagerItems.length,
+        rowHeight: presetManagerRowHeight,
+        listTop: 6,
+        footerActions,
+        footerLine: presetManagerCopyDraft !== undefined
+          ? tuiMessage(locale, 'sessions.footer.edit')
+          : presetManagerDeleteConfirm !== undefined
+            ? tuiMessage(locale, 'sessions.footer.confirm')
+            : presetManagerDetail !== undefined
+              ? [
+                presetManagerDetail.canSetDefault ? tuiMessage(locale, 'presets.action.setDefault') : undefined,
+                presetManagerDetail.canCopy ? tuiMessage(locale, 'presets.action.copy') : undefined,
+                presetManagerDetail.canDelete ? tuiMessage(locale, 'presets.action.delete') : undefined,
+                tuiMessage(locale, 'presets.action.view'),
+                props.pathOpenerAvailable ? tuiMessage(locale, 'presets.action.openFile') : undefined,
+                props.pathOpenerAvailable ? tuiMessage(locale, 'presets.action.open') : undefined,
+                tuiMessage(locale, 'presets.action.close'),
+              ].filter((label): label is string => label !== undefined).join(' · ')
+              : tuiMessage(locale, 'presets.action.close'),
+        context: 'Dialog',
+      })
+    }
+    if (sessionManager !== undefined) {
+      const sessionFooterKey = directoryBrowser !== undefined ? 'sessions.directory.footer'
+        : sessionManagerEdit !== undefined ? 'sessions.footer.edit'
+          : sessionManagerConfirm !== undefined ? 'sessions.footer.confirm'
+            : sessionManagerDetail ? sessionManagerTab === 'sessions'
+              ? sessionDetailFooterKey : 'sessions.footer.workspaceDetail'
+              : sessionManagerTab === 'sessions' ? 'sessions.footer.sessions' : 'sessions.footer.workspaces'
+      const sessionFooterLabels = tuiMessage(locale, sessionFooterKey).split(' · ')
+      const footerActions: TuiPointerFooterAction[] = directoryBrowser !== undefined
+        ? [
+          { action: { id: 'sessionManager.accept' as const }, label: sessionFooterLabels[1] ?? '' },
+          ...(directoryBrowserPage?.parent === undefined ? [] : [{
+            action: { id: 'sessionManager.directoryParent' as const }, label: sessionFooterLabels[2] ?? '',
+          }]),
+          { action: { id: 'sessionManager.directoryHome' as const }, label: sessionFooterLabels[3] ?? '' },
+          { action: { id: 'sessionManager.directoryHidden' as const }, label: sessionFooterLabels[4] ?? '' },
+          { action: { id: 'sessionManager.directoryRefresh' as const }, label: sessionFooterLabels[5] ?? '' },
+          { action: { id: 'sessionManager.close' as const }, label: sessionFooterLabels[6] ?? '' },
+        ]
+        : sessionManagerEdit !== undefined || sessionManagerConfirm !== undefined
+          ? [
+            { action: { id: 'sessionManager.accept' as const }, label: sessionFooterLabels[0] ?? '' },
+            { action: { id: 'sessionManager.close' as const }, label: sessionFooterLabels[1] ?? '' },
+          ]
+          : sessionManagerDetail && sessionManagerTab === 'sessions'
+            ? [
+              { action: { id: 'sessionManager.resume' as const }, label: sessionFooterLabels[0] ?? '' },
+              { action: { id: 'sessionManager.fork' as const }, label: sessionFooterLabels[1] ?? '' },
+              { action: { id: 'sessionManager.rename' as const }, label: sessionFooterLabels[2] ?? '' },
+              ...(canToggleManagedSessionArchive ? [{
+                action: { id: 'sessionManager.archive' as const }, label: sessionFooterLabels[3] ?? '',
+              }] : []),
+              { action: { id: 'sessionManager.close' as const }, label: sessionFooterLabels.at(-1) ?? '' },
+            ]
+            : sessionManagerDetail
+              ? [
+                { action: { id: 'sessionManager.rename' as const }, label: sessionFooterLabels[0] ?? '' },
+                { action: { id: 'sessionManager.moveUp' as const }, label: '[' },
+                { action: { id: 'sessionManager.moveDown' as const }, label: ']' },
+                { action: { id: 'sessionManager.delete' as const }, label: sessionFooterLabels[2] ?? '' },
+                { action: { id: 'sessionManager.close' as const }, label: sessionFooterLabels[3] ?? '' },
+              ]
+              : sessionManagerTab === 'workspaces'
+                ? [
+                  { action: { id: 'sessionManager.accept' as const }, label: sessionFooterLabels[1] ?? '' },
+                  { action: { id: 'sessionManager.add' as const }, label: sessionFooterLabels[2] ?? '' },
+                  { action: { id: 'sessionManager.tab' as const, tab: 'sessions' }, label: sessionFooterLabels[3] ?? '' },
+                  { action: { id: 'sessionManager.refresh' as const }, label: sessionFooterLabels[4] ?? '' },
+                  { action: { id: 'sessionManager.close' as const }, label: sessionFooterLabels[5] ?? '' },
+                ]
+                : [
+                  { action: { id: 'sessionManager.accept' as const }, label: sessionFooterLabels[0] ?? '' },
+                  { action: { id: 'sessionManager.scope' as const }, label: sessionFooterLabels[1] ?? '' },
+                  { action: { id: 'sessionManager.archiveFilter' as const }, label: sessionFooterLabels[2] ?? '' },
+                  { action: { id: 'sessionManager.sort' as const }, label: sessionFooterLabels[3] ?? '' },
+                  { action: { id: 'sessionManager.group' as const }, label: sessionFooterLabels[4] ?? '' },
+                  { action: { id: 'sessionManager.tab' as const, tab: 'workspaces' }, label: sessionFooterLabels[5] ?? '' },
+                  { action: { id: 'sessionManager.close' as const }, label: sessionFooterLabels[6] ?? '' },
+                ]
+      return tuiSessionManagerPointerRegions({
+        columns,
+        rows: terminalRows,
+        listVisible: directoryBrowser !== undefined
+          ? directoryBrowser.phase === 'ready' && directoryBrowserPage !== undefined
+          : sessionManager.phase === 'ready' && !sessionManagerDetail
+          && sessionManagerEdit === undefined && sessionManagerConfirm === undefined,
+        visibleStart: directoryBrowser === undefined ? sessionManagerVisibleStart : directoryVisibleStart,
+        visibleCount: directoryBrowser === undefined ? visibleSessionManagerItems.length : visibleDirectoryRows.length,
+        rowHeight: directoryBrowser === undefined ? sessionManagerRowHeight : 1,
+        ...(directoryBrowser === undefined ? {} : { showTabs: false }),
+        ...(directoryBrowser !== undefined ? {} : {
+          tabs: {
+            row: 4,
+            left: 3,
+            labels: {
+              sessions: tuiMessage(locale, 'sessions.tab.sessions'),
+              workspaces: tuiMessage(locale, 'sessions.tab.workspaces'),
+            },
+          },
+        }),
+        footerActions,
+        footerLine: tuiMessage(locale, sessionFooterKey),
+        context: 'Dialog',
+      })
+    }
+    if (queueOpen) {
+      const queueFooterKey = queueEditDraft !== undefined ? 'queue.hint.edit'
+        : queueDeleteConfirmation ? 'queue.hint.delete'
+          : queueDetail ? selectedQueueItem?.canEdit === true || selectedQueueItem?.canDelete === true
+            ? 'queue.hint.detailActions' : 'queue.hint.detail'
+            : 'queue.hint.list'
+      const queueFooterLine = tuiMessage(locale, queueFooterKey)
+      const queueFooterLabels = queueFooterLine.split(' · ')
+      const queueFooterActions: TuiPointerFooterAction[] = queueEditDraft !== undefined || queueDeleteConfirmation
+        ? [
+          { action: { id: 'queue.accept' as const }, label: queueFooterLabels[0] ?? '' },
+          { action: { id: 'queue.close' as const }, label: queueFooterLabels[1] ?? '' },
+        ]
+        : queueDetail ? [
+          ...(selectedQueueItem?.canEdit === true
+            ? [{ action: { id: 'queue.edit' as const }, label: queueFooterLabels[1] ?? '' }] : []),
+          ...(selectedQueueItem?.canDelete === true
+            ? [{ action: { id: 'queue.delete' as const }, label: queueFooterLabels[2] ?? '' }] : []),
+          { action: { id: 'queue.close' as const }, label: queueFooterLabels.at(-1) ?? '' },
+        ] : [
+          { action: { id: 'queue.accept' as const }, label: queueFooterLabels[1] ?? '' },
+          ...(selectedQueueItem?.canEdit === true
+            ? [{ action: { id: 'queue.edit' as const }, label: queueFooterLabels[2] ?? '' }] : []),
+          ...(selectedQueueItem?.canDelete === true
+            ? [{ action: { id: 'queue.delete' as const }, label: queueFooterLabels[3] ?? '' }] : []),
+          { action: { id: 'queue.close' as const }, label: queueFooterLabels[4] ?? '' },
+        ]
+      return tuiQueuePointerRegions({
+        columns,
+        rows: terminalRows,
+        open: true,
+        detail: queueDetail,
+        editing: queueEditDraft !== undefined,
+        confirmingDelete: queueDeleteConfirmation,
+        canEdit: selectedQueueItem?.canEdit === true,
+        canDelete: selectedQueueItem?.canDelete === true,
+        visibleStart: queueVisibleStart,
+        visibleCount: visibleQueueItems.length,
+        rowHeight: 2,
+        footerActions: queueFooterActions,
+        footerLine: queueFooterLine,
+        context: 'Dialog',
+      })
+    }
+    if (providerCenterVisible) {
+      const providerWizardFooterKey = providerWizard?.step === 'models'
+        ? 'provider.custom.hint.models'
+        : providerWizard?.step === 'picker'
+          ? 'provider.custom.hint.picker'
+          : providerWizard?.step === 'confirm'
+            ? 'provider.custom.hint.confirm'
+            : providerWizard?.step === 'protocol'
+              ? 'provider.custom.hint.protocol'
+              : 'provider.custom.hint.input'
+      const providerListFooterKey = providerCenter.onboarding !== undefined
+        ? providerCreationTarget === undefined ? 'provider.onboarding.hintNoAdd' : 'provider.onboarding.hint'
+        : providerCreationTarget === undefined ? 'provider.hint.list' : 'provider.hint.listAdd'
+      const providerFooterLine = providerWizard !== undefined
+        ? tuiMessage(locale, providerWizardFooterKey)
+        : tuiMessage(locale, providerListFooterKey)
+      const providerFooterLabels = providerFooterLine.split(' · ')
+      const providerFooterActions: TuiPointerFooterAction[] | undefined = providerWizard !== undefined
+        ? providerWizard.step === 'models'
+          ? [
+            { action: { id: 'provider.wizardAccept' as const }, label: providerFooterLabels[0] ?? '' },
+            { action: { id: 'provider.wizardDiscover' as const }, label: providerFooterLabels[1] ?? '' },
+            { action: { id: 'provider.wizardBack' as const }, label: providerFooterLabels[2] ?? '' },
+          ]
+          : providerWizard.step === 'picker'
+            ? [
+              { action: { id: 'provider.wizardToggle' as const }, label: providerFooterLabels[1] ?? '' },
+              { action: { id: 'provider.wizardAccept' as const }, label: providerFooterLabels[2] ?? '' },
+              { action: { id: 'provider.wizardBack' as const }, label: providerFooterLabels[3] ?? '' },
+            ]
+            : providerWizard.step === 'protocol'
+              ? [
+                { action: { id: 'provider.wizardAccept' as const }, label: providerFooterLabels[1] ?? '' },
+                { action: { id: 'provider.wizardBack' as const }, label: providerFooterLabels[2] ?? '' },
+              ]
+              : [
+                { action: { id: 'provider.wizardAccept' as const }, label: providerFooterLabels[0] ?? '' },
+                { action: { id: 'provider.wizardBack' as const }, label: providerFooterLabels[1] ?? '' },
+              ]
+        : providerDetail ? undefined
+          : providerCenter.onboarding !== undefined
+            ? [
+              { action: { id: 'provider.accept' as const }, label: providerFooterLabels[0] ?? '' },
+              ...(providerCreationTarget === undefined ? [] : [{
+                action: { id: 'provider.add' as const }, label: providerFooterLabels[1] ?? '',
+              }]),
+              { action: { id: 'provider.close' as const }, label: providerFooterLabels[
+                providerCreationTarget === undefined ? 1 : 2
+              ] ?? '' },
+            ]
+            : [
+              { action: { id: 'provider.accept' as const }, label: providerFooterLabels[1] ?? '' },
+              ...(providerCreationTarget === undefined ? [] : [{
+                action: { id: 'provider.add' as const }, label: providerFooterLabels[2] ?? '',
+              }]),
+              { action: { id: 'provider.refresh' as const }, label: providerFooterLabels[
+                providerCreationTarget === undefined ? 2 : 3
+              ] ?? '' },
+              { action: { id: 'provider.close' as const }, label: providerFooterLabels[
+                providerCreationTarget === undefined ? 3 : 4
+              ] ?? '' },
+            ]
+      return tuiProviderPointerRegions({
+        columns,
+        rows: terminalRows,
+        detail: providerDetail,
+        wizard: providerWizard !== undefined,
+        picker: providerWizard?.step === 'picker',
+        ...(providerWizard?.step === 'picker' || providerWizard?.step === 'protocol'
+          ? { wizardListKind: providerWizard.step }
+          : {}),
+        canAdd: providerCreationTarget !== undefined,
+        canAuthenticate: providerWizard === undefined
+          && providerSecretDraft === undefined && providerEndpointDraft === undefined
+          && providerCanAuthenticate,
+        ...(providerDetail ? { detailActions: providerDetailPointerActions } : {}),
+        visibleStart: providerVisibleStart,
+        visibleCount: visibleProviderRows.length,
+        rowHeight: providerRowHeight,
+        candidateStart: providerWizard?.step === 'protocol' ? 0 : providerCandidateStart,
+        candidateCount: providerWizard?.step === 'protocol'
+          ? providerWizard.target.protocols.length : visibleProviderCandidates.length,
+        candidateTop: 5,
+        ...(providerProfilePointerFields.length === 0 ? {} : { profileFields: providerProfilePointerFields }),
+        ...(providerFooterActions === undefined ? {} : {
+          footerActions: providerFooterActions,
+          footerLine: providerFooterLine,
+        }),
         context: 'Dialog',
       })
     }
     if (helpVisible || doctorVisible || loadedContextVisible) {
-      return tuiModalClosePointerRegions({
-        columns, row: terminalRows, context: 'Dialog', id: 'dialog:close', action: 'dialog.close',
+      const line = helpVisible ? helpFooterLine : scrollingDialogFooterLine
+      return tuiDialogFooterPointerRegions({
+        id: 'dialog', columns, row: terminalRows, lineLeft: helpVisible ? 2 : 3, line,
+        actions: [{ action: { id: 'dialog.close' }, label: tuiMessage(locale, 'common.esc.close') }],
       })
     }
     if (footerDetail !== undefined || focus?.mode === 'detail') {
-      return tuiModalClosePointerRegions({
-        columns, row: terminalRows, context: 'Detail', id: 'detail:close', action: 'detail.close',
+      const close = tuiDialogFooterPointerRegions({
+        id: 'detail', columns, row: terminalRows, lineLeft: 2, line: transcriptDetailFooterLine,
+        actions: [{
+          action: { id: 'detail.close' },
+          label: transcriptDetailFooterLine.split(' · ').at(-1) ?? '',
+        }],
+        context: 'Detail',
+      })
+      const visibleStart = Math.min(
+        focus?.mode === 'detail' ? focus.detailOffset : 0,
+        Math.max(0, transcriptDetailLines.length - detailRows),
+      )
+      const visibleCount = Math.min(detailRows, Math.max(0, transcriptDetailLines.length - visibleStart))
+      return Object.freeze([
+        ...(feedbackNoteDraft === undefined && focusedFeedbackMessageId !== undefined
+          ? tuiFeedbackPointerRegions({
+            columns,
+            row: transcriptRows + 3 + visibleCount,
+            hasFeedback: focusedFeedback !== undefined,
+            messageId: focusedFeedbackMessageId,
+            labels: feedbackActionLabels,
+            context: 'Detail',
+          })
+          : []),
+        ...(focusedDeliverables === undefined || !props.pathOpenerAvailable
+          ? []
+          : tuiDeliverablesPointerRegions({
+            columns,
+            startRow: transcriptRows + 3,
+            visibleStart,
+            visibleCount,
+            total: focusedDeliverables.items.length,
+            context: 'Detail',
+          })),
+        ...(focusedDeliverables === undefined || selectedDeliverable === undefined
+          ? []
+          : tuiDeliverableActionPointerRegions({
+            columns,
+            row: transcriptRows + 3 + visibleCount,
+            line: deliverableActionLine,
+            copyLabel: deliverableActionLine.split(' · ')[1] ?? '',
+            ...(props.pathOpenerAvailable
+              ? { openLabel: deliverableActionLine.split(' · ')[2] ?? '' }
+              : {}),
+            context: 'Detail',
+          })),
+        ...close,
+      ])
+    }
+    if (sessionExportDialog !== undefined) {
+      const line = tuiMessage(locale, sessionExportDialog.phase === 'selecting'
+        ? 'export.footer.selecting'
+        : sessionExportDialog.phase === 'exporting' ? 'export.footer.exporting' : 'common.esc.close')
+      const labels = line.split(' · ')
+      return tuiDialogFooterPointerRegions({
+        id: 'sessionExport',
+        columns,
+        row: terminalRows,
+        lineLeft: 2,
+        line,
+        actions: sessionExportDialog.phase === 'selecting'
+          ? [
+            { action: { id: 'sessionExport.accept' }, label: labels[0] ?? '' },
+            { action: { id: 'sessionExport.scope' }, label: labels[1] ?? '' },
+            { action: { id: 'sessionExport.close' }, label: labels[2] ?? '' },
+          ]
+          : [{ action: { id: 'sessionExport.close' }, label: labels[0] ?? '' }],
       })
     }
-    if (footerSelection !== undefined || freshSessionDialog !== undefined
-      || rewindDialog !== undefined || sessionExportDialog !== undefined) {
-      return Object.freeze([])
+    if (freshSessionDialog !== undefined) {
+      const line = tuiMessage(locale, freshSessionDialog.phase === 'creating'
+        ? 'common.esc.close' : 'fresh.confirm')
+      const labels = line.split(' · ')
+      return tuiDialogFooterPointerRegions({
+        id: 'fresh',
+        columns,
+        row: terminalRows,
+        lineLeft: 3,
+        line,
+        actions: freshSessionDialog.phase === 'creating'
+          ? [{ action: { id: 'fresh.close' }, label: labels[0] ?? '' }]
+          : [
+            { action: { id: 'fresh.accept' }, label: labels[0] ?? '' },
+            { action: { id: 'fresh.close' }, label: labels[1] ?? '' },
+          ],
+      })
     }
+    if (rewindDialog !== undefined) {
+      if (rewindDialog.phase === 'browsing' && rewindConfirmation === undefined) {
+        const actionLine = tuiMessage(locale, rewindSelectedCandidate === undefined
+          ? 'footer.rewind.empty' : 'footer.rewind.actions')
+        const line = `${tuiMessage(locale, 'footer.rewind.title', {
+          position: rewindSelectedCandidate === undefined
+            ? '0/0' : `${effectiveRewindSelection + 1}/${rewindCandidates.length}`,
+        })} · ${actionLine}`
+        const labels = actionLine.split(' · ')
+        const candidateRegions = tuiRewindCandidatePointerRegions(
+          transcriptPointerRegions(
+            visible,
+            focusTargets,
+            Math.max(1, 1 + transcriptRows - transcriptContentRows),
+            columns,
+            transcriptColumns,
+            workspace,
+            'Dialog',
+            locale,
+          ),
+          rewindCandidates.map(candidate => `event:${candidate.eventSeq}`),
+        )
+        const footer = tuiDialogFooterPointerRegions({
+          id: 'rewind',
+          columns,
+          row: terminalRows,
+          lineLeft: 2,
+          line,
+          actions: rewindSelectedCandidate === undefined
+            ? [{ action: { id: 'rewind.close' }, label: labels[1] ?? '' }]
+            : [
+              { action: { id: 'rewind.accept' }, label: labels[1] ?? '' },
+              { action: { id: 'rewind.close' }, label: labels[2] ?? '' },
+            ],
+        })
+        return Object.freeze([...candidateRegions, ...footer])
+      }
+      const activeDraft = hasComposerDraft && composer.text.trim() !== '/rewind'
+      const line = rewindConfirmation !== undefined
+        ? activeDraft
+          ? [
+            tuiMessage(locale, 'rewind.stash'),
+            tuiMessage(locale, 'rewind.discard'),
+            tuiMessage(locale, 'rewind.cancel'),
+          ].join(' · ')
+          : tuiMessage(locale, 'rewind.confirm')
+        : tuiMessage(locale, rewindDialog.phase === 'rewinding' ? 'rewind.footer.cancel' : 'common.esc.close')
+      const labels = line.split(' · ')
+      return tuiDialogFooterPointerRegions({
+        id: 'rewind',
+        columns,
+        row: terminalRows,
+        lineLeft: 3,
+        line,
+        actions: rewindConfirmation !== undefined
+          ? activeDraft
+            ? [
+              { action: { id: 'rewind.stash' }, label: labels[0] ?? '' },
+              { action: { id: 'rewind.discard' }, label: labels[1] ?? '' },
+              { action: { id: 'rewind.close' }, label: labels[2] ?? '' },
+            ]
+            : [
+              { action: { id: 'rewind.accept' }, label: labels[0] ?? '' },
+              { action: { id: 'rewind.close' }, label: labels[1] ?? '' },
+            ]
+          : [{ action: { id: 'rewind.close' }, label: labels[0] ?? '' }],
+      })
+    }
+    if (footerSelection !== undefined) return Object.freeze([])
     if (pointerContext === 'PluginHub' && pluginHubDialog !== undefined) {
       return tuiPluginHubPointerRegions({
         columns,
@@ -1379,12 +3096,55 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         rowHeights: pluginHubRows.slice(
           pluginHubVisibleStart, pluginHubVisibleStart + pluginHubVisibleCount,
         ).map(row => tuiPluginHubCardLayout(row, columns, Date.now(), locale).height),
+        footerActions: pluginHubFooterActions,
+        footerLine: pluginHubFooterLine,
         context: 'PluginHub',
       })
     }
     if (pointerContext === 'Dialog' && resumeDialog !== undefined) {
       const previewVisible = resumeDialog.phase === 'ready'
         && resumePreviewVisible && selectedResumeCandidate !== undefined
+      const resumeFooterLine = resumeConfirmation !== undefined
+        ? [
+          tuiMessage(locale, 'resume.stash'),
+          tuiMessage(locale, 'resume.discard'),
+          tuiMessage(locale, 'resume.cancel'),
+        ].join(' · ')
+        : resumeDialog.phase === 'resuming'
+          ? tuiMessage(locale, 'resume.footer.cancel')
+          : narrowResume
+            ? tuiMessage(locale, 'resume.footer.narrow', {
+              direction: tuiMessage(locale, resumeView === 'list'
+                ? 'resume.direction.preview' : 'resume.direction.list'),
+            })
+            : tuiMessage(locale, 'resume.footer.wide')
+      const resumeFooterLabels = resumeFooterLine.split(' · ')
+      const resumeFooterActions: TuiPointerFooterAction[] = resumeConfirmation !== undefined
+        ? [
+          { action: { id: 'resume.stash' as const }, label: resumeFooterLabels[0] ?? '' },
+          { action: { id: 'resume.discard' as const }, label: resumeFooterLabels[1] ?? '' },
+          { action: { id: 'resume.close' as const }, label: resumeFooterLabels[2] ?? '' },
+        ]
+        : resumeDialog.phase === 'resuming'
+          ? [{ action: { id: 'resume.close' as const }, label: resumeFooterLabels[0] ?? '' }]
+          : resumeDialog.phase !== 'ready'
+            ? [{
+              action: { id: 'resume.close' as const },
+              label: resumeFooterLabels.at(-1) ?? '',
+            }]
+            : narrowResume
+              ? [
+                { action: { id: 'resume.toggleView' as const, view: resumeView === 'list' ? 'preview' : 'list' }, label: resumeFooterLabels[0] ?? '' },
+                { action: { id: 'resume.accept' as const }, label: resumeFooterLabels[3] ?? '' },
+                { action: { id: 'resume.rename' as const }, label: resumeFooterLabels[4] ?? '' },
+                { action: { id: 'resume.close' as const }, label: resumeFooterLabels[5] ?? '' },
+              ]
+              : [
+                { action: { id: 'resume.scope' as const, scope: resumeScope === 'workspace' ? 'all' : 'workspace' }, label: resumeFooterLabels[2] ?? '' },
+                { action: { id: 'resume.accept' as const }, label: resumeFooterLabels[3] ?? '' },
+                { action: { id: 'resume.rename' as const }, label: resumeFooterLabels[4] ?? '' },
+                { action: { id: 'resume.close' as const }, label: resumeFooterLabels[5] ?? '' },
+              ]
       return tuiResumePointerRegions({
         columns,
         rows: terminalRows,
@@ -1396,14 +3156,39 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         visibleStart: resumeVisibleStart,
         visibleCount: visibleResumeCandidates.length,
         rowHeight: resumeRowHeight,
+        scopeTabs: {
+          row: 4,
+          left: 2,
+          workspaceLabel: tuiMessage(locale, resumeScope === 'workspace'
+            ? 'resume.scope.workspace.active' : 'resume.scope.workspace'),
+          allLabel: tuiMessage(locale, resumeScope === 'all'
+            ? 'resume.scope.all.active' : 'resume.scope.all'),
+          gap: ' ',
+        },
+        footerActions: resumeFooterActions,
+        footerLine: resumeFooterLine,
         context: 'Dialog',
       })
     }
     if (workOpen) return tuiWorkPointerRegions(
-      work.items.length, effectiveWorkSelection, transcriptRows, columns, 'Work',
+      work.items.length, effectiveWorkSelection, transcriptRows, columns, 'Work', {
+        row: terminalRows,
+        line: workFooterLine,
+        lineLeft: 2,
+        actions: [
+          ...(selectedWorkItem?.inspectable === true
+            ? [{ action: { id: 'work.open' as const }, label: tuiMessage(locale, 'footer.work.open') }] : []),
+          ...(selectedWorkItem?.action === undefined || selectedWorkItem.action === 'none'
+            ? [] : [{ action: { id: 'work.stop' as const }, label: tuiMessage(locale, 'footer.work.stop') }]),
+          { action: { id: 'work.close' as const }, label: tuiMessage(locale, 'common.esc.close') },
+        ],
+      },
     )
     if (pointerContext === 'Composer' || pointerContext === 'Transcript') {
       const suggestionTop = Math.max(1, terminalRows - 2 - (composerRows + 2) - suggestionRows + 1)
+      const footerRows = props.extensions.renderStatus(Math.max(1, columns - 2), locale).length > 0 ? 2 : 1
+      const browseFooterLine = tuiMessage(locale, 'footer.browse')
+      const browseFooterLabels = browseFooterLine.split(' · ')
       return Object.freeze([
         ...(pointerContext === 'Composer' && suggestion !== undefined
           ? tuiSuggestionPointerRegions({
@@ -1414,6 +3199,15 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             context: 'Composer',
           })
           : []),
+        ...(transcriptScreenMap === undefined || inlineDeliverableReferences.length === 0
+          ? []
+          : tuiDeliverableInlinePointerRegions({
+            map: transcriptScreenMap,
+            topRow: transcriptScreenTopRow,
+            references: inlineDeliverableReferences,
+            openerAvailable: props.pathOpenerAvailable,
+            context: pointerContext,
+          })),
         ...transcriptPointerRegions(
           visible,
           focusTargets,
@@ -1424,7 +3218,42 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           pointerContext,
           locale,
         ),
-        ...tuiFooterPointerRegions(mountedFooterItems, columns, terminalRows, pointerContext),
+        ...(footerItemsPointerVisible
+          ? tuiFooterPointerRegions(mountedFooterItems, columns, terminalRows, pointerContext) : []),
+        ...(focus?.mode === 'browse' && pointerContext === 'Transcript'
+          ? tuiDialogFooterPointerRegions({
+            id: 'transcript:browse', columns, row: terminalRows, lineLeft: 2,
+            line: browseFooterLine,
+            actions: [
+              { action: { id: 'transcript.openFocused' }, label: browseFooterLabels[1] ?? '' },
+              { action: { id: 'transcript.closeBrowse' }, label: browseFooterLabels[2] ?? '' },
+            ],
+            context: 'Transcript',
+          }) : []),
+        ...goalPlanRow === undefined ? [] : tuiGoalPlanPointerRegions(columns, goalPlanRow, pointerContext),
+        ...tuiQueuePointerRegions({
+          columns,
+          rows: terminalRows,
+          open: false,
+          detail: false,
+          editing: false,
+          confirmingDelete: false,
+          canEdit: false,
+          canDelete: false,
+          collapsedRow: queueCardRow,
+          visibleStart: 0,
+          visibleCount: 0,
+          rowHeight: 1,
+          context: pointerContext,
+        }),
+        ...(pointerContext === 'Composer' && attachmentRail.count > 0
+          ? tuiAttachmentRailPointerRegions({
+            columns,
+            startRow: terminalRows - footerRows - attachmentRail.count - 1,
+            count: attachmentRail.count,
+            context: 'Composer',
+          })
+          : []),
       ])
     }
     return Object.freeze([])
@@ -1502,6 +3331,12 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     () => fullscreenScene === undefined ? undefined : props.extensions.renderFullscreenScene(columns, terminalRows, locale),
     [extensionSnapshot.revision, fullscreenScene, props.extensions, columns, terminalRows, locale],
   )
+  const fullscreenCloseLabel = tuiMessage(locale, 'common.esc.close')
+  const fullscreenFooterLine = tuiFullscreenFooterLine(fullscreenFrame?.footer, fullscreenCloseLabel)
+  const fullscreenCloseRegions = useMemo(() => tuiDialogFooterPointerRegions({
+    id: 'fullscreen', columns, row: terminalRows, lineLeft: 3, line: fullscreenFooterLine,
+    actions: [{ action: { id: 'dialog.close' }, label: fullscreenCloseLabel }],
+  }), [columns, fullscreenCloseLabel, fullscreenFooterLine, terminalRows])
   const startupFrame = tuiStartupComposerFrame(
     stdout,
     composerRows,
@@ -1520,6 +3355,14 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   useEffect(() => {
     if (loadedContext !== undefined) setLoadedContextOffset(0)
   }, [loadedContext])
+
+  useEffect(() => {
+    if (goalPlanSurface !== undefined) return
+    setGoalPlanOpen(false)
+    setGoalEditDraft(undefined)
+    setGoalClearConfirmation(false)
+    setGoalPlanError('')
+  }, [goalPlanSurface])
 
   useEffect(() => {
     if (focus?.mode !== 'browse' || focusedTargetKey === undefined) return
@@ -1618,9 +3461,11 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       ? suggestion.selectedIndex
       : Math.max(0, Math.min(suggestion.items.length - 1, requestedIndex))
     const selectedItem = suggestion.items[index]
-    const selectedPath = selectedItem?.source === 'path' && selectedItem.description === 'file'
-      ? selectedItem.label.slice(1)
-      : undefined
+    const selectedPath = (selectedItem?.source === 'file' && selectedItem.referenceKind === 'file')
+      ? selectedItem.referencePath
+      : selectedItem?.source === 'path' && selectedItem.description === 'file'
+        ? selectedItem.label.slice(1)
+        : undefined
     if (selectedPath !== undefined && isImagePath(selectedPath)) {
       const viewId = props.view.id
       setBusy(true)
@@ -1711,6 +3556,11 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       setWorkOpen(true)
       return
     }
+    if (item.action === 'goalPlan') {
+      setFooterSelection(undefined)
+      openGoalPlan()
+      return
+    }
     if (item.action === 'detail') {
       setFooterDetail({ itemId: item.id, offset: 0 })
       return
@@ -1736,6 +3586,15 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       void props.onPluginHubConfirm()
       return
     }
+    if (pluginHubDialog.phase === 'detail') {
+      if (pluginHubDialog.discoveryDetail !== undefined) {
+        void props.onOpenUrl(pluginHubDialog.discoveryDetail.repository.url)
+      } else if (pluginHubDialog.detail?.latestVersion?.installable === true
+        && pluginHubDialog.profileMutations !== false) {
+        void props.onPluginHubInstall()
+      }
+      return
+    }
     if (pluginHubDialog.phase !== 'browse' || index === undefined) return
     const selected = pluginHubRows[index]
     if (selected === undefined) return
@@ -1750,6 +3609,550 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     }
     const catalogItem = pluginHubItems?.find(item => String(item.id) === selected.id)
     if (catalogItem !== undefined) void props.onPluginHubDetail(catalogItem.id)
+  }
+
+  const openQueue = (): void => {
+    if (queue.items.length === 0 || busy) return
+    setQueueOpen(true)
+    setQueueSelection(previous => Math.min(previous, queue.items.length - 1))
+    setQueueDetail(false)
+    setQueueDetailOffset(0)
+    setQueueEditDraft(undefined)
+    setQueueDeleteConfirmation(false)
+    setQueueError('')
+  }
+
+  const closeQueueLayer = (): void => {
+    if (queueEditDraft !== undefined) {
+      setQueueEditDraft(undefined)
+      setQueueError('')
+    } else if (queueDeleteConfirmation) {
+      setQueueDeleteConfirmation(false)
+      setQueueError('')
+    } else if (queueDetail) {
+      setQueueDetail(false)
+      setQueueDetailOffset(0)
+      setQueueError('')
+    } else {
+      setQueueOpen(false)
+      setQueueError('')
+    }
+  }
+
+  const openSelectedQueueDetail = (): void => {
+    if (selectedQueueItem === undefined) return
+    setQueueDetail(true)
+    setQueueDetailOffset(0)
+    setQueueError('')
+  }
+
+  const editSelectedQueueItem = (): void => {
+    if (selectedQueueItem?.canEdit !== true) {
+      setQueueError(tuiMessage(locale, 'queue.error.notEditable'))
+      return
+    }
+    setQueueEditDraft(selectedQueueItem.text)
+    setQueueDeleteConfirmation(false)
+    setQueueError('')
+  }
+
+  const saveQueueEdit = (): void => {
+    if (selectedQueueItem === undefined || queueEditDraft === undefined) return
+    const result = editTuiQueueItem(props.agent, selectedQueueItem.id, queueEditDraft, queue.revision)
+    if (!result.ok) {
+      setQueueError(tuiMessage(locale, result.reason === 'revision-conflict' || result.reason === 'not-pending'
+        ? 'queue.error.consumed' : 'queue.error.notEditable'))
+      return
+    }
+    setQueueEditDraft(undefined)
+    setQueueError('')
+  }
+
+  const askDeleteSelectedQueueItem = (): void => {
+    if (selectedQueueItem?.canDelete !== true) {
+      setQueueError(tuiMessage(locale, 'queue.error.notDeletable'))
+      return
+    }
+    setQueueDeleteConfirmation(true)
+    setQueueEditDraft(undefined)
+    setQueueError('')
+  }
+
+  const deleteSelectedQueueItem = (): void => {
+    if (selectedQueueItem === undefined) return
+    const result = deleteTuiQueueItem(props.agent, selectedQueueItem.id, queue.revision)
+    if (!result.ok) {
+      setQueueError(tuiMessage(locale, result.reason === 'revision-conflict' || result.reason === 'not-pending'
+        ? 'queue.error.consumed' : 'queue.error.notDeletable'))
+      setQueueDeleteConfirmation(false)
+      return
+    }
+    setQueueDeleteConfirmation(false)
+    setQueueDetail(false)
+    setQueueDetailOffset(0)
+    setQueueError('')
+  }
+
+  const openGoalPlan = (): void => {
+    if (goalPlanSurface === undefined) {
+      setNotice(tuiMessage(locale, 'goalPlan.none'))
+      return
+    }
+    setGoalPlanOpen(true)
+    setGoalEditDraft(undefined)
+    setGoalClearConfirmation(false)
+    setGoalPlanError('')
+  }
+
+  const closeGoalPlanLayer = (): void => {
+    if (goalEditDraft !== undefined) setGoalEditDraft(undefined)
+    else if (goalClearConfirmation) setGoalClearConfirmation(false)
+    else setGoalPlanOpen(false)
+    setGoalPlanError('')
+  }
+
+  const runGoalPlanMutation = (operation: () => Promise<void>): void => {
+    if (busy) return
+    setBusy(true)
+    setGoalPlanError('')
+    void operation().then(() => {
+      setGoalEditDraft(undefined)
+      setGoalClearConfirmation(false)
+    }, (error: unknown) => {
+      setGoalPlanError(tuiGoalPlanMutationErrorMessage(error, locale))
+    }).finally(() => { setBusy(false) })
+  }
+
+  const saveGoalEdit = (): void => {
+    const objective = goalEditDraft?.trim()
+    if (objective === undefined || objective === '') {
+      setGoalPlanError(tuiMessage(locale, 'goalPlan.edit.blank'))
+      return
+    }
+    runGoalPlanMutation(() => props.onEditGoal(objective))
+  }
+
+  const closeSessionManagerLayer = (): void => {
+    if (directoryBrowser !== undefined) {
+      directoryBrowserAbort.current?.abort(new Error('TUI directory browser closed'))
+      directoryBrowserAbort.current = undefined
+      setDirectoryBrowser(undefined)
+      setSessionManagerError('')
+    } else if (sessionManagerEdit !== undefined) {
+      setSessionManagerEdit(undefined)
+      setSessionManagerError('')
+    } else if (sessionManagerConfirm !== undefined) {
+      setSessionManagerConfirm(undefined)
+      setSessionManagerError('')
+    } else if (sessionManagerDetail) {
+      setSessionManagerDetail(false)
+      setSessionManagerError('')
+    } else if (sessionManagerQuery !== '') {
+      setSessionManagerQuery('')
+      setSessionManagerSelection(0)
+      setSessionManagerError('')
+    } else props.onCloseSessionManager()
+  }
+
+  const runSessionManagerMutation = (operation: () => Promise<void>): void => {
+    setSessionManagerError('')
+    void operation().then(() => {
+      setSessionManagerEdit(undefined)
+      setSessionManagerConfirm(undefined)
+      setSessionManagerDetail(false)
+      setSessionManagerError('')
+    }, (error: unknown) => {
+      setSessionManagerError(error instanceof Error ? error.message : String(error))
+    })
+  }
+
+  const persistSessionManagerPreferences = (patch: Partial<TuiSessionManagerPreferences>): void => {
+    void props.onUpdateSessionManagerPreferences(patch).catch((error: unknown) => {
+      setSessionManagerError(error instanceof Error ? error.message : String(error))
+    })
+  }
+
+  const loadWorkspaceDirectory = (path?: string): void => {
+    const capability = props.directoryPicker
+    if (capability?.kind !== 'browse') return
+    directoryBrowserAbort.current?.abort(new Error('TUI directory listing superseded'))
+    const controller = new AbortController()
+    directoryBrowserAbort.current = controller
+    setDirectoryBrowser(previous => ({
+      phase: 'loading',
+      ...(previous?.listing === undefined ? {} : { listing: previous.listing }),
+      ...(path === undefined ? {} : { requestedPath: path }),
+      selection: 0,
+      showHidden: previous?.showHidden ?? false,
+      error: '',
+    }))
+    void capability.list(path, controller.signal).then((listing) => {
+      if (controller.signal.aborted || directoryBrowserAbort.current !== controller) return
+      setDirectoryBrowser(previous => ({
+        phase: 'ready',
+        listing,
+        selection: 0,
+        showHidden: previous?.showHidden ?? false,
+        error: '',
+      }))
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || directoryBrowserAbort.current !== controller) return
+      setDirectoryBrowser(previous => ({
+        phase: 'error',
+        ...(previous?.listing === undefined ? {} : { listing: previous.listing }),
+        ...(path === undefined ? {} : { requestedPath: path }),
+        selection: previous?.selection ?? 0,
+        showHidden: previous?.showHidden ?? false,
+        error: terminalSafe(error instanceof Error ? error.message : String(error)),
+      }))
+    }).finally(() => {
+      if (directoryBrowserAbort.current === controller) directoryBrowserAbort.current = undefined
+    })
+  }
+
+  const beginWorkspaceAdd = (): void => {
+    const capability = props.directoryPicker
+    if (sessionManager === undefined || busy) return
+    if (capability === undefined) {
+      setSessionManagerEdit({ kind: 'workspace-add', draft: sessionManager.currentWorkspaceLabel })
+      setSessionManagerError(tuiMessage(locale, 'sessions.directory.unavailable'))
+      return
+    }
+    if (capability.kind === 'browse') {
+      setSessionManagerEdit(undefined)
+      setSessionManagerError('')
+      setDirectoryBrowser({ phase: 'loading', selection: 0, showHidden: false, error: '' })
+      loadWorkspaceDirectory()
+      return
+    }
+    setBusy(true)
+    setSessionManagerError('')
+    const controller = new AbortController()
+    directoryBrowserAbort.current = controller
+    void capability.pick(controller.signal).then((path) => {
+      if (path !== null) setSessionManagerEdit({ kind: 'workspace-add', draft: path })
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) {
+        setSessionManagerError(terminalSafe(error instanceof Error ? error.message : String(error)))
+      }
+    }).finally(() => {
+      if (directoryBrowserAbort.current === controller) directoryBrowserAbort.current = undefined
+      setBusy(false)
+    })
+  }
+
+  const acceptWorkspaceDirectory = (index = effectiveDirectorySelection): void => {
+    const row = directoryBrowserPage?.rows[index]
+    if (row === undefined) return
+    if (row.kind === 'directory') {
+      loadWorkspaceDirectory(row.path)
+      return
+    }
+    directoryBrowserAbort.current?.abort(new Error('TUI directory selected'))
+    directoryBrowserAbort.current = undefined
+    setDirectoryBrowser(undefined)
+    setSessionManagerEdit({ kind: 'workspace-add', draft: row.path })
+    setSessionManagerError('')
+  }
+
+  const saveSessionManagerEdit = (): void => {
+    const edit = sessionManagerEdit
+    if (edit === undefined || edit.draft.trim() === '') {
+      setSessionManagerError(tuiMessage(locale, 'sessions.error.blank'))
+      return
+    }
+    if (edit.kind === 'workspace-add') {
+      runSessionManagerMutation(() => props.onCreateManagedWorkspace(edit.draft.trim()))
+    } else if (edit.kind === 'workspace-rename' && selectedManagedWorkspace !== undefined) {
+      runSessionManagerMutation(() => props.onRenameManagedWorkspace(selectedManagedWorkspace, edit.draft))
+    } else if (edit.kind === 'session-rename' && selectedManagedSession !== undefined) {
+      runSessionManagerMutation(() => props.onRenameManagedSession(selectedManagedSession.candidate, edit.draft))
+    }
+  }
+
+  const confirmSessionManagerMutation = (): void => {
+    if (sessionManagerConfirm === 'workspace-delete' && selectedManagedWorkspace !== undefined) {
+      runSessionManagerMutation(() => props.onDeleteManagedWorkspace(selectedManagedWorkspace))
+    } else if ((sessionManagerConfirm === 'session-archive' || sessionManagerConfirm === 'session-unarchive')
+      && selectedManagedSession !== undefined) {
+      runSessionManagerMutation(() => props.onArchiveManagedSession(
+        selectedManagedSession.candidate, sessionManagerConfirm === 'session-archive',
+      ))
+    }
+  }
+
+  const patchProviderWizard = (patch: Partial<TuiProviderWizardState>): void => {
+    setProviderWizard(previous => previous === undefined ? undefined : Object.freeze({
+      ...previous, ...patch,
+    }))
+  }
+
+  const openProviderWizard = (): void => {
+    if (providerCreationTarget === undefined || busy) return
+    setProviderDetail(false)
+    setProviderWizardSecret('')
+    setProviderWizard(createProviderWizard(providerCreationTarget))
+  }
+
+  const backProviderWizard = (): void => {
+    if (providerWizard === undefined || busy) return
+    const previous: Partial<Record<TuiProviderWizardStep, TuiProviderWizardStep | undefined>> = {
+      id: undefined,
+      name: 'id',
+      endpoint: 'name',
+      protocol: 'endpoint',
+      key: 'protocol',
+      models: 'key',
+      picker: 'models',
+      confirm: 'models',
+    }
+    const step = previous[providerWizard.step]
+    if (step === undefined) {
+      setProviderWizard(undefined)
+      setProviderWizardSecret('')
+    } else {
+      patchProviderWizard({ step, error: '' })
+    }
+  }
+
+  const acceptProviderWizard = (): void => {
+    const wizard = providerWizard
+    if (wizard === undefined || busy) return
+    if (wizard.step === 'id') {
+      const id = wizard.id.trim()
+      if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(id)) {
+        patchProviderWizard({ error: tuiMessage(locale, 'provider.custom.error.id') })
+      } else if (wizard.target.existingProviderIds.includes(id)) {
+        patchProviderWizard({ error: tuiMessage(locale, 'provider.custom.error.taken') })
+      } else patchProviderWizard({ id, displayName: wizard.displayName || id, step: 'name', error: '' })
+      return
+    }
+    if (wizard.step === 'name') {
+      const displayName = wizard.displayName.trim()
+      if (displayName === '') patchProviderWizard({ error: tuiMessage(locale, 'provider.custom.error.name') })
+      else patchProviderWizard({ displayName, step: 'endpoint', error: '' })
+      return
+    }
+    if (wizard.step === 'endpoint') {
+      try {
+        const endpoint = validateTuiProviderEndpoint(wizard.endpoint)
+        patchProviderWizard({ endpoint, step: 'protocol', error: '' })
+      } catch {
+        patchProviderWizard({ error: tuiMessage(locale, 'provider.custom.error.endpoint') })
+      }
+      return
+    }
+    if (wizard.step === 'protocol') {
+      patchProviderWizard({ step: 'key', error: '' })
+      return
+    }
+    if (wizard.step === 'key') {
+      try {
+        if (providerWizardSecret.trim() !== '') validateTuiProviderApiKey(providerWizardSecret)
+        patchProviderWizard({ step: 'models', error: '' })
+      } catch {
+        patchProviderWizard({ error: tuiMessage(locale, 'provider.custom.error.key') })
+      }
+      return
+    }
+    if (wizard.step === 'models') {
+      const models = providerWizardModels(wizard.modelText, wizard.models)
+      if (models.length === 0) {
+        patchProviderWizard({ error: tuiMessage(locale, 'provider.custom.error.models') })
+      } else patchProviderWizard({ models, step: 'confirm', error: '' })
+      return
+    }
+    if (wizard.step === 'picker') {
+      const selected = wizard.candidates.filter(candidate => wizard.picked.has(candidate.id))
+      const byId = new Map(wizard.models.map(model => [model.id, model]))
+      for (const candidate of selected) byId.set(candidate.id, byId.get(candidate.id) ?? candidate)
+      const models = Object.freeze([...byId.values()])
+      patchProviderWizard({
+        models,
+        modelText: models.map(model => model.id).join(', '),
+        step: 'models',
+        candidates: Object.freeze([]),
+        picked: new Set<string>(),
+        error: '',
+      })
+      return
+    }
+    const draft = providerWizardDraft(wizard, providerWizardSecret)
+    setBusy(true)
+    patchProviderWizard({ error: '' })
+    void props.onCreateCustomProvider(wizard.target, draft).then(() => {
+      setProviderWizard(undefined)
+      setProviderWizardSecret('')
+    }).catch((error: unknown) => {
+      if (error instanceof TuiCustomProviderError
+        && (error.code === 'credential-write-failed' || error.code === 'credentials-unavailable')) {
+        setProviderWizard(undefined)
+        setProviderWizardSecret('')
+        setNotice(tuiMessage(locale, 'provider.custom.error.credentialPartial'))
+        return
+      }
+      patchProviderWizard({ error: providerWizardFailure(error, locale) })
+    }).finally(() => { setBusy(false) })
+  }
+
+  const discoverProviderWizardModels = (): void => {
+    const wizard = providerWizard
+    if (wizard === undefined || wizard.step !== 'models' || busy) return
+    setBusy(true)
+    patchProviderWizard({ error: '' })
+    void props.onDiscoverCustomProviderModels(
+      wizard.target,
+      providerWizardDraft({ ...wizard, models: providerWizardModels(wizard.modelText, wizard.models) }, providerWizardSecret),
+    ).then((candidates) => {
+      if (candidates.length === 0) {
+        patchProviderWizard({ error: tuiMessage(locale, 'provider.custom.discovery.empty') })
+        return
+      }
+      const known = new Set(wizard.models.map(model => model.id))
+      patchProviderWizard({
+        step: 'picker',
+        candidates,
+        picked: new Set(candidates.filter(candidate => !known.has(candidate.id)).map(candidate => candidate.id)),
+        candidateIndex: 0,
+        error: '',
+      })
+    }).catch((error: unknown) => {
+      patchProviderWizard({ error: providerWizardFailure(error, locale) })
+    }).finally(() => { setBusy(false) })
+  }
+
+  const authenticateSelectedProvider = (): void => {
+    if (selectedProvider === undefined || !providerCanAuthenticate || busy) return
+    setBusy(true)
+    setNotice('')
+    void props.onAuthenticateProvider(selectedProvider.id).catch(() => {
+      setNotice(tuiMessage(locale, 'provider.signInFailed'))
+    }).finally(() => { setBusy(false) })
+  }
+
+  const saveSelectedProviderApiKey = (): void => {
+    if (selectedProvider === undefined || providerSecretDraft === undefined || !providerCanStoreKey || busy) return
+    try {
+      validateTuiProviderApiKey(providerSecretDraft)
+    } catch {
+      setProviderSecretError(tuiMessage(locale, 'provider.key.invalid'))
+      return
+    }
+    const provider = selectedProvider.id
+    const key = providerSecretDraft
+    setBusy(true)
+    setProviderSecretError('')
+    void props.onSaveProviderApiKey(provider, key).then(() => {
+      setProviderSecretDraft(undefined)
+      setProviderSecretError('')
+    }).catch((error: unknown) => {
+      setProviderSecretError(error instanceof TuiProviderApiKeyError && error.code === 'invalid-key'
+        ? tuiMessage(locale, 'provider.key.invalid')
+        : tuiMessage(locale, 'provider.key.failed'))
+    }).finally(() => { setBusy(false) })
+  }
+
+  const saveSelectedProviderEndpoint = (reset = false): void => {
+    const draft = providerEndpointDraft
+    if (selectedProvider === undefined || (!reset && draft === undefined)
+      || selectedProvider.settings?.writable !== true || busy) return
+    if (!reset) {
+      if (draft === undefined) return
+      try {
+        validateTuiProviderEndpoint(draft)
+      } catch {
+        setProviderEndpointError(tuiMessage(locale, 'provider.endpoint.invalid'))
+        return
+      }
+    }
+    const provider = selectedProvider.id
+    const endpoint = reset ? undefined : draft
+    setBusy(true)
+    setProviderEndpointError('')
+    void props.onSaveProviderEndpoint(provider, endpoint).then(() => {
+      setProviderEndpointDraft(undefined)
+      setProviderEndpointError('')
+    }).catch((error: unknown) => {
+      setProviderEndpointError(error instanceof TuiProviderEndpointError && error.code === 'invalid-endpoint'
+        ? tuiMessage(locale, 'provider.endpoint.invalid')
+        : tuiMessage(locale, 'provider.endpoint.failed'))
+    }).finally(() => { setBusy(false) })
+  }
+
+  const openSelectedProviderProfile = (): void => {
+    if (selectedProvider === undefined || !providerCanEditProfile || busy) return
+    const editor = createProviderProfileEditor(selectedProvider)
+    if (editor !== undefined) setProviderProfileEditor(editor)
+  }
+
+  const patchProviderProfileEditor = (patch: Partial<TuiProviderProfileEditorState>): void => {
+    setProviderProfileEditor(previous => previous === undefined ? undefined : Object.freeze({ ...previous, ...patch }))
+  }
+
+  const cycleProviderProfileField = (direction: -1 | 1): void => {
+    const editor = providerProfileEditor
+    const row = providerRows.find(candidate => candidate.id === editor?.providerId)
+    if (editor === undefined || row === undefined) return
+    const fields = providerProfileFields(row)
+    const index = fields.indexOf(editor.field)
+    if (index < 0 || fields.length === 0) return
+    const field = fields[(index + direction + fields.length) % fields.length]
+    if (field !== undefined) patchProviderProfileEditor({ field, error: '' })
+  }
+
+  const saveSelectedProviderProfile = (): void => {
+    const editor = providerProfileEditor
+    if (editor === undefined || busy) return
+    let draft: TuiProviderProfileDraft
+    try {
+      draft = providerProfileDraft(editor)
+    } catch {
+      patchProviderProfileEditor({ error: tuiMessage(locale, 'provider.profile.error.models') })
+      return
+    }
+    setBusy(true)
+    patchProviderProfileEditor({ error: '' })
+    void props.onSaveProviderProfile(editor.providerId, draft).then(() => {
+      setProviderProfileEditor(undefined)
+    }).catch((error: unknown) => {
+      const key = error instanceof TuiProviderProfileError
+        ? error.code === 'settings-conflict' ? 'provider.profile.error.conflict'
+          : error.code === 'invalid-display-name' ? 'provider.profile.error.name'
+            : error.code === 'invalid-protocol' ? 'provider.profile.error.protocol'
+              : error.code === 'models-required' || error.code === 'invalid-model'
+                ? 'provider.profile.error.models'
+                : 'provider.profile.error.failed'
+        : 'provider.profile.error.failed'
+      patchProviderProfileEditor({ error: tuiMessage(locale, key) })
+    }).finally(() => { setBusy(false) })
+  }
+
+  const removeSelectedProvider = (): void => {
+    const provider = providerDeleteConfirmation
+    if (provider === undefined || busy) return
+    setBusy(true)
+    setProviderSecretError('')
+    void props.onRemoveProvider(provider).then(() => {
+      setProviderDeleteConfirmation(undefined)
+      setProviderDetail(false)
+      setProviderDetailOffset(0)
+    }).catch((error: unknown) => {
+      setProviderSecretError(tuiMessage(locale,
+        error instanceof TuiProviderRemoveError && error.code === 'settings-conflict'
+          ? 'provider.remove.error.conflict' : 'provider.remove.error.failed'))
+    }).finally(() => { setBusy(false) })
+  }
+
+  const logoutSelectedProvider = (): void => {
+    const provider = providerLogoutConfirmation
+    if (provider === undefined || busy) return
+    setBusy(true)
+    setProviderSecretError('')
+    void props.onLogoutProvider(provider).then(() => {
+      setProviderLogoutConfirmation(undefined)
+    }).catch(() => {
+      setProviderSecretError(tuiMessage(locale, 'provider.logout.error'))
+    }).finally(() => { setBusy(false) })
   }
 
   const activateResumeCandidate = (candidate: TuiResumeCandidate): void => {
@@ -1903,6 +4306,187 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     props.interactions.cancelCurrent()
   }
 
+  const openHostSettingsRow = (row: TuiHostSettingsRow): void => {
+    setHostSettingsDetailNs(String(row.ns))
+    setHostSettingsFieldSelection(0)
+    setHostSettingsDrafts({})
+    setHostSettingsEditing(false)
+    setHostSettingsError('')
+    setHostPluginDetail(undefined)
+  }
+
+  const discardHostSettingsDrafts = (): void => {
+    setHostSettingsDrafts({})
+    setHostSettingsEditing(false)
+    setHostSettingsError('')
+  }
+
+  const selectHostPluginTab = (tab: 'plugins' | 'settings'): void => {
+    setHostPluginTab(tab)
+    setHostPluginSelection(0)
+    setHostPluginDetail(undefined)
+    setHostSettingsDetailNs(undefined)
+    discardHostSettingsDrafts()
+  }
+
+  const selectHostSettingsField = (index: number): void => {
+    if (hostSettingsFields[index] === undefined) return
+    setHostSettingsFieldSelection(index)
+    setHostSettingsEditing(false)
+    setHostSettingsError('')
+  }
+
+  const editSelectedHostSetting = (): void => {
+    if (selectedHostSettingsField === undefined || !hostSettingsCanEdit) return
+    setHostSettingsDrafts(previous => ({
+      ...previous,
+      [selectedHostSettingsField.id]: previous[selectedHostSettingsField.id]
+        ?? { text: selectedHostSettingsField.value },
+    }))
+    setHostSettingsEditing(true)
+    setHostSettingsError('')
+  }
+
+  const cycleSelectedHostSetting = (): void => {
+    if (selectedHostSettingsField?.kind !== 'enum' || !hostSettingsCanEdit) return
+    const options = selectedHostSettingsField.options ?? []
+    const current = hostSettingsDrafts[selectedHostSettingsField.id]?.text ?? selectedHostSettingsField.value
+    const next = options[(Math.max(0, options.indexOf(current)) + 1) % Math.max(1, options.length)]
+    if (next !== undefined) {
+      setHostSettingsDrafts(previous => ({
+        ...previous,
+        [selectedHostSettingsField.id]: { text: next },
+      }))
+    }
+  }
+
+  const selectTrajectoryInspectorTab = (tab: 'summary' | 'input' | 'output' | 'timing'): void => {
+    setTrajectoryInspectorTab(tab)
+  }
+
+  const cycleTrajectoryInspectorTab = (): void => {
+    const tabs = ['summary', 'input', 'output', 'timing'] as const
+    const tab = tabs[(tabs.indexOf(trajectoryInspectorTab) + 1) % tabs.length]
+    if (tab !== undefined) selectTrajectoryInspectorTab(tab)
+  }
+
+  const acceptPresetManagerLayer = (): void => {
+    const copyDraft = presetManagerCopyDraft
+    if (copyDraft !== undefined) {
+      if (copyDraft.step === 'id') {
+        try {
+          validateTuiPresetId(copyDraft.idDraft, presetManagerRows.map(row => row.preset.id))
+          setPresetManagerCopyDraft(current => current === undefined ? undefined : { ...current, step: 'name' })
+          setPresetManagerError('')
+        } catch (error) {
+          setPresetManagerError(error instanceof TuiPresetIdError
+            ? tuiMessage(locale, `presets.id.${error.code === 'empty' ? 'empty' : error.code === 'id-taken' ? 'taken' : 'invalid'}`,
+              error.code === 'id-taken' ? { id: copyDraft.idDraft.trim() } : {})
+            : String(error))
+        }
+        return
+      }
+      const id = copyDraft.idDraft.trim()
+      const name = copyDraft.nameDraft.trim() || undefined
+      void (async () => {
+        try {
+          await props.onCopyPreset(copyDraft.sourceId, id, name)
+          setPresetManagerCopyDraft(undefined)
+          setPresetManagerError('')
+          await props.onRefreshPresetManager()
+        } catch (error) {
+          setPresetManagerError(tuiPresetMutationErrorMessage(error, 'copy', locale))
+        }
+      })()
+      return
+    }
+    const deleteTarget = presetManagerDeleteConfirm
+    if (deleteTarget !== undefined) {
+      void (async () => {
+        try {
+          await props.onDeletePreset(deleteTarget.preset.id)
+          setPresetManagerDeleteConfirm(undefined)
+          setPresetManagerDetail(undefined)
+          setPresetManagerError('')
+          await props.onRefreshPresetManager()
+        } catch (error) {
+          setPresetManagerError(tuiPresetMutationErrorMessage(error, 'delete', locale))
+        }
+      })()
+    }
+  }
+
+  const resetSelectedHostSetting = (): void => {
+    if (selectedHostSettingsField === undefined) return
+    setHostSettingsDrafts(previous => ({
+      ...previous,
+      [selectedHostSettingsField.id]: { text: selectedHostSettingsField.value, reset: true },
+    }))
+    setHostSettingsEditing(false)
+    setHostSettingsError('')
+  }
+
+  const saveHostSettingsDrafts = (): void => {
+    if (hostSettingsDetail === undefined || hostSettingsSaving || !hostSettingsCanEdit) return
+    let mutation: TuiHostSettingsMutation
+    try {
+      mutation = planTuiHostSettingsMutation(hostSettingsDetail, hostSettingsDrafts)
+    } catch (error) {
+      setHostSettingsError(tuiHostSettingsErrorMessage(error, locale))
+      return
+    }
+    setHostSettingsSaving(true)
+    setHostSettingsEditing(false)
+    setHostSettingsError('')
+    void props.onMutateHostSettings(mutation).then(() => {
+      setHostSettingsDrafts({})
+    }).catch((error: unknown) => {
+      // The controller refreshes even on a revision conflict; retain drafts for an explicit retry.
+      setHostSettingsError(tuiHostSettingsErrorMessage(error, locale))
+    }).finally(() => {
+      setHostSettingsSaving(false)
+    })
+  }
+
+  const toggleSelectedTrajectoryFold = (): void => {
+    const selected = trajectoryEntries[effectiveTrajectorySelection]
+    const selectedTurn = selected?.turn
+    if (selected?.kind === 'turn' && selectedTurn !== undefined) {
+      setTrajectoryCollapsedTurns((previous) => {
+        const next = new Set(previous)
+        if (next.has(selectedTurn)) next.delete(selectedTurn)
+        else next.add(selectedTurn)
+        return next
+      })
+    } else if (selected?.kind === 'step' && selected.turn !== undefined && selected.step !== undefined) {
+      const id = `${selected.turn}:${selected.step}`
+      setTrajectoryCollapsedSteps((previous) => {
+        const next = new Set(previous)
+        if (next.has(id)) next.delete(id)
+        else next.add(id)
+        return next
+      })
+    }
+  }
+
+  const cancelSelectedWorkItem = (): void => {
+    if (selectedWorkItem === undefined || selectedWorkItem.action === 'none' || busy) return
+    setBusy(true)
+    setNotice('')
+    void props.onCancelWork(selectedWorkItem).catch((error: unknown) => {
+      setNotice(terminalSafe(error instanceof Error ? error.message : String(error)))
+    }).finally(() => { setBusy(false) })
+  }
+
+  const openSelectedWorkItem = (): void => {
+    if (selectedWorkItem === undefined || !selectedWorkItem.inspectable || busy) return
+    setBusy(true)
+    setNotice('')
+    void props.onOpenWork(selectedWorkItem).catch((error: unknown) => {
+      setNotice(terminalSafe(error instanceof Error ? error.message : String(error)))
+    }).finally(() => { setBusy(false) })
+  }
+
   const dispatchPointerAction = (column: number, row: number): void => {
     const hyperlink = hyperlinkAtScreen(column, row)
     if (hyperlink !== undefined) {
@@ -1915,11 +4499,60 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     if (action.id === 'transcript.focus') {
       const target = focusTargets[action.index]
       if (target?.key === action.key) toggleTranscriptTargetDetail(target, action.index)
+    } else if (action.id === 'transcript.openFocused') {
+      if (focus?.mode === 'browse' && focusedTarget !== undefined) {
+        toggleTranscriptTargetDetail(focusedTarget, focus.focusedIndex)
+      }
+    } else if (action.id === 'transcript.closeBrowse') {
+      if (focus?.mode === 'browse') setFocus(undefined)
+    } else if (action.id === 'rewind.select') {
+      if (rewindDialog?.phase === 'browsing' && rewindCandidates[action.index] !== undefined) {
+        setRewindSelection(action.index)
+        setRewindError('')
+      }
+    } else if (action.id === 'rewind.accept') {
+      if (rewindDialog?.phase === 'browsing') {
+        if (rewindConfirmation === undefined) {
+          const candidate = rewindCandidates[effectiveRewindSelection]
+          if (candidate === undefined) setRewindError(tuiMessage(locale, 'rewind.turn.none'))
+          else {
+            setRewindConfirmation(candidate)
+            setRewindError('')
+          }
+        } else if (!(hasComposerDraft && composer.text.trim() !== '/rewind')) confirmRewind('none')
+      }
+    } else if (action.id === 'rewind.stash') {
+      if (rewindConfirmation !== undefined) confirmRewind('stash')
+    } else if (action.id === 'rewind.discard') {
+      if (rewindConfirmation !== undefined) confirmRewind('discard')
+    } else if (action.id === 'rewind.close') {
+      if (rewindConfirmation !== undefined) {
+        setRewindConfirmation(undefined)
+        setRewindError('')
+      } else props.onCloseRewind()
+    } else if (action.id === 'fresh.accept') {
+      if (freshSessionDialog?.phase !== 'creating') void props.onConfirmFreshSession()
+    } else if (action.id === 'fresh.close') {
+      props.onCloseFreshSession()
+    } else if (action.id === 'sessionExport.accept') {
+      if (sessionExportDialog?.phase === 'selecting') {
+        void props.onExportSession(exportDirectory.text, exportDescendants, sessionExportDialog.format)
+      }
+    } else if (action.id === 'sessionExport.scope') {
+      if (sessionExportDialog?.phase === 'selecting') setExportDescendants(previous => !previous)
+    } else if (action.id === 'sessionExport.close') {
+      props.onCloseSessionExport()
     } else if (action.id === 'footer.activate') {
       activateFooterItem(mountedFooterItems.find(item => item.id === action.itemId))
     } else if (action.id === 'work.select') {
       setWorkSelection(Math.max(0, Math.min(work.items.length - 1, action.index)))
       setWorkClock(Date.now())
+    } else if (action.id === 'work.open') {
+      openSelectedWorkItem()
+    } else if (action.id === 'work.stop') {
+      cancelSelectedWorkItem()
+    } else if (action.id === 'work.close') {
+      setWorkOpen(false)
     } else if (action.id === 'pluginHub.toggleView') {
       if (pluginHubDialog !== undefined && pluginHubDialog.view !== action.targetView) {
         setPluginHubSelection(0)
@@ -1930,6 +4563,10 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       activatePluginHubPointer(action.index)
     } else if (action.id === 'pluginHub.close') {
       props.onClosePluginHub()
+    } else if (action.id === 'pluginHub.refresh') {
+      if (pluginHubDialog?.phase === 'browse' || pluginHubDialog?.phase === 'error') {
+        void props.onPluginHubRefresh()
+      }
     } else if (action.id === 'pluginHub.sort') {
       setPluginHubSelection(0)
       void props.onPluginHubSort()
@@ -1962,6 +4599,398 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         setResumeView(action.view)
         setResumeError('')
       }
+    } else if (action.id === 'resume.rename') {
+      const candidate = resumeCandidates[effectiveResumeSelection]
+      if (candidate === undefined) setResumeError(tuiMessage(locale, 'resume.search.none.current'))
+      else if (candidate.disabledReason !== undefined) setResumeError(candidate.disabledReason)
+      else if (hasComposerDraft && composer.text.trim() !== '/resume') {
+        setResumeError(tuiMessage(locale, 'resume.rename.draft'))
+      } else {
+        setResumeError('')
+        void props.onResumeForRename(candidate)
+      }
+    } else if (action.id === 'resume.stash') {
+      if (resumeConfirmation !== undefined) confirmResumeWithDraft('stash')
+    } else if (action.id === 'resume.discard') {
+      if (resumeConfirmation !== undefined) confirmResumeWithDraft('discard')
+    } else if (action.id === 'resume.close') {
+      if (resumeConfirmation !== undefined) {
+        setResumeConfirmation(undefined)
+        setResumeError('')
+      } else if (resumeQuery !== '') {
+        setResumeQuery('')
+        setResumeSelection(0)
+        setResumeError('')
+      } else props.onCloseResume()
+    } else if (action.id === 'provider.accept') {
+      if (providerRows.length > 0) {
+        setProviderSelection(Math.max(0, Math.min(providerRows.length - 1, action.index ?? effectiveProviderSelection)))
+        setProviderDetail(true)
+        setProviderDetailOffset(0)
+      }
+    } else if (action.id === 'provider.authenticate') {
+      authenticateSelectedProvider()
+    } else if (action.id === 'provider.editProfile') {
+      openSelectedProviderProfile()
+    } else if (action.id === 'provider.editEndpoint') {
+      if (selectedProvider?.settings?.writable === true) {
+        setProviderEndpointDraft('')
+        setProviderEndpointError('')
+      }
+    } else if (action.id === 'provider.editApiKey') {
+      if (providerCanStoreKey) {
+        setProviderSecretDraft('')
+        setProviderSecretError('')
+      }
+    } else if (action.id === 'provider.logout') {
+      if (providerCanLogout) setProviderLogoutConfirmation(selectedProvider.id)
+    } else if (action.id === 'provider.remove') {
+      if (providerCanRemove) setProviderDeleteConfirmation(selectedProvider.id)
+    } else if (action.id === 'provider.profileSave') {
+      saveSelectedProviderProfile()
+    } else if (action.id === 'provider.confirm') {
+      if (providerDeleteConfirmation !== undefined) removeSelectedProvider()
+      else if (providerLogoutConfirmation !== undefined) logoutSelectedProvider()
+      else if (providerSecretDraft !== undefined) saveSelectedProviderApiKey()
+      else if (providerEndpointDraft !== undefined) saveSelectedProviderEndpoint()
+    } else if (action.id === 'provider.endpointReset') {
+      if (providerEndpointDraft !== undefined) saveSelectedProviderEndpoint(true)
+    } else if (action.id === 'provider.refresh') {
+      void props.onRefreshProviderCenter()
+    } else if (action.id === 'provider.add') {
+      openProviderWizard()
+    } else if (action.id === 'provider.wizardAccept') {
+      acceptProviderWizard()
+    } else if (action.id === 'provider.wizardDiscover') {
+      discoverProviderWizardModels()
+    } else if (action.id === 'provider.wizardBack') {
+      backProviderWizard()
+    } else if (action.id === 'provider.wizardToggle') {
+      if (providerWizard?.step === 'picker') {
+        const index = action.index ?? providerWizard.candidateIndex
+        const candidate = providerWizard.candidates[index]
+        if (candidate !== undefined) {
+          const picked = new Set(providerWizard.picked)
+          if (!picked.delete(candidate.id)) picked.add(candidate.id)
+          patchProviderWizard({ candidateIndex: index, picked, error: '' })
+        }
+      }
+    } else if (action.id === 'provider.wizardSelect') {
+      if (providerWizard?.step === 'protocol' && providerWizard.target.protocols[action.index] !== undefined) {
+        patchProviderWizard({ protocolIndex: action.index, error: '' })
+      }
+    } else if (action.id === 'provider.profileField') {
+      const row = providerProfileEditor === undefined ? undefined
+        : providerRows.find(candidate => candidate.id === providerProfileEditor.providerId)
+      if (row !== undefined && providerProfileFields(row).includes(action.field)) {
+        patchProviderProfileEditor({ field: action.field, error: '' })
+      }
+    } else if (action.id === 'provider.close') {
+      if (providerWizard !== undefined) {
+        backProviderWizard()
+      } else if (providerProfileEditor !== undefined || providerDeleteConfirmation !== undefined
+        || providerLogoutConfirmation !== undefined
+        || providerSecretDraft !== undefined || providerEndpointDraft !== undefined) {
+        setProviderProfileEditor(undefined)
+        setProviderDeleteConfirmation(undefined)
+        setProviderLogoutConfirmation(undefined)
+        setProviderSecretDraft(undefined)
+        setProviderSecretError('')
+        setProviderEndpointDraft(undefined)
+        setProviderEndpointError('')
+      } else if (providerDetail) {
+        setProviderDetail(false)
+        setProviderDetailOffset(0)
+      } else props.onCloseProviderCenter()
+    } else if (action.id === 'queue.open') {
+      openQueue()
+    } else if (action.id === 'queue.accept') {
+      if (action.index !== undefined) {
+        setQueueSelection(Math.max(0, Math.min(queue.items.length - 1, action.index)))
+        setQueueDetail(true)
+        setQueueDetailOffset(0)
+        setQueueError('')
+      } else if (queueEditDraft !== undefined) saveQueueEdit()
+      else if (queueDeleteConfirmation) deleteSelectedQueueItem()
+      else openSelectedQueueDetail()
+    } else if (action.id === 'queue.edit') {
+      editSelectedQueueItem()
+    } else if (action.id === 'queue.delete') {
+      askDeleteSelectedQueueItem()
+    } else if (action.id === 'queue.close') {
+      closeQueueLayer()
+    } else if (action.id === 'goalPlan.open') {
+      openGoalPlan()
+    } else if (action.id === 'goalPlan.edit') {
+      if (goalPlanSurface?.goal !== undefined) setGoalEditDraft(goalPlanSurface.goal.objective)
+    } else if (action.id === 'goalPlan.pause') {
+      runGoalPlanMutation(() => props.onPauseGoal())
+    } else if (action.id === 'goalPlan.resume') {
+      runGoalPlanMutation(() => props.onResumeGoal())
+    } else if (action.id === 'goalPlan.clear') {
+      setGoalClearConfirmation(true)
+      setGoalPlanError('')
+    } else if (action.id === 'goalPlan.exitPlan') {
+      runGoalPlanMutation(() => props.onExitPlan())
+    } else if (action.id === 'goalPlan.accept') {
+      if (goalEditDraft !== undefined) saveGoalEdit()
+      else if (goalClearConfirmation) runGoalPlanMutation(() => props.onClearGoal())
+    } else if (action.id === 'goalPlan.close') {
+      closeGoalPlanLayer()
+    } else if (action.id === 'sessionManager.tab') {
+      setSessionManagerTab(action.tab)
+      setSessionManagerQuery('')
+      setSessionManagerSelection(0)
+      setSessionManagerDetail(false)
+      setSessionManagerError('')
+    } else if (action.id === 'trajectory.accept') {
+      const index = action.index ?? effectiveTrajectorySelection
+      if (trajectoryEntries[index] !== undefined) {
+        setTrajectorySelection(index)
+        setTrajectoryDetailKey(trajectoryEntries[index].key)
+      }
+    } else if (action.id === 'trajectory.close') {
+      if (trajectoryDetail !== undefined) setTrajectoryDetailKey(undefined)
+      else props.onCloseTrajectory()
+    } else if (action.id === 'trajectory.tab') {
+      selectTrajectoryInspectorTab(action.tab)
+    } else if (action.id === 'trajectory.cycleTab') {
+      cycleTrajectoryInspectorTab()
+    } else if (action.id === 'trajectory.fold') {
+      toggleSelectedTrajectoryFold()
+    } else if (action.id === 'trajectory.search') {
+      setTrajectorySearchEditing(true)
+    } else if (action.id === 'trajectory.older') {
+      props.onLoadOlderTrajectory()
+    } else if (action.id === 'trajectory.tail') {
+      setTrajectoryTailFollow(previous => !previous)
+    } else if (action.id === 'deliverables.inline') {
+      if (action.mode === 'open' && props.pathOpenerAvailable) {
+        void props.onOpenPath(action.path)
+      } else {
+        const result = props.onCopy(action.path)
+        setNotice(result.ok
+          ? tuiMessage(locale, 'clipboard.detail.copied')
+          : result.message ?? tuiMessage(locale, 'clipboard.copy.failed'))
+      }
+    } else if (action.id === 'deliverables.open') {
+      const node = focus?.mode === 'detail' && focusedTarget?.node.kind === 'deliverables'
+        ? focusedTarget.node
+        : undefined
+      const index = action.index ?? deliverableSelection
+      const item = node?.items[index]
+      if (item !== undefined) {
+        setDeliverableSelection(index)
+        if (props.pathOpenerAvailable) void props.onOpenPath(item.path)
+        else setNotice(tuiMessage(locale, 'deliverables.open.unavailable'))
+      }
+    } else if (action.id === 'deliverables.copy') {
+      if (selectedDeliverable !== undefined) {
+        const result = props.onCopy(selectedDeliverable.path)
+        setNotice(result.ok
+          ? tuiMessage(locale, 'clipboard.detail.copied')
+          : result.message ?? tuiMessage(locale, 'clipboard.copy.failed'))
+      }
+    } else if (action.id === 'feedback.like' || action.id === 'feedback.dislike') {
+      const rating = action.id === 'feedback.like' ? 'positive' as const : 'negative' as const
+      const current = activeMessageFeedback?.items.find(item => item.messageId === action.messageId)
+      void props.onSubmitFeedback(action.messageId, rating, current?.note)
+    } else if (action.id === 'feedback.clear') {
+      void props.onClearFeedback(action.messageId)
+    } else if (action.id === 'feedback.note') {
+      const current = activeMessageFeedback?.items.find(item => item.messageId === action.messageId)
+      if (current !== undefined) {
+        setFeedbackNoteDraft({ messageId: action.messageId, rating: current.rating, text: current.note ?? '' })
+      }
+    } else if (action.id === 'attachment.remove') {
+      setComposer((current) => {
+        const target = current.attachments?.[action.index]
+        return target === undefined ? current : removeComposerImageAttachment(current, target.ref.attachmentId)
+      })
+    } else if (action.id === 'hostPlugins.accept') {
+      const index = action.index ?? effectiveHostPluginSelection
+      setHostPluginSelection(index)
+      if (hostPluginTab === 'plugins' && hostPluginRows[index] !== undefined) {
+        setHostPluginDetail(hostPluginRows[index])
+        setHostSettingsDetailNs(undefined)
+      } else if (hostPluginTab === 'settings' && hostSettingsRows[index] !== undefined) {
+        openHostSettingsRow(hostSettingsRows[index])
+      }
+    } else if (action.id === 'hostPlugins.field') {
+      selectHostSettingsField(action.index)
+    } else if (action.id === 'hostPlugins.filter') {
+      setHostPluginFilter(f => f === 'all' ? 'enabled' : f === 'enabled' ? 'disabled' : f === 'disabled' ? 'failed' : 'all')
+      setHostPluginSelection(0)
+    } else if (action.id === 'hostPlugins.tab') {
+      selectHostPluginTab(action.tab ?? (hostPluginTab === 'plugins' ? 'settings' : 'plugins'))
+    } else if (action.id === 'hostPlugins.refresh') {
+      void props.onRefreshHostPluginCenter()
+    } else if (action.id === 'hostPlugins.edit') {
+      editSelectedHostSetting()
+    } else if (action.id === 'hostPlugins.cycle') {
+      cycleSelectedHostSetting()
+    } else if (action.id === 'hostPlugins.save') {
+      saveHostSettingsDrafts()
+    } else if (action.id === 'hostPlugins.discard') {
+      discardHostSettingsDrafts()
+    } else if (action.id === 'hostPlugins.reset') {
+      resetSelectedHostSetting()
+    } else if (action.id === 'hostPlugins.close') {
+      if (hostPluginDetail !== undefined) setHostPluginDetail(undefined)
+      else if (hostSettingsDetailNs !== undefined) {
+        setHostSettingsDetailNs(undefined)
+        discardHostSettingsDrafts()
+      }
+      else props.onCloseHostPluginCenter()
+    } else if (action.id === 'presetManager.accept') {
+      if (action.index === undefined && (presetManagerCopyDraft !== undefined
+        || presetManagerDeleteConfirm !== undefined)) {
+        acceptPresetManagerLayer()
+      } else if (action.index !== undefined && presetManagerRows[action.index] !== undefined) {
+        setPresetManagerSelection(action.index)
+        setPresetManagerDetail(presetManagerRows[action.index])
+        setPresetManagerError('')
+      } else if (selectedPresetManagerRow !== undefined) {
+        setPresetManagerDetail(selectedPresetManagerRow)
+      }
+    } else if (action.id === 'presetManager.setDefault') {
+      if (presetManagerDetail !== undefined && presetManagerDetail.canSetDefault) {
+        void (async () => {
+          try {
+            await props.onSetDefaultPreset(presetManagerDetail.preset.id, presetManager?.defaultRevision)
+            setPresetManagerError('')
+            await props.onRefreshPresetManager()
+            setPresetManagerDetail(undefined)
+          } catch (error) {
+            setPresetManagerError(tuiPresetMutationErrorMessage(error, 'setDefault', locale))
+          }
+        })()
+      }
+    } else if (action.id === 'presetManager.copy') {
+      if (presetManagerDetail !== undefined && presetManagerDetail.canCopy) {
+        setPresetManagerCopyDraft({
+          sourceId: presetManagerDetail.preset.id,
+          idDraft: '',
+          nameDraft: '',
+          step: 'id',
+        })
+        setPresetManagerError('')
+      }
+    } else if (action.id === 'presetManager.delete') {
+      if (presetManagerDetail !== undefined && presetManagerDetail.canDelete) {
+        setPresetManagerDeleteConfirm(presetManagerDetail)
+      }
+    } else if (action.id === 'presetManager.view') {
+      if (presetManagerDetail !== undefined) {
+        const id = presetManagerDetail.preset.id
+        setPresetManagerComposition({ id, phase: 'loading' })
+        void props.onReadPresetComposition(id).then((preview) => {
+          setPresetManagerComposition(current => current?.id === id
+            ? { id, phase: 'ready', text: preview.text, truncated: preview.truncated }
+            : current)
+        }).catch((error: unknown) => {
+          setPresetManagerComposition(undefined)
+          setPresetManagerError(terminalSafe(error instanceof Error ? error.message : String(error)))
+        })
+      }
+    } else if (action.id === 'presetManager.openFile') {
+      if (presetManagerDetail !== undefined) void props.onOpenPresetFile(presetManagerDetail.preset.id)
+    } else if (action.id === 'presetManager.open') {
+      if (presetManagerDetail !== undefined) void props.onOpenPresetLocation(presetManagerDetail.preset.id)
+    } else if (action.id === 'presetManager.close') {
+      if (presetManagerCopyDraft !== undefined) {
+        setPresetManagerCopyDraft(undefined)
+        setPresetManagerError('')
+      } else if (presetManagerDeleteConfirm !== undefined) {
+        setPresetManagerDeleteConfirm(undefined)
+        setPresetManagerError('')
+      } else if (presetManagerDetail !== undefined) {
+        setPresetManagerDetail(undefined)
+        setPresetManagerError('')
+      } else {
+        props.onClosePresetManager()
+      }
+    } else if (action.id === 'sessionManager.accept') {
+      if (directoryBrowser !== undefined) {
+        if (action.index !== undefined) {
+          const index = action.index
+          setDirectoryBrowser(previous => previous === undefined ? undefined : { ...previous, selection: index })
+          acceptWorkspaceDirectory(index)
+        } else acceptWorkspaceDirectory()
+      } else if (action.index !== undefined) {
+        setSessionManagerSelection(Math.max(0, Math.min(sessionManagerItems.length - 1, action.index)))
+        setSessionManagerDetail(true)
+        setSessionManagerError('')
+      } else if (sessionManagerEdit !== undefined) saveSessionManagerEdit()
+      else if (sessionManagerConfirm !== undefined) confirmSessionManagerMutation()
+      else if (sessionManagerItems.length > 0) setSessionManagerDetail(true)
+    } else if (action.id === 'sessionManager.resume') {
+      if (selectedManagedSession !== undefined) {
+        runSessionManagerMutation(() => props.onResumeManagedSession(selectedManagedSession.candidate))
+      }
+    } else if (action.id === 'sessionManager.fork') {
+      if (selectedManagedSession !== undefined) {
+        runSessionManagerMutation(() => props.onForkManagedSession(selectedManagedSession.candidate))
+      }
+    } else if (action.id === 'sessionManager.rename') {
+      if (selectedManagedSession !== undefined) {
+        setSessionManagerEdit({ kind: 'session-rename', draft: selectedManagedSession.candidate.title })
+      } else if (selectedManagedWorkspace !== undefined) {
+        setSessionManagerEdit({ kind: 'workspace-rename', draft: selectedManagedWorkspace.title })
+      }
+    } else if (action.id === 'sessionManager.archive') {
+      if (canToggleManagedSessionArchive) {
+        setSessionManagerConfirm(selectedManagedSession.archived ? 'session-unarchive' : 'session-archive')
+      }
+    } else if (action.id === 'sessionManager.add') {
+      beginWorkspaceAdd()
+    } else if (action.id === 'sessionManager.moveUp' && selectedManagedWorkspace !== undefined) {
+      runSessionManagerMutation(() => props.onMoveManagedWorkspace(selectedManagedWorkspace, -1))
+    } else if (action.id === 'sessionManager.moveDown' && selectedManagedWorkspace !== undefined) {
+      runSessionManagerMutation(() => props.onMoveManagedWorkspace(selectedManagedWorkspace, 1))
+    } else if (action.id === 'sessionManager.delete') {
+      if (selectedManagedWorkspace !== undefined) setSessionManagerConfirm('workspace-delete')
+    } else if (action.id === 'sessionManager.scope') {
+      setSessionManagerScope((previous) => {
+        const next = previous === 'workspace' ? 'all' : 'workspace'
+        persistSessionManagerPreferences({ scope: next })
+        return next
+      })
+      setSessionManagerSelection(0)
+    } else if (action.id === 'sessionManager.archiveFilter') {
+      setSessionManagerArchive((previous) => {
+        const next = previous === 'active' ? 'archived' : previous === 'archived' ? 'all' : 'active'
+        persistSessionManagerPreferences({ archive: next })
+        return next
+      })
+      setSessionManagerSelection(0)
+    } else if (action.id === 'sessionManager.sort') {
+      setSessionManagerSort((previous) => {
+        const next: TuiSessionSort = previous === 'updated-desc' ? 'updated-asc'
+          : previous === 'updated-asc' ? 'title' : previous === 'title' ? 'workspace' : 'updated-desc'
+        persistSessionManagerPreferences({ sort: next })
+        return next
+      })
+      setSessionManagerSelection(0)
+    } else if (action.id === 'sessionManager.group') {
+      setSessionManagerGroup((previous) => {
+        persistSessionManagerPreferences({ groupByWorkspace: !previous })
+        return !previous
+      })
+    } else if (action.id === 'sessionManager.directoryParent') {
+      if (directoryBrowserPage?.parent !== undefined) loadWorkspaceDirectory(directoryBrowserPage.parent)
+    } else if (action.id === 'sessionManager.directoryHome') {
+      loadWorkspaceDirectory()
+    } else if (action.id === 'sessionManager.directoryHidden') {
+      setDirectoryBrowser(previous => previous === undefined ? undefined : {
+        ...previous, showHidden: !previous.showHidden, selection: 0,
+      })
+    } else if (action.id === 'sessionManager.directoryRefresh') {
+      loadWorkspaceDirectory(directoryBrowserPage?.path ?? directoryBrowser?.requestedPath)
+    } else if (action.id === 'sessionManager.refresh') {
+      runSessionManagerMutation(() => props.onRefreshSessionManager())
+    } else if (action.id === 'sessionManager.close') {
+      closeSessionManagerLayer()
     } else if (action.id === 'dialog.option') {
       selectQuestionOption(action.index)
     } else if (action.id === 'dialog.accept') {
@@ -2030,9 +5059,41 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     }).finally(() => { setBusy(false) })
   }
 
+  const insertBracketedPasteText = (state: ComposerState, input: string): ComposerState => (
+    isLargeComposerPaste(input) ? insertComposerPasteReference(state, input) : insertComposerText(state, input)
+  )
+
+  const pasteTerminalPaths = (input: string, paths: readonly string[]): void => {
+    const viewId = props.view.id
+    setBusy(true)
+    setNotice('')
+    void props.onTerminalPathPaste(paths).then((result) => {
+      if (currentAgentViewId.current !== viewId) return
+      updateComposer(previous => result === undefined
+        ? insertBracketedPasteText(previous, input)
+        : insertComposerClipboard(previous, result.text, result.attachments))
+    }).catch((error: unknown) => {
+      if (currentAgentViewId.current === viewId) {
+        updateComposer(previous => insertBracketedPasteText(previous, input))
+        setNotice(terminalSafe(error instanceof Error ? error.message : String(error)))
+      }
+    }).finally(() => { setBusy(false) })
+  }
+
   useTuiTerminalInput((terminalInput) => {
     if (externalEditorActive) return
     if (extensionSnapshot.fullscreenScene !== undefined) {
+      if (terminalInput.kind === 'mouse') {
+        const mouseKind = tuiTerminalMouseReportKind(terminalInput.button, terminalInput.release)
+        const primaryButton = (terminalInput.button & 0b11) === 0
+          && (terminalInput.button & 0b11100) === 0
+        if (mouseKind === 'press' && primaryButton && fullscreenCloseRegions.some(region =>
+          terminalInput.column >= region.rect.left && terminalInput.column <= region.rect.right
+          && terminalInput.row >= region.rect.top && terminalInput.row <= region.rect.bottom)) {
+          props.extensions.closeFullscreenScene()
+        }
+        return
+      }
       if (terminalInput.kind !== 'input') return
       if (terminalInput.key.escape && !terminalInput.key.ctrl && !terminalInput.key.meta) {
         props.extensions.closeFullscreenScene()
@@ -2130,6 +5191,75 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           setLoadedContextOffset(previous => Math.max(
             0, Math.min(Math.max(0, loadedContextLines.length - loadedContextBodyRows), previous + wheelDirection),
           ))
+          return
+        }
+        if (queueOpen) {
+          if (queueDetail) {
+            setQueueDetailOffset(previous => Math.max(
+              0,
+              Math.min(
+                Math.max(0, selectedQueueDetailLines.length - queueDetailBodyRows),
+                previous + wheelDirection,
+              ),
+            ))
+          } else if (queueEditDraft === undefined && !queueDeleteConfirmation && queue.items.length > 0) {
+            setQueueSelection(previous => Math.max(
+              0, Math.min(queue.items.length - 1, previous + wheelDirection),
+            ))
+          }
+          return
+        }
+        if (trajectory !== undefined) {
+          if (trajectoryDetail === undefined && trajectoryEntries.length > 0) {
+            setTrajectorySelection(previous => Math.max(
+              0, Math.min(trajectoryEntries.length - 1, previous + wheelDirection),
+            ))
+          }
+          return
+        }
+        if (hostPluginCenter !== undefined) {
+          if (hostPluginDetail === undefined && hostPluginItems.length > 0) {
+            setHostPluginSelection(previous => Math.max(
+              0, Math.min(hostPluginItems.length - 1, previous + wheelDirection),
+            ))
+          }
+          return
+        }
+        if (presetManager !== undefined) {
+          if (presetManagerDetail === undefined && presetManagerCopyDraft === undefined
+            && presetManagerDeleteConfirm === undefined && presetManagerRows.length > 0) {
+            setPresetManagerSelection(previous => Math.max(
+              0, Math.min(presetManagerRows.length - 1, previous + wheelDirection),
+            ))
+          }
+          return
+        }
+        if (sessionManager !== undefined) {
+          if (!sessionManagerDetail && sessionManagerEdit === undefined
+            && sessionManagerConfirm === undefined && sessionManagerItems.length > 0) {
+            setSessionManagerSelection(previous => Math.max(
+              0, Math.min(sessionManagerItems.length - 1, previous + wheelDirection),
+            ))
+          }
+          return
+        }
+        if (providerCenterVisible) {
+          if (providerWizard?.step === 'picker' && providerWizard.candidates.length > 0) {
+            patchProviderWizard({
+              candidateIndex: Math.max(0, Math.min(
+                providerWizard.candidates.length - 1, providerWizard.candidateIndex + wheelDirection,
+              )),
+            })
+          } else if (providerDetail) {
+            setProviderDetailOffset(previous => Math.max(
+              0,
+              Math.min(Math.max(0, selectedProviderDetailLines.length - providerDetailBodyRows), previous + wheelDirection),
+            ))
+          } else if (providerRows.length > 0) {
+            setProviderSelection(previous => Math.max(
+              0, Math.min(providerRows.length - 1, previous + wheelDirection),
+            ))
+          }
           return
         }
         if (pluginHubDialog !== undefined && interaction === undefined) {
@@ -2247,6 +5377,12 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     const globalAction = matchAction('Global', input, key)
     if (globalAction === 'app.interrupt') {
       if (interaction !== undefined) cancelInteraction()
+      else if (goalPlanOpen) closeGoalPlanLayer()
+      else if (queueOpen) closeQueueLayer()
+      else if (trajectory !== undefined) props.onCloseTrajectory()
+      else if (hostPluginCenter !== undefined) props.onCloseHostPluginCenter()
+      else if (presetManager !== undefined) props.onClosePresetManager()
+      else if (sessionManager !== undefined) closeSessionManagerLayer()
       else if (workOpen) setWorkOpen(false)
       else if (freshSessionDialog !== undefined) {
         props.onCloseFreshSession()
@@ -2268,6 +5404,19 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       }
       else if (loadedContextVisible) {
         props.onCloseLoadedContext()
+      }
+      else if (providerCenterVisible) {
+        if (providerWizard !== undefined) {
+          backProviderWizard()
+        } else if (providerSecretDraft !== undefined || providerEndpointDraft !== undefined) {
+          setProviderSecretDraft(undefined)
+          setProviderSecretError('')
+          setProviderEndpointDraft(undefined)
+          setProviderEndpointError('')
+        } else if (providerDetail) {
+          setProviderDetail(false)
+          setProviderDetailOffset(0)
+        } else props.onCloseProviderCenter()
       }
       else if (agentStatus === 'running') props.onCancel()
       else props.onExit()
@@ -2344,6 +5493,275 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           Math.max(0, loadedContextLines.length - loadedContextBodyRows), previous + loadedContextBodyRows,
         ))
       } else if (action === 'dialog.cancel') props.onCloseLoadedContext()
+      return
+    }
+    if (queueOpen) {
+      const action = matchAction('Dialog', input, key)
+      const lower = input.toLocaleLowerCase()
+      if (queueEditDraft !== undefined) {
+        if (action === 'dialog.cancel') closeQueueLayer()
+        else if (action === 'dialog.accept') saveQueueEdit()
+        else if (key.backspace) {
+          setQueueEditDraft(previous => previous?.slice(0, -1))
+          setQueueError('')
+        } else if (key.delete) {
+          setQueueEditDraft('')
+          setQueueError('')
+        } else if (input !== '' && acceptsCommittedText(key)) {
+          setQueueEditDraft(previous => `${previous ?? ''}${input}`.slice(0, 65_536))
+          setQueueError('')
+        }
+        return
+      }
+      if (queueDeleteConfirmation) {
+        if (action === 'dialog.cancel' || lower === 'n') closeQueueLayer()
+        else if (action === 'dialog.accept' || lower === 'y') deleteSelectedQueueItem()
+        return
+      }
+      if (queueDetail) {
+        if (lower === 'e') editSelectedQueueItem()
+        else if (lower === 'd' || key.delete || key.backspace) askDeleteSelectedQueueItem()
+        else if (action === 'dialog.previous') {
+          setQueueDetailOffset(previous => Math.max(0, previous - 1))
+        } else if (action === 'dialog.next') {
+          setQueueDetailOffset(previous => Math.min(
+            Math.max(0, selectedQueueDetailLines.length - queueDetailBodyRows), previous + 1,
+          ))
+        } else if (action === 'dialog.previousPage') {
+          setQueueDetailOffset(previous => Math.max(0, previous - queueDetailBodyRows))
+        } else if (action === 'dialog.nextPage') {
+          setQueueDetailOffset(previous => Math.min(
+            Math.max(0, selectedQueueDetailLines.length - queueDetailBodyRows),
+            previous + queueDetailBodyRows,
+          ))
+        } else if (action === 'dialog.cancel') closeQueueLayer()
+        return
+      }
+      if (lower === 'e') editSelectedQueueItem()
+      else if (lower === 'd' || key.delete || key.backspace) askDeleteSelectedQueueItem()
+      else if (action === 'dialog.previous') setQueueSelection(previous => Math.max(0, previous - 1))
+      else if (action === 'dialog.next') {
+        setQueueSelection(previous => Math.min(Math.max(0, queue.items.length - 1), previous + 1))
+      } else if (action === 'dialog.previousPage') {
+        setQueueSelection(previous => Math.max(0, previous - queueVisibleCount))
+      } else if (action === 'dialog.nextPage') {
+        setQueueSelection(previous => Math.min(
+          Math.max(0, queue.items.length - 1), previous + queueVisibleCount,
+        ))
+      } else if (action === 'dialog.accept') openSelectedQueueDetail()
+      else if (action === 'dialog.cancel') closeQueueLayer()
+      return
+    }
+    if (providerCenterVisible) {
+      const action = matchAction('Dialog', input, key)
+      const lower = input.toLocaleLowerCase()
+      if (providerWizard !== undefined) {
+        const wizard = providerWizard
+        if (action === 'dialog.cancel') {
+          backProviderWizard()
+          return
+        }
+        if (wizard.step === 'picker') {
+          if (action === 'dialog.previous') {
+            patchProviderWizard({ candidateIndex: Math.max(0, wizard.candidateIndex - 1), error: '' })
+          } else if (action === 'dialog.next') {
+            patchProviderWizard({
+              candidateIndex: Math.min(Math.max(0, wizard.candidates.length - 1), wizard.candidateIndex + 1),
+              error: '',
+            })
+          } else if (input === ' ') {
+            const candidate = wizard.candidates[wizard.candidateIndex]
+            if (candidate !== undefined) {
+              const picked = new Set(wizard.picked)
+              if (!picked.delete(candidate.id)) picked.add(candidate.id)
+              patchProviderWizard({ picked, error: '' })
+            }
+          } else if (action === 'dialog.accept') acceptProviderWizard()
+          return
+        }
+        if (wizard.step === 'protocol') {
+          if (action === 'dialog.previous' || action === 'dialog.next') {
+            const direction = action === 'dialog.previous' ? -1 : 1
+            const count = wizard.target.protocols.length
+            patchProviderWizard({
+              protocolIndex: count === 0 ? 0 : (wizard.protocolIndex + direction + count) % count,
+              error: '',
+            })
+          } else if (action === 'dialog.accept') acceptProviderWizard()
+          return
+        }
+        if (wizard.step === 'confirm') {
+          if (action === 'dialog.accept') acceptProviderWizard()
+          return
+        }
+        if (wizard.step === 'models' && key.ctrl === true && lower === 'f') {
+          discoverProviderWizardModels()
+          return
+        }
+        if (action === 'dialog.accept') {
+          acceptProviderWizard()
+          return
+        }
+        if (wizard.step === 'key') {
+          if (key.backspace) setProviderWizardSecret(previous => previous.slice(0, -1))
+          else if (key.delete) setProviderWizardSecret('')
+          else if (input !== '' && acceptsCommittedText(key)) {
+            setProviderWizardSecret(previous => `${previous}${input}`.slice(0, 4_096))
+          }
+          patchProviderWizard({ error: '' })
+          return
+        }
+        const field = wizard.step === 'id' ? 'id'
+          : wizard.step === 'name' ? 'displayName'
+            : wizard.step === 'endpoint' ? 'endpoint'
+              : 'modelText'
+        const limit = field === 'id' ? 128 : field === 'displayName' ? 128 : 4_096
+        if (key.backspace) patchProviderWizard({ [field]: wizard[field].slice(0, -1), error: '' })
+        else if (key.delete) patchProviderWizard({ [field]: '', error: '' })
+        else if (input !== '' && acceptsCommittedText(key)) {
+          patchProviderWizard({ [field]: `${wizard[field]}${input}`.slice(0, limit), error: '' })
+        }
+        return
+      }
+      if (providerDeleteConfirmation !== undefined) {
+        if (action === 'dialog.cancel') {
+          setProviderDeleteConfirmation(undefined)
+          setProviderSecretError('')
+        } else if (action === 'dialog.accept') removeSelectedProvider()
+        return
+      }
+      if (providerLogoutConfirmation !== undefined) {
+        if (action === 'dialog.cancel') {
+          setProviderLogoutConfirmation(undefined)
+          setProviderSecretError('')
+        } else if (action === 'dialog.accept') logoutSelectedProvider()
+        return
+      }
+      if (providerProfileEditor !== undefined) {
+        const editor = providerProfileEditor
+        if (action === 'dialog.cancel') {
+          setProviderProfileEditor(undefined)
+        } else if (key.ctrl === true && lower === 's') {
+          saveSelectedProviderProfile()
+        } else if (key.tab) {
+          cycleProviderProfileField(key.shift === true ? -1 : 1)
+        } else if (editor.field === 'protocol' && (key.leftArrow || key.rightArrow
+          || action === 'dialog.previous' || action === 'dialog.next')) {
+          const direction = key.leftArrow || action === 'dialog.previous' ? -1 : 1
+          const count = editor.protocols.length
+          patchProviderProfileEditor({
+            protocolIndex: count === 0 ? 0 : (editor.protocolIndex + direction + count) % count,
+            error: '',
+          })
+        } else if (editor.field !== 'protocol') {
+          const field = editor.field === 'displayName' ? 'displayName' : 'modelsText'
+          const limit = field === 'displayName' ? 128 : 16_384
+          if (key.backspace) patchProviderProfileEditor({ [field]: editor[field].slice(0, -1), error: '' })
+          else if (key.delete) patchProviderProfileEditor({ [field]: '', error: '' })
+          else if (input !== '' && acceptsCommittedText(key)) {
+            patchProviderProfileEditor({ [field]: `${editor[field]}${input}`.slice(0, limit), error: '' })
+          }
+        }
+        return
+      }
+      if (providerSecretDraft !== undefined) {
+        if (action === 'dialog.cancel') {
+          setProviderSecretDraft(undefined)
+          setProviderSecretError('')
+        } else if (action === 'dialog.accept') {
+          saveSelectedProviderApiKey()
+        } else if (key.backspace) {
+          setProviderSecretDraft(previous => previous?.slice(0, -1))
+          setProviderSecretError('')
+        } else if (key.delete) {
+          setProviderSecretDraft('')
+          setProviderSecretError('')
+        } else if (input !== '' && acceptsCommittedText(key)) {
+          setProviderSecretDraft(previous => `${previous ?? ''}${input}`.slice(0, 4_096))
+          setProviderSecretError('')
+        }
+        return
+      }
+      if (providerEndpointDraft !== undefined) {
+        if (action === 'dialog.cancel') {
+          setProviderEndpointDraft(undefined)
+          setProviderEndpointError('')
+        } else if (action === 'dialog.accept') {
+          saveSelectedProviderEndpoint()
+        } else if (lower === 'u') {
+          saveSelectedProviderEndpoint(true)
+        } else if (key.backspace) {
+          setProviderEndpointDraft(previous => previous?.slice(0, -1))
+          setProviderEndpointError('')
+        } else if (key.delete) {
+          setProviderEndpointDraft('')
+          setProviderEndpointError('')
+        } else if (input !== '' && acceptsCommittedText(key)) {
+          setProviderEndpointDraft(previous => `${previous ?? ''}${input}`.slice(0, 4_096))
+          setProviderEndpointError('')
+        }
+        return
+      }
+      if (lower === 'r') {
+        void props.onRefreshProviderCenter()
+        return
+      }
+      if (providerDetail) {
+        if (lower === 'p' && providerCanEditProfile) {
+          openSelectedProviderProfile()
+        } else if (lower === 'd' && providerCanRemove) {
+          setProviderDeleteConfirmation(selectedProvider.id)
+          setProviderSecretError('')
+        } else if (lower === 'x' && providerCanLogout) {
+          setProviderLogoutConfirmation(selectedProvider.id)
+          setProviderSecretError('')
+        } else if (lower === 'e' && selectedProvider?.settings?.writable === true) {
+          setProviderEndpointDraft('')
+          setProviderEndpointError('')
+        } else if (lower === 'k' && providerCanStoreKey) {
+          setProviderSecretDraft('')
+          setProviderSecretError('')
+        } else if ((action === 'dialog.accept' || lower === 'l') && providerCanAuthenticate) {
+          authenticateSelectedProvider()
+        } else if (action === 'dialog.previous') {
+          setProviderDetailOffset(previous => Math.max(0, previous - 1))
+        } else if (action === 'dialog.next') {
+          setProviderDetailOffset(previous => Math.min(
+            Math.max(0, selectedProviderDetailLines.length - providerDetailBodyRows), previous + 1,
+          ))
+        } else if (action === 'dialog.previousPage') {
+          setProviderDetailOffset(previous => Math.max(0, previous - providerDetailBodyRows))
+        } else if (action === 'dialog.nextPage') {
+          setProviderDetailOffset(previous => Math.min(
+            Math.max(0, selectedProviderDetailLines.length - providerDetailBodyRows),
+            previous + providerDetailBodyRows,
+          ))
+        } else if (action === 'dialog.cancel') {
+          setProviderDetail(false)
+          setProviderDetailOffset(0)
+        }
+        return
+      }
+      if (lower === 'a' && providerCreationTarget !== undefined) {
+        openProviderWizard()
+        return
+      }
+      if (action === 'dialog.previous') {
+        setProviderSelection(previous => Math.max(0, previous - 1))
+      } else if (action === 'dialog.next') {
+        setProviderSelection(previous => Math.min(Math.max(0, providerRows.length - 1), previous + 1))
+      } else if (action === 'dialog.previousPage') {
+        setProviderSelection(previous => Math.max(0, previous - providerVisibleCount))
+      } else if (action === 'dialog.nextPage') {
+        setProviderSelection(previous => Math.min(
+          Math.max(0, providerRows.length - 1), previous + providerVisibleCount,
+        ))
+      } else if (action === 'dialog.accept' && selectedProvider !== undefined) {
+        setProviderDetail(true)
+        setProviderDetailOffset(0)
+      } else if (action === 'dialog.cancel') {
+        props.onCloseProviderCenter()
+      }
       return
     }
     if (inputContext === 'Approval') {
@@ -2530,6 +5948,444 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       }
       return
     }
+    if (goalPlanOpen && interaction === undefined) {
+      const action = matchAction('Dialog', input, key)
+      const lower = input.toLocaleLowerCase()
+      if (goalEditDraft !== undefined) {
+        if (action === 'dialog.cancel') closeGoalPlanLayer()
+        else if (action === 'dialog.accept') saveGoalEdit()
+        else if (key.backspace) {
+          setGoalEditDraft(previous => previous?.slice(0, -1))
+          setGoalPlanError('')
+        } else if (key.delete) {
+          setGoalEditDraft('')
+          setGoalPlanError('')
+        } else if (input !== '' && acceptsCommittedText(key)) {
+          setGoalEditDraft(previous => `${previous ?? ''}${input}`.slice(0, 4_096))
+          setGoalPlanError('')
+        }
+        return
+      }
+      if (goalClearConfirmation) {
+        if (action === 'dialog.cancel' || lower === 'n') closeGoalPlanLayer()
+        else if (action === 'dialog.accept' || lower === 'y') runGoalPlanMutation(() => props.onClearGoal())
+        return
+      }
+      if (action === 'dialog.cancel') closeGoalPlanLayer()
+      else if (lower === 'e' && goalPlanSurface?.goal !== undefined) {
+        setGoalEditDraft(goalPlanSurface.goal.objective)
+        setGoalPlanError('')
+      } else if (lower === 'p' && goalPlanSurface?.goal?.phase === 'active') {
+        runGoalPlanMutation(() => props.onPauseGoal())
+      } else if (lower === 'r' && (goalPlanSurface?.goal?.phase === 'paused'
+        || goalPlanSurface?.goal?.phase === 'blocked')) {
+        runGoalPlanMutation(() => props.onResumeGoal())
+      } else if (lower === 'c' && goalPlanSurface?.goal !== undefined) {
+        setGoalClearConfirmation(true)
+        setGoalPlanError('')
+      } else if (lower === 'x' && goalPlanSurface?.plan?.effective === true) {
+        runGoalPlanMutation(() => props.onExitPlan())
+      }
+      return
+    }
+    if (trajectory !== undefined && interaction === undefined) {
+      const action = matchAction('Dialog', input, key)
+      const lower = input.toLocaleLowerCase()
+      if (trajectorySearchEditing) {
+        if (action === 'dialog.cancel' || action === 'dialog.accept') {
+          setTrajectorySearchEditing(false)
+        } else if (key.backspace) {
+          setTrajectoryQuery(previous => previous.slice(0, -1))
+          setTrajectorySelection(0)
+        } else if (input !== '' && acceptsCommittedText(key)) {
+          setTrajectoryQuery(previous => `${previous}${input}`.slice(0, 256))
+          setTrajectorySelection(0)
+        }
+        return
+      }
+      if (trajectoryDetail !== undefined) {
+        if (action === 'dialog.cancel') setTrajectoryDetailKey(undefined)
+        else if (key.tab || key.rightArrow) {
+          cycleTrajectoryInspectorTab()
+        } else if (key.leftArrow) {
+          const tabs = ['summary', 'input', 'output', 'timing'] as const
+          const tab = tabs[(tabs.indexOf(trajectoryInspectorTab) + tabs.length - 1) % tabs.length]
+          if (tab !== undefined) selectTrajectoryInspectorTab(tab)
+        }
+        return
+      }
+      if (input === '/') {
+        setTrajectorySearchEditing(true)
+      } else if (input === 'R') {
+        props.onRefreshTrajectory()
+      } else if (lower === 'l' && trajectory.omitted > 0) {
+        props.onLoadOlderTrajectory()
+      } else if (lower === 't') {
+        setTrajectoryTailFollow(previous => !previous)
+      } else if (lower === 'f') {
+        toggleSelectedTrajectoryFold()
+      } else if (action === 'dialog.previous' || action === 'dialog.next') {
+        if (trajectoryEntries.length === 0) return
+        setTrajectoryTailFollow(false)
+        setTrajectorySelection(previous => action === 'dialog.previous'
+          ? (Math.min(previous, trajectoryEntries.length - 1) + trajectoryEntries.length - 1)
+            % trajectoryEntries.length
+          : (Math.min(previous, trajectoryEntries.length - 1) + 1) % trajectoryEntries.length)
+      } else if (action === 'dialog.previousPage' || action === 'dialog.nextPage') {
+        setTrajectoryTailFollow(false)
+        setTrajectorySelection(previous => action === 'dialog.previousPage'
+          ? Math.max(0, previous - trajectoryVisibleCount)
+          : Math.min(Math.max(0, trajectoryEntries.length - 1), previous + trajectoryVisibleCount))
+      } else if (action === 'dialog.accept') {
+        if (trajectoryEntries[effectiveTrajectorySelection] !== undefined) {
+          setTrajectoryDetailKey(trajectoryEntries[effectiveTrajectorySelection].key)
+          setTrajectoryInspectorTab('summary')
+        }
+      } else if (action === 'dialog.cancel') {
+        props.onCloseTrajectory()
+      }
+      return
+    }
+    if (hostPluginCenter !== undefined && interaction === undefined) {
+      const action = matchAction('Dialog', input, key)
+      const lower = input.toLocaleLowerCase()
+      if (hostPluginDetail !== undefined) {
+        if (action === 'dialog.cancel') setHostPluginDetail(undefined)
+        return
+      }
+      if (hostSettingsDetailNs !== undefined) {
+        if (hostSettingsEditing) {
+          if (action === 'dialog.cancel' || action === 'dialog.accept') {
+            setHostSettingsEditing(false)
+          } else if (key.backspace && selectedHostSettingsField !== undefined) {
+            setHostSettingsDrafts((previous) => {
+              const current = previous[selectedHostSettingsField.id]?.text ?? selectedHostSettingsField.value
+              return { ...previous, [selectedHostSettingsField.id]: { text: current.slice(0, -1) } }
+            })
+          } else if (input !== '' && acceptsCommittedText(key) && selectedHostSettingsField !== undefined) {
+            setHostSettingsDrafts((previous) => {
+              const current = previous[selectedHostSettingsField.id]?.text ?? ''
+              return { ...previous, [selectedHostSettingsField.id]: { text: `${current}${input}`.slice(0, 128) } }
+            })
+            setHostSettingsError('')
+          }
+          return
+        }
+        if (action === 'dialog.cancel') {
+          setHostSettingsDetailNs(undefined)
+          discardHostSettingsDrafts()
+        } else if (lower === 's' && hostSettingsCanEdit) {
+          saveHostSettingsDrafts()
+        } else if (lower === 'd' && hostSettingsCanEdit) {
+          discardHostSettingsDrafts()
+        } else if (lower === 'x' && hostSettingsCanEdit) {
+          resetSelectedHostSetting()
+        } else if (lower === 'e' && selectedHostSettingsField !== undefined && hostSettingsCanEdit) {
+          editSelectedHostSetting()
+        } else if (input === ' ' && selectedHostSettingsField?.kind === 'enum' && hostSettingsCanEdit) {
+          cycleSelectedHostSetting()
+        } else if (action === 'dialog.previous' || action === 'dialog.next') {
+          if (hostSettingsFields.length === 0) return
+          setHostSettingsFieldSelection(previous => action === 'dialog.previous'
+            ? (Math.min(previous, hostSettingsFields.length - 1) + hostSettingsFields.length - 1)
+              % hostSettingsFields.length
+            : (Math.min(previous, hostSettingsFields.length - 1) + 1) % hostSettingsFields.length)
+        }
+        return
+      }
+      if (key.tab) {
+        selectHostPluginTab(hostPluginTab === 'plugins' ? 'settings' : 'plugins')
+      } else if (lower === 'f' && hostPluginTab === 'plugins') {
+        setHostPluginFilter(f => f === 'all' ? 'enabled' : f === 'enabled' ? 'disabled' : f === 'disabled' ? 'failed' : 'all')
+        setHostPluginSelection(0)
+      } else if (input === 'R') {
+        void props.onRefreshHostPluginCenter()
+      } else if (action === 'dialog.previous' || action === 'dialog.next') {
+        if (hostPluginItems.length === 0) return
+        setHostPluginSelection(previous => action === 'dialog.previous'
+          ? (Math.min(previous, hostPluginItems.length - 1) + hostPluginItems.length - 1)
+            % hostPluginItems.length
+          : (Math.min(previous, hostPluginItems.length - 1) + 1) % hostPluginItems.length)
+      } else if (action === 'dialog.previousPage' || action === 'dialog.nextPage') {
+        setHostPluginSelection(previous => action === 'dialog.previousPage'
+          ? Math.max(0, previous - hostPluginVisibleCount)
+          : Math.min(Math.max(0, hostPluginItems.length - 1), previous + hostPluginVisibleCount))
+      } else if (action === 'dialog.accept') {
+        if (hostPluginTab === 'plugins' && hostPluginRows[effectiveHostPluginSelection] !== undefined) {
+          setHostPluginDetail(hostPluginRows[effectiveHostPluginSelection])
+        } else if (hostPluginTab === 'settings' && hostSettingsRows[effectiveHostPluginSelection] !== undefined) {
+          openHostSettingsRow(hostSettingsRows[effectiveHostPluginSelection])
+        }
+      } else if (action === 'dialog.cancel') {
+        props.onCloseHostPluginCenter()
+      } else if (key.backspace && hostPluginTab === 'plugins') {
+        setHostPluginQuery(previous => previous.slice(0, -1))
+        setHostPluginSelection(0)
+      } else if (input !== '' && acceptsCommittedText(key) && hostPluginTab === 'plugins') {
+        setHostPluginQuery(previous => `${previous}${input}`.slice(0, 256))
+        setHostPluginSelection(0)
+      }
+      return
+    }
+    if (presetManager !== undefined && interaction === undefined) {
+      const action = matchAction('Dialog', input, key)
+      const lower = input.toLocaleLowerCase()
+      if (presetManagerCopyDraft !== undefined) {
+        if (action === 'dialog.cancel') {
+          setPresetManagerCopyDraft(undefined)
+          setPresetManagerError('')
+        } else if (action === 'dialog.accept') {
+          acceptPresetManagerLayer()
+        } else if (key.backspace) {
+          setPresetManagerCopyDraft((d) => {
+            if (d === undefined) return undefined
+            const field = d.step === 'id' ? 'idDraft' : 'nameDraft'
+            return { ...d, [field]: d[field].slice(0, -1) }
+          })
+          setPresetManagerError('')
+        } else if (key.delete) {
+          setPresetManagerCopyDraft((d) => {
+            if (d === undefined) return undefined
+            return { ...d, [d.step === 'id' ? 'idDraft' : 'nameDraft']: '' }
+          })
+          setPresetManagerError('')
+        } else if (input !== '' && acceptsCommittedText(key)) {
+          setPresetManagerCopyDraft((d) => {
+            if (d === undefined) return undefined
+            const field = d.step === 'id' ? 'idDraft' : 'nameDraft'
+            return { ...d, [field]: `${d[field]}${input}`.slice(0, 256) }
+          })
+          setPresetManagerError('')
+        }
+        return
+      }
+      if (presetManagerDeleteConfirm !== undefined) {
+        if (action === 'dialog.cancel' || lower === 'n') {
+          setPresetManagerDeleteConfirm(undefined)
+          setPresetManagerError('')
+        } else if (action === 'dialog.accept' || lower === 'y') {
+          acceptPresetManagerLayer()
+        }
+        return
+      }
+      if (presetManagerDetail !== undefined) {
+        if (action === 'dialog.cancel') {
+          setPresetManagerDetail(undefined)
+          setPresetManagerError('')
+        } else if (lower === 'd' && presetManagerDetail.canSetDefault) {
+          void (async () => {
+            try {
+              await props.onSetDefaultPreset(presetManagerDetail.preset.id, presetManager.defaultRevision)
+              setPresetManagerError('')
+              await props.onRefreshPresetManager()
+              setPresetManagerDetail(undefined)
+            } catch (error) {
+              setPresetManagerError(tuiPresetMutationErrorMessage(error, 'setDefault', locale))
+            }
+          })()
+        } else if (lower === 'c' && presetManagerDetail.canCopy) {
+          setPresetManagerCopyDraft({
+            sourceId: presetManagerDetail.preset.id,
+            idDraft: '',
+            nameDraft: '',
+            step: 'id',
+          })
+          setPresetManagerError('')
+        } else if ((lower === 'x' || key.delete || key.backspace) && presetManagerDetail.canDelete) {
+          setPresetManagerDeleteConfirm(presetManagerDetail)
+        } else if (lower === 'v') {
+          const id = presetManagerDetail.preset.id
+          setPresetManagerComposition({ id, phase: 'loading' })
+          void props.onReadPresetComposition(id).then((preview) => {
+            setPresetManagerComposition(current => current?.id === id
+              ? { id, phase: 'ready', text: preview.text, truncated: preview.truncated }
+              : current)
+          }).catch((error: unknown) => {
+            setPresetManagerComposition(undefined)
+            setPresetManagerError(terminalSafe(error instanceof Error ? error.message : String(error)))
+          })
+        } else if (lower === 'f' && props.pathOpenerAvailable) {
+          void props.onOpenPresetFile(presetManagerDetail.preset.id)
+        } else if (lower === 'o' && props.pathOpenerAvailable) {
+          void props.onOpenPresetLocation(presetManagerDetail.preset.id)
+        }
+        return
+      }
+      if (action === 'dialog.previous' || action === 'dialog.next') {
+        if (presetManagerRows.length === 0) return
+        setPresetManagerSelection(previous => action === 'dialog.previous'
+          ? (Math.min(previous, presetManagerRows.length - 1) + presetManagerRows.length - 1)
+            % presetManagerRows.length
+          : (Math.min(previous, presetManagerRows.length - 1) + 1) % presetManagerRows.length)
+        setPresetManagerError('')
+      } else if (action === 'dialog.previousPage' || action === 'dialog.nextPage') {
+        setPresetManagerSelection(previous => action === 'dialog.previousPage'
+          ? Math.max(0, previous - presetManagerVisibleCount)
+          : Math.min(Math.max(0, presetManagerRows.length - 1), previous + presetManagerVisibleCount))
+      } else if (action === 'dialog.accept') {
+        if (presetManagerRows.length > 0 && selectedPresetManagerRow !== undefined) {
+          setPresetManagerDetail(selectedPresetManagerRow)
+        }
+      } else if (action === 'dialog.cancel') {
+        props.onClosePresetManager()
+      } else if (input === 'R') {
+        void props.onRefreshPresetManager()
+      }
+      return
+    }
+    if (sessionManager !== undefined && interaction === undefined) {
+      const action = matchAction('Dialog', input, key)
+      const lower = input.toLocaleLowerCase()
+      if (sessionManager.phase !== 'ready') {
+        if (action === 'dialog.cancel') props.onCloseSessionManager()
+        return
+      }
+      if (directoryBrowser !== undefined) {
+        if (action === 'dialog.cancel') {
+          closeSessionManagerLayer()
+        } else if (input === 'R') {
+          loadWorkspaceDirectory(directoryBrowserPage?.path ?? directoryBrowser.requestedPath)
+        } else if (input === '.') {
+          setDirectoryBrowser(previous => previous === undefined ? undefined : {
+            ...previous, showHidden: !previous.showHidden, selection: 0,
+          })
+        } else if (input === '~') {
+          loadWorkspaceDirectory()
+        } else if ((key.leftArrow || key.backspace) && directoryBrowserPage?.parent !== undefined) {
+          loadWorkspaceDirectory(directoryBrowserPage.parent)
+        } else if (action === 'dialog.previous' || action === 'dialog.next') {
+          const count = directoryBrowserPage?.rows.length ?? 0
+          if (count > 0) setDirectoryBrowser(previous => previous === undefined ? undefined : {
+            ...previous,
+            selection: action === 'dialog.previous'
+              ? (Math.min(previous.selection, count - 1) + count - 1) % count
+              : (Math.min(previous.selection, count - 1) + 1) % count,
+          })
+        } else if (action === 'dialog.previousPage' || action === 'dialog.nextPage') {
+          const count = directoryBrowserPage?.rows.length ?? 0
+          setDirectoryBrowser(previous => previous === undefined ? undefined : {
+            ...previous,
+            selection: action === 'dialog.previousPage'
+              ? Math.max(0, previous.selection - directoryVisibleCount)
+              : Math.min(Math.max(0, count - 1), previous.selection + directoryVisibleCount),
+          })
+        } else if (action === 'dialog.accept' && directoryBrowser.phase === 'ready') {
+          acceptWorkspaceDirectory()
+        }
+        return
+      }
+      if (sessionManagerEdit !== undefined) {
+        if (action === 'dialog.cancel') closeSessionManagerLayer()
+        else if (action === 'dialog.accept') saveSessionManagerEdit()
+        else if (key.backspace) {
+          setSessionManagerEdit(previous => previous === undefined ? undefined : {
+            ...previous, draft: previous.draft.slice(0, -1),
+          })
+          setSessionManagerError('')
+        } else if (key.delete) {
+          setSessionManagerEdit(previous => previous === undefined ? undefined : { ...previous, draft: '' })
+          setSessionManagerError('')
+        } else if (input !== '' && acceptsCommittedText(key)) {
+          setSessionManagerEdit(previous => previous === undefined ? undefined : {
+            ...previous, draft: `${previous.draft}${input}`.slice(0, 4_096),
+          })
+          setSessionManagerError('')
+        }
+        return
+      }
+      if (sessionManagerConfirm !== undefined) {
+        if (action === 'dialog.cancel' || lower === 'n') closeSessionManagerLayer()
+        else if (action === 'dialog.accept' || lower === 'y') confirmSessionManagerMutation()
+        return
+      }
+      if (sessionManagerDetail) {
+        if (action === 'dialog.cancel') closeSessionManagerLayer()
+        else if (sessionManagerTab === 'sessions' && selectedManagedSession !== undefined) {
+          if (lower === 'o' || action === 'dialog.accept') {
+            runSessionManagerMutation(() => props.onResumeManagedSession(selectedManagedSession.candidate))
+          } else if (lower === 'f') {
+            runSessionManagerMutation(() => props.onForkManagedSession(selectedManagedSession.candidate))
+          } else if (lower === 'r') {
+            setSessionManagerEdit({ kind: 'session-rename', draft: selectedManagedSession.candidate.title })
+          } else if (selectedManagedSession.archived && props.canUnarchiveManagedSessions === true && lower === 'u') {
+            setSessionManagerConfirm('session-unarchive')
+          } else if (!selectedManagedSession.archived && lower === 'a' && !selectedManagedSession.current) {
+            setSessionManagerConfirm('session-archive')
+          }
+        } else if (sessionManagerTab === 'workspaces' && selectedManagedWorkspace !== undefined) {
+          if (lower === 'r') {
+            setSessionManagerEdit({ kind: 'workspace-rename', draft: selectedManagedWorkspace.title })
+          } else if (lower === '[') {
+            runSessionManagerMutation(() => props.onMoveManagedWorkspace(selectedManagedWorkspace, -1))
+          } else if (lower === ']') {
+            runSessionManagerMutation(() => props.onMoveManagedWorkspace(selectedManagedWorkspace, 1))
+          } else if (lower === 'd' || key.delete || key.backspace) {
+            setSessionManagerConfirm('workspace-delete')
+          }
+        }
+        return
+      }
+      if (key.tab) {
+        setSessionManagerTab(previous => previous === 'sessions' ? 'workspaces' : 'sessions')
+        setSessionManagerQuery('')
+        setSessionManagerSelection(0)
+        setSessionManagerError('')
+      } else if (sessionManagerTab === 'sessions' && lower === 'v') {
+        setSessionManagerArchive((previous) => {
+          const next = previous === 'active' ? 'archived' : previous === 'archived' ? 'all' : 'active'
+          persistSessionManagerPreferences({ archive: next })
+          return next
+        })
+        setSessionManagerSelection(0)
+      } else if (sessionManagerTab === 'sessions' && lower === 's') {
+        setSessionManagerScope((previous) => {
+          const next = previous === 'workspace' ? 'all' : 'workspace'
+          persistSessionManagerPreferences({ scope: next })
+          return next
+        })
+        setSessionManagerSelection(0)
+      } else if (sessionManagerTab === 'sessions' && lower === 'o') {
+        setSessionManagerSort((previous) => {
+          const next: TuiSessionSort = previous === 'updated-desc' ? 'updated-asc'
+            : previous === 'updated-asc' ? 'title' : previous === 'title' ? 'workspace' : 'updated-desc'
+          persistSessionManagerPreferences({ sort: next })
+          return next
+        })
+        setSessionManagerSelection(0)
+      } else if (sessionManagerTab === 'sessions' && lower === 'g') {
+        setSessionManagerGroup((previous) => {
+          persistSessionManagerPreferences({ groupByWorkspace: !previous })
+          return !previous
+        })
+      } else if (sessionManagerTab === 'workspaces' && lower === 'a') {
+        beginWorkspaceAdd()
+      } else if (input === 'R') {
+        runSessionManagerMutation(() => props.onRefreshSessionManager())
+      } else if (action === 'dialog.previous' || action === 'dialog.next') {
+        if (sessionManagerItems.length === 0) return
+        setSessionManagerSelection(previous => action === 'dialog.previous'
+          ? (Math.min(previous, sessionManagerItems.length - 1) + sessionManagerItems.length - 1)
+            % sessionManagerItems.length
+          : (Math.min(previous, sessionManagerItems.length - 1) + 1) % sessionManagerItems.length)
+        setSessionManagerError('')
+      } else if (action === 'dialog.previousPage' || action === 'dialog.nextPage') {
+        setSessionManagerSelection(previous => action === 'dialog.previousPage'
+          ? Math.max(0, previous - sessionManagerVisibleCount)
+          : Math.min(Math.max(0, sessionManagerItems.length - 1), previous + sessionManagerVisibleCount))
+      } else if (action === 'dialog.accept') {
+        if (sessionManagerItems.length > 0) setSessionManagerDetail(true)
+      } else if (action === 'dialog.cancel') {
+        closeSessionManagerLayer()
+      } else if (key.backspace) {
+        setSessionManagerQuery(previous => deleteComposerText(createComposerState(previous), 'backward').text)
+        setSessionManagerSelection(0)
+      } else if (input !== '' && acceptsCommittedText(key)) {
+        setSessionManagerQuery(previous => insertComposerText(createComposerState(previous), input)
+          .text.slice(0, TUI_SESSION_MANAGER_QUERY_LIMIT))
+        setSessionManagerSelection(0)
+      }
+      return
+    }
     if (resumeDialog !== undefined && interaction === undefined) {
       if (resumeDialog.phase === 'resuming') {
         if (matchAction('Dialog', input, key) === 'dialog.cancel') props.onCloseResume()
@@ -2621,24 +6477,78 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           : (Math.min(previous, work.items.length - 1) + 1) % work.items.length)
         setNotice('')
       } else if (action === 'work.cancel') {
-        if (selectedWorkItem === undefined || selectedWorkItem.action === 'none' || busy) return
-        setBusy(true)
-        setNotice('')
-        void props.onCancelWork(selectedWorkItem).catch((error: unknown) => {
-          setNotice(terminalSafe(error instanceof Error ? error.message : String(error)))
-        }).finally(() => { setBusy(false) })
+        cancelSelectedWorkItem()
       } else if (action === 'work.inspect') {
-        if (selectedWorkItem === undefined || !selectedWorkItem.inspectable || busy) return
-        setBusy(true)
-        setNotice('')
-        void props.onOpenWork(selectedWorkItem).catch((error: unknown) => {
-          setNotice(terminalSafe(error instanceof Error ? error.message : String(error)))
-        }).finally(() => { setBusy(false) })
+        openSelectedWorkItem()
       } else if (action === 'work.close') setWorkOpen(false)
       return
     }
     if (inputContext === 'Detail' && (focus?.mode === 'detail' || footerDetail !== undefined)) {
+      if (feedbackNoteDraft !== undefined) {
+        if (key.escape) {
+          setFeedbackNoteDraft(undefined)
+        } else if (focusedFeedbackMutation?.status === 'pending') {
+          return
+        } else if (key.return) {
+          const draft = feedbackNoteDraft
+          void props.onSubmitFeedback(
+            draft.messageId,
+            draft.rating,
+            draft.text.trim() === '' ? undefined : draft.text,
+          )
+        } else if (key.backspace || key.delete) {
+          setFeedbackNoteDraft(previous => previous === undefined ? previous : {
+            ...previous, text: previous.text.slice(0, -1),
+          })
+        } else if (input !== '' && acceptsCommittedText(key)) {
+          setFeedbackNoteDraft(previous => previous === undefined ? previous : {
+            ...previous, text: previous.text + input,
+          })
+        }
+        return
+      }
       const action = matchAction('Detail', input, key)
+      if (focusedDeliverables !== undefined
+        && (action === 'detail.previousItem' || action === 'detail.nextItem')) {
+        const offset = action === 'detail.previousItem' ? -1 : 1
+        setDeliverableSelection(previous => Math.max(
+          0,
+          Math.min(focusedDeliverables.items.length - 1, previous + offset),
+        ))
+        return
+      }
+      if (selectedDeliverable !== undefined && action === 'detail.copyPath') {
+        const result = props.onCopy(selectedDeliverable.path)
+        setNotice(result.ok
+          ? tuiMessage(locale, 'clipboard.detail.copied')
+          : result.message ?? tuiMessage(locale, 'clipboard.copy.failed'))
+        return
+      }
+      if (selectedDeliverable !== undefined && action === 'detail.openPath') {
+        if (props.pathOpenerAvailable) void props.onOpenPath(selectedDeliverable.path)
+        else setNotice(tuiMessage(locale, 'deliverables.open.unavailable'))
+        return
+      }
+      if (focusedFeedbackMessageId !== undefined
+        && (action === 'detail.feedbackPositive' || action === 'detail.feedbackNegative')) {
+        const rating = action === 'detail.feedbackPositive' ? 'positive' as const : 'negative' as const
+        void props.onSubmitFeedback(focusedFeedbackMessageId, rating, focusedFeedback?.note)
+        return
+      }
+      if (focusedFeedbackMessageId !== undefined && focusedFeedback !== undefined
+        && action === 'detail.feedbackNote') {
+        setFeedbackNoteDraft({
+          messageId: focusedFeedbackMessageId,
+          rating: focusedFeedback.rating,
+          text: focusedFeedback.note ?? '',
+        })
+        return
+      }
+      if (focusedFeedbackMessageId !== undefined && focusedFeedback !== undefined
+        && action === 'detail.feedbackClear') {
+        void props.onClearFeedback(focusedFeedbackMessageId)
+        return
+      }
       if (action === 'detail.copy') {
         const copyText = screenSelection?.surface === 'detail'
           ? tuiScreenSelectionText(screenSelection.map, screenSelection.range)
@@ -2677,6 +6587,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         return
       }
       if (action === 'detail.close') {
+        setFeedbackNoteDraft(undefined)
         if (screenSelection?.surface === 'detail') setScreenSelection(undefined)
         else if (footerDetail !== undefined) setFooterDetail(undefined)
         else {
@@ -2854,6 +6765,14 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       executeLocalCommand('/resume')
       return
     }
+    if (interaction === undefined && focus === undefined && composerAction === 'composer.openQueue') {
+      openQueue()
+      return
+    }
+    if (interaction === undefined && focus === undefined && composerAction === 'composer.openGoalPlan') {
+      openGoalPlan()
+      return
+    }
     if (inputContext === 'Composer' && props.view.kind === 'root'
       && key.meta === true && key.upArrow === true && key.shift !== true
       && !hasComposerDraft && suggestion === undefined) {
@@ -2973,6 +6892,14 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       return
     }
     if (input !== '' && acceptsCommittedText(key)) {
+      const pastedPaths = key.paste === true && terminalInput.truncated !== true
+        && inputContext === 'Composer' && interaction === undefined && focus === undefined && !busy
+        ? parseTuiTerminalPathPaste(input)
+        : undefined
+      if (pastedPaths !== undefined) {
+        pasteTerminalPaths(input, pastedPaths)
+        return
+      }
       updateComposer(previous => key.paste === true && isLargeComposerPaste(input)
         ? insertComposerPasteReference(previous, input)
         : insertComposerText(previous, input))
@@ -2995,7 +6922,10 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const suggestionPanel = !helpVisible && interaction === undefined && focus === undefined && suggestion !== undefined
     ? <Box flexDirection="column" paddingX={2} flexShrink={0}>
       {suggestion.status === 'loading' && <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}>{tuiMessage(locale, 'suggestion.searching')}</Text>}
-      {suggestion.status === 'empty' && <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}>{suggestion.kind === 'path' ? tuiMessage(locale, 'suggestion.empty.paths') : tuiMessage(locale, 'suggestion.empty.commands')}</Text>}
+      {suggestion.status === 'empty' && <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}>{suggestion.kind === 'reference'
+        ? tuiMessage(locale, 'suggestion.empty.references')
+        : suggestion.kind === 'path' ? tuiMessage(locale, 'suggestion.empty.paths') : tuiMessage(locale, 'suggestion.empty.commands')}</Text>}
+      {suggestion.error !== undefined && <Text {...tuiTextStyle(theme.tokens.error)}>{terminalSafe(suggestion.error)}</Text>}
       {visibleSuggestions.map((item, index) => <Text key={item.id} wrap="truncate-end">
         <Text {...item.disabledReason !== undefined
           ? tuiTextStyle(theme.tokens.muted)
@@ -3016,16 +6946,18 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         })}
       </Text>}
       {suggestion.status === 'truncated' && <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}>
-        {suggestion.items.length === 0 ? tuiMessage(locale, 'suggestion.search.limit') : tuiMessage(locale, 'suggestion.paths.omitted')}
+        {suggestion.items.length === 0 ? tuiMessage(locale, 'suggestion.search.limit') : tuiMessage(locale,
+          suggestion.kind === 'reference' ? 'suggestion.references.omitted' : 'suggestion.paths.omitted')}
       </Text>}
     </Box>
     : undefined
   const cursorPrefix = sessionExportDialog?.phase === 'selecting'
     ? `${tuiMessage(locale, 'composer.path')} › `
-    : resumeDialog !== undefined || freshSessionDialog !== undefined
+    : resumeDialog !== undefined || sessionManager !== undefined || freshSessionDialog !== undefined
       || rewindDialog !== undefined || sessionExportDialog !== undefined
       || (pluginHubDialog !== undefined && interaction === undefined)
-      || helpVisible || doctorVisible || loadedContextVisible || footerSelection !== undefined || footerDetail !== undefined || workOpen
+      || helpVisible || doctorVisible || loadedContextVisible || providerCenterVisible || queueOpen || goalPlanOpen
+      || footerSelection !== undefined || footerDetail !== undefined || workOpen
       ? undefined
       : question !== undefined
         ? '> '
@@ -3039,6 +6971,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                 : agentStatus === 'running' ? 'composer.steer' : 'composer.prompt')} › `
               : undefined
   props.onInputCursor(fullscreenScene !== undefined || doctorVisible || loadedContextVisible
+    || providerCenterVisible || queueOpen || goalPlanOpen || sessionManager !== undefined
     ? undefined
     : pluginHubDialog !== undefined && interaction === undefined
       ? pluginHubDialog.view === 'discover' && !pluginHubDetailOpen && !pluginHubPlanOpen
@@ -3050,28 +6983,19 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         cursorPrefix,
         composerLayout,
         startupSurface ? startupFrame : undefined,
-        2 + (question === undefined ? 0 : 1) + (attachmentLine === undefined ? 0 : 1),
+        2 + (question === undefined ? 0 : 1) + attachmentRail.count,
       ))
-
-  const runningDeliveryHint = props.view.kind === 'root'
-    && agentStatus === 'running'
-    && hasComposerDraft
-    && interaction === undefined
-    && focus === undefined
-    && suggestion === undefined
-    ? tuiMessage(locale, 'status.running.delivery')
-    : undefined
 
   if (fullscreenScene !== undefined) {
     const frame = fullscreenFrame ?? {
-      title: fullscreenScene.id, lines: [], footer: tuiMessage(locale, 'common.esc.close'),
+      title: fullscreenScene.id, lines: [], footer: fullscreenCloseLabel,
     }
     return <TuiPane title={frame.title} titleTone="default" height={stdout.rows}>
       <TuiScrollablePanel framed marginX={1} paddingX={1}>
         {frame.lines.map((line, index) => <Text key={`${index}:${line}`} wrap="truncate-end">{line}</Text>)}
       </TuiScrollablePanel>
       <TuiSection paddingX={2} height={1}>
-        <TuiHintLine>{frame.footer ?? tuiMessage(locale, 'common.esc.close')}</TuiHintLine>
+        <TuiHintLine>{fullscreenFooterLine}</TuiHintLine>
       </TuiSection>
     </TuiPane>
   }
@@ -3090,14 +7014,14 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           wrap="truncate-end"
         >{line.text}</Text>)}
       </TuiScrollablePanel>
-      <TuiSection paddingX={2} height={2}>
-        <TuiHintLine>
+      <TuiActionFooter
+        status={<TuiHintLine>
           {doctorLines.length === 0 ? 0 : visibleDoctorOffset + 1}–{Math.min(
             visibleDoctorOffset + doctorBodyRows, doctorLines.length,
           )} / {doctorLines.length}
-        </TuiHintLine>
-        <TuiHintLine>{tuiMessage(locale, 'common.updown')} · {tuiMessage(locale, 'common.page')} · {tuiMessage(locale, 'common.esc.close')}</TuiHintLine>
-      </TuiSection>
+        </TuiHintLine>}
+        actions={<TuiHintLine>{scrollingDialogFooterLine}</TuiHintLine>}
+      />
     </TuiPane>
   }
 
@@ -3109,14 +7033,376 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           wrap="truncate-end"
         >{line.text}</Text>)}
       </TuiScrollablePanel>
-      <TuiSection paddingX={2} height={2}>
-        <TuiHintLine>
+      <TuiActionFooter
+        status={<TuiHintLine>
           {loadedContextLines.length === 0 ? 0 : visibleLoadedContextOffset + 1}–{Math.min(
             visibleLoadedContextOffset + loadedContextBodyRows, loadedContextLines.length,
           )} / {loadedContextLines.length}
-        </TuiHintLine>
-        <TuiHintLine>{tuiMessage(locale, 'common.updown')} · {tuiMessage(locale, 'common.page')} · {tuiMessage(locale, 'common.esc.close')}</TuiHintLine>
-      </TuiSection>
+        </TuiHintLine>}
+        actions={<TuiHintLine>{scrollingDialogFooterLine}</TuiHintLine>}
+      />
+    </TuiPane>
+  }
+
+  if (queueOpen) {
+    if (queueEditDraft !== undefined && selectedQueueItem !== undefined) {
+      const lines = terminalWrappedLines(`${queueEditDraft}█`, Math.max(1, columns - 6))
+      const visibleLines = lines.slice(Math.max(0, lines.length - Math.max(1, terminalRows - 7)))
+      return <TuiPane title={tuiMessage(locale, 'queue.title')} titleTone="default" height={stdout.rows}>
+        <TuiScrollablePanel framed marginX={1} paddingX={1}>
+          <TuiSection title={tuiMessage(locale, 'queue.edit.title')} tone="accent">
+            {visibleLines.map((line, index) => <Text key={`${index}:${line}`}>{line}</Text>)}
+            {queueError === '' ? undefined : <TuiHintLine tone="error">{queueError}</TuiHintLine>}
+          </TuiSection>
+        </TuiScrollablePanel>
+        <TuiActionFooter
+          status={<TuiHintLine>{tuiMessage(locale, 'queue.edit.identity', { id: selectedQueueItem.id })}</TuiHintLine>}
+          actions={<TuiHintLine>{tuiMessage(locale, 'queue.hint.edit')}</TuiHintLine>}
+        />
+      </TuiPane>
+    }
+    if (queueDeleteConfirmation && selectedQueueItem !== undefined) {
+      return <TuiPane title={tuiMessage(locale, 'queue.title')} titleTone="default" height={stdout.rows}>
+        <TuiScrollablePanel framed marginX={1} paddingX={1}>
+          <TuiSection title={tuiMessage(locale, 'queue.delete.title')} tone="warning">
+            <Text>{tuiMessage(locale, 'queue.delete.question')}</Text>
+            <TuiHintLine>{selectedQueueItem.preview}</TuiHintLine>
+            {queueError === '' ? undefined : <TuiHintLine tone="error">{queueError}</TuiHintLine>}
+          </TuiSection>
+        </TuiScrollablePanel>
+        <TuiActionFooter
+          status={<TuiHintLine>{tuiMessage(locale, 'queue.delete.boundary')}</TuiHintLine>}
+          actions={<TuiHintLine>{tuiMessage(locale, 'queue.hint.delete')}</TuiHintLine>}
+        />
+      </TuiPane>
+    }
+    if (queueDetail && selectedQueueItem !== undefined) {
+      return <TuiPane title={tuiMessage(locale, 'queue.title')} titleTone="default" height={stdout.rows}>
+        <TuiScrollablePanel framed marginX={1} paddingX={1}>
+          {selectedQueueDetailLines.slice(queueDetailWindow.start, queueDetailWindow.end).map((line, index) => <Text
+            key={`${queueDetailWindow.start + index}:${line}`}
+            wrap="truncate-end"
+          >{line}</Text>)}
+          {queueError === '' ? undefined : <TuiHintLine tone="error">{queueError}</TuiHintLine>}
+        </TuiScrollablePanel>
+        <TuiActionFooter
+          status={<TuiHintLine>{queueDetailWindow.start + 1}–{queueDetailWindow.end} / {selectedQueueDetailLines.length}</TuiHintLine>}
+          actions={<TuiHintLine>{tuiMessage(locale, selectedQueueItem.canEdit || selectedQueueItem.canDelete
+            ? 'queue.hint.detailActions' : 'queue.hint.detail')}</TuiHintLine>}
+        />
+      </TuiPane>
+    }
+    return <TuiPane title={tuiMessage(locale, 'queue.title')} titleTone="default" height={stdout.rows}>
+      <TuiScrollablePanel framed marginX={1} paddingX={1}>
+        {visibleQueueItems.map((item, index) => {
+          const absoluteIndex = queueVisibleStart + index
+          const lane = tuiMessage(locale, item.lane === 'next-step' ? 'queue.lane.step' : 'queue.lane.turn')
+          const attachments = item.attachmentCount === 0 ? '' : ` · ${tuiMessage(locale, 'queue.attachments', {
+            count: item.attachmentCount,
+          })}`
+          return <TuiListRow
+            key={item.id}
+            selected={absoluteIndex === effectiveQueueSelection}
+            height={2}
+            title={item.preview === '' ? tuiMessage(locale, 'queue.noText') : item.preview}
+            trailing={lane}
+            trailingTone={item.lane === 'next-step' ? 'warning' : 'accent'}
+            description={`${formatTuiQueueAge(item.insertedAt, queueClock)} · ${item.source}${attachments}`}
+          />
+        })}
+        {queue.omitted === 0 ? undefined : <TuiHintLine tone="warning">
+          {tuiMessage(locale, 'queue.omitted', { count: queue.omitted })}
+        </TuiHintLine>}
+        {queueError === '' ? undefined : <TuiHintLine tone="error">{queueError}</TuiHintLine>}
+      </TuiScrollablePanel>
+      <TuiActionFooter
+        status={<TuiHintLine>{tuiMessage(locale, 'queue.counts', {
+          step: queue.nextStepCount, turn: queue.nextTurnCount,
+        })}</TuiHintLine>}
+        actions={<TuiHintLine>{tuiMessage(locale, 'queue.hint.list')}</TuiHintLine>}
+      />
+    </TuiPane>
+  }
+
+  if (providerCenterVisible) {
+    const phaseStatus = providerCenter.onboarding !== undefined
+      ? tuiMessage(locale, providerCenter.onboarding.durable
+        ? 'provider.onboarding.prompt' : 'provider.onboarding.promptProcess')
+      : providerCenter.phase === 'loading'
+        ? tuiMessage(locale, 'provider.loading')
+        : providerCenter.phase === 'error'
+          ? tuiMessage(locale, 'provider.refreshFailed')
+          : providerCenter.snapshot?.omittedProviders
+            ? tuiMessage(locale, 'provider.omitted', { count: providerCenter.snapshot.omittedProviders })
+            : `${providerRows.length}`
+    if (providerWizard !== undefined) {
+      const wizard = providerWizard
+      const stepTitle = wizard.step === 'id' ? tuiMessage(locale, 'provider.custom.step.id')
+        : wizard.step === 'name' ? tuiMessage(locale, 'provider.custom.step.name')
+          : wizard.step === 'endpoint' ? tuiMessage(locale, 'provider.custom.step.endpoint')
+            : wizard.step === 'protocol' ? tuiMessage(locale, 'provider.custom.step.protocol')
+              : wizard.step === 'key' ? tuiMessage(locale, 'provider.custom.step.key')
+                : wizard.step === 'models' ? tuiMessage(locale, 'provider.custom.step.models')
+                  : wizard.step === 'picker' ? tuiMessage(locale, 'provider.custom.step.picker')
+                    : tuiMessage(locale, 'provider.custom.step.confirm')
+      const stepPosition = wizard.step === 'id' ? 1
+        : wizard.step === 'name' ? 2
+          : wizard.step === 'endpoint' ? 3
+            : wizard.step === 'protocol' ? 4
+              : wizard.step === 'key' ? 5
+                : wizard.step === 'models' || wizard.step === 'picker' ? 6 : 7
+      const textValue = wizard.step === 'id' ? wizard.id
+        : wizard.step === 'name' ? wizard.displayName
+          : wizard.step === 'endpoint' ? wizard.endpoint
+            : wizard.step === 'models' ? wizard.modelText
+              : ''
+      const keyMaskCells = Math.max(1, columns - 22)
+      const keyMask = `${'•'.repeat(Math.min(providerWizardSecret.length, keyMaskCells))}█`
+      return <TuiPane title={tuiMessage(locale, 'pane.provider')} titleTone="default" height={stdout.rows}>
+        <TuiScrollablePanel framed marginX={1} paddingX={1}>
+          <TuiSection title={tuiMessage(locale, 'provider.custom.title', {
+            step: stepPosition, total: 7, title: stepTitle,
+          })} tone="accent">
+            {wizard.step === 'protocol'
+              ? wizard.target.protocols.map((protocol, index) => <TuiListRow
+                key={protocol}
+                selected={index === wizard.protocolIndex}
+                height={1}
+                title={protocol}
+              />)
+              : wizard.step === 'picker'
+                ? visibleProviderCandidates.map((candidate, index) => {
+                  const absoluteIndex = providerCandidateStart + index
+                  return <TuiListRow
+                    key={`${absoluteIndex}:${candidate.id}`}
+                    selected={absoluteIndex === wizard.candidateIndex}
+                    height={1}
+                    title={`${wizard.picked.has(candidate.id) ? '[x]' : '[ ]'} ${candidate.name ?? candidate.id}`}
+                    trailing={candidate.name === undefined ? undefined : candidate.id}
+                  />
+                })
+                : wizard.step === 'confirm'
+                  ? <>
+                    <Text>{tuiMessage(locale, 'provider.custom.confirm.identity', {
+                      name: wizard.displayName, id: wizard.id,
+                    })}</Text>
+                    <Text>{tuiMessage(locale, 'provider.custom.confirm.endpoint', {
+                      endpoint: providerWizardEndpointLabel(wizard.endpoint),
+                    })}</Text>
+                    <Text>{tuiMessage(locale, 'provider.custom.confirm.protocol', {
+                      protocol: wizard.target.protocols[wizard.protocolIndex] ?? '?',
+                    })}</Text>
+                    <Text>{tuiMessage(locale, 'provider.custom.confirm.models', { count: wizard.models.length })}</Text>
+                    <Text>{tuiMessage(locale, 'provider.custom.confirm.credential', {
+                      state: tuiMessage(locale, providerWizardSecret.trim() === ''
+                        ? 'provider.custom.credential.none' : 'provider.custom.credential.staged'),
+                    })}</Text>
+                  </>
+                  : <>
+                    <TuiHintLine>{tuiMessage(locale, wizard.step === 'id'
+                      ? 'provider.custom.prompt.id'
+                      : wizard.step === 'name'
+                        ? 'provider.custom.prompt.name'
+                        : wizard.step === 'endpoint'
+                          ? 'provider.custom.prompt.endpoint'
+                          : wizard.step === 'key'
+                            ? 'provider.custom.prompt.key'
+                            : 'provider.custom.prompt.models')}</TuiHintLine>
+                    <Text wrap="truncate-end">{wizard.step === 'key' ? keyMask : `${textValue}█`}</Text>
+                  </>}
+            {wizard.error === '' ? undefined : <TuiHintLine tone="error">{wizard.error}</TuiHintLine>}
+          </TuiSection>
+        </TuiScrollablePanel>
+        <TuiActionFooter
+          status={<TuiHintLine>{busy
+            ? tuiMessage(locale, wizard.step === 'picker'
+              ? 'provider.custom.discovery.loading' : 'common.working')
+            : wizard.step === 'picker'
+              ? tuiMessage(locale, 'provider.custom.picker.count', {
+                picked: wizard.picked.size, count: wizard.candidates.length,
+              })
+              : ''}</TuiHintLine>}
+          actions={<TuiHintLine>{tuiMessage(locale, wizard.step === 'models'
+            ? 'provider.custom.hint.models'
+            : wizard.step === 'picker'
+              ? 'provider.custom.hint.picker'
+              : wizard.step === 'confirm'
+                ? 'provider.custom.hint.confirm'
+                : wizard.step === 'protocol'
+                  ? 'provider.custom.hint.protocol'
+                  : 'provider.custom.hint.input')}</TuiHintLine>}
+        />
+      </TuiPane>
+    }
+    if (providerDetail && providerProfileEditor !== undefined) {
+      const editor = providerProfileEditor
+      const row = providerRows.find(candidate => candidate.id === editor.providerId)
+      const editable = row?.settings?.editable
+      const inherited = tuiMessage(locale, 'provider.profile.inherited')
+      const protocol = editor.protocols[editor.protocolIndex] || inherited
+      const models = editor.modelsText === '' ? tuiMessage(locale, 'provider.profile.modelsEmpty') : editor.modelsText
+      return <TuiPane title={tuiMessage(locale, 'pane.provider')} titleTone="default" height={stdout.rows}>
+        <TuiScrollablePanel framed marginX={1} paddingX={1}>
+          <TuiSection title={tuiMessage(locale, 'provider.profile.title', { provider: editor.providerId })} tone="accent">
+            {editable?.displayNameSupported === true ? <Text {...editor.field === 'displayName' ? tuiTextStyle(theme.tokens.selection) : {}} wrap="truncate-end">
+              {tuiMessage(locale, 'provider.profile.displayName', {
+                value: `${editor.displayName || inherited}${editor.field === 'displayName' ? '█' : ''}`,
+              })}
+            </Text> : undefined}
+            {editable?.protocolSupported === true ? <Text {...editor.field === 'protocol' ? tuiTextStyle(theme.tokens.selection) : {}} wrap="truncate-end">
+              {tuiMessage(locale, 'provider.profile.protocol', {
+                value: `${protocol}${editor.field === 'protocol' ? ' ◀▶' : ''}`,
+              })}
+            </Text> : undefined}
+            {editable?.modelsSupported === true ? <Text {...editor.field === 'models' ? tuiTextStyle(theme.tokens.selection) : {}} wrap="wrap">
+              {tuiMessage(locale, 'provider.profile.models', {
+                value: `${terminalSafe(models)}${editor.field === 'models' ? '█' : ''}`,
+              })}
+            </Text> : undefined}
+            {editable?.modelsSupported === true
+              ? <TuiHintLine>{tuiMessage(locale, 'provider.profile.syntax')}</TuiHintLine> : undefined}
+            {editor.error === '' ? undefined : <TuiHintLine tone="error">{editor.error}</TuiHintLine>}
+          </TuiSection>
+        </TuiScrollablePanel>
+        <TuiActionFooter
+          status={<TuiHintLine>{busy ? tuiMessage(locale, 'common.working') : ''}</TuiHintLine>}
+          actions={<TuiHintLine>{providerDetailActionHint}</TuiHintLine>}
+        />
+      </TuiPane>
+    }
+    if (providerDetail && providerDeleteConfirmation !== undefined) {
+      const row = providerRows.find(candidate => candidate.id === providerDeleteConfirmation)
+      return <TuiPane title={tuiMessage(locale, 'pane.provider')} titleTone="default" height={stdout.rows}>
+        <TuiScrollablePanel framed marginX={1} paddingX={1}>
+          <TuiSection title={tuiMessage(locale, 'provider.remove.title', {
+            provider: row?.name ?? providerDeleteConfirmation,
+          })} tone="warning">
+            <Text wrap="wrap">{tuiMessage(locale, 'provider.remove.detail')}</Text>
+            {providerSecretError === '' ? undefined : <TuiHintLine tone="error">{providerSecretError}</TuiHintLine>}
+          </TuiSection>
+        </TuiScrollablePanel>
+        <TuiActionFooter
+          status={<TuiHintLine>{busy ? tuiMessage(locale, 'common.working') : ''}</TuiHintLine>}
+          actions={<TuiHintLine>{providerDetailActionHint}</TuiHintLine>}
+        />
+      </TuiPane>
+    }
+    if (providerDetail && providerLogoutConfirmation !== undefined) {
+      const row = providerRows.find(candidate => candidate.id === providerLogoutConfirmation)
+      return <TuiPane title={tuiMessage(locale, 'pane.provider')} titleTone="default" height={stdout.rows}>
+        <TuiScrollablePanel framed marginX={1} paddingX={1}>
+          <TuiSection title={tuiMessage(locale, 'provider.logout.title', {
+            provider: row?.name ?? providerLogoutConfirmation,
+          })} tone="warning">
+            <Text wrap="wrap">{tuiMessage(locale, 'provider.logout.detail')}</Text>
+            {providerSecretError === '' ? undefined : <TuiHintLine tone="error">{providerSecretError}</TuiHintLine>}
+          </TuiSection>
+        </TuiScrollablePanel>
+        <TuiActionFooter
+          status={<TuiHintLine>{busy ? tuiMessage(locale, 'common.working') : ''}</TuiHintLine>}
+          actions={<TuiHintLine>{providerDetailActionHint}</TuiHintLine>}
+        />
+      </TuiPane>
+    }
+    if (providerDetail && selectedProvider !== undefined && providerEndpointDraft !== undefined) {
+      const currentEndpoint = selectedProvider.settings?.endpoint
+        ?? tuiMessage(locale, 'provider.endpoint.inherited')
+      return <TuiPane title={tuiMessage(locale, 'pane.provider')} titleTone="default" height={stdout.rows}>
+        <TuiScrollablePanel framed marginX={1} paddingX={1}>
+          <TuiSection
+            title={tuiMessage(locale, 'provider.endpoint.prompt', { provider: selectedProvider.name })}
+            tone="accent"
+          >
+            <TuiHintLine>{tuiMessage(locale, 'provider.endpoint.current', { endpoint: currentEndpoint })}</TuiHintLine>
+            <Text wrap="truncate-end">{tuiMessage(locale, 'provider.endpoint.input', {
+              value: `${providerEndpointDraft}█`,
+            })}</Text>
+            {providerEndpointError === '' ? undefined : <TuiHintLine tone="error">{providerEndpointError}</TuiHintLine>}
+          </TuiSection>
+        </TuiScrollablePanel>
+        <TuiActionFooter
+          status={<TuiHintLine>{busy ? tuiMessage(locale, 'common.working') : ''}</TuiHintLine>}
+          actions={<TuiHintLine>{providerDetailActionHint}</TuiHintLine>}
+        />
+      </TuiPane>
+    }
+    if (providerDetail && selectedProvider !== undefined && providerSecretDraft !== undefined) {
+      const availableMaskCells = Math.max(1, columns - 16)
+      const mask = `${'•'.repeat(Math.min(providerSecretDraft.length, availableMaskCells))}█`
+      return <TuiPane title={tuiMessage(locale, 'pane.provider')} titleTone="default" height={stdout.rows}>
+        <TuiScrollablePanel framed marginX={1} paddingX={1}>
+          <TuiSection
+            title={tuiMessage(locale, 'provider.key.prompt', { provider: selectedProvider.name })}
+            tone="accent"
+          >
+            <Text wrap="truncate-end">{tuiMessage(locale, 'provider.key.masked', { value: mask })}</Text>
+            {providerSecretError === '' ? undefined : <TuiHintLine tone="error">{providerSecretError}</TuiHintLine>}
+          </TuiSection>
+        </TuiScrollablePanel>
+        <TuiActionFooter
+          status={<TuiHintLine>{busy ? tuiMessage(locale, 'common.working') : ''}</TuiHintLine>}
+          actions={<TuiHintLine>{providerDetailActionHint}</TuiHintLine>}
+        />
+      </TuiPane>
+    }
+    if (providerDetail && selectedProvider !== undefined) {
+      return <TuiPane title={tuiMessage(locale, 'pane.provider')} titleTone="default" height={stdout.rows}>
+        <TuiScrollablePanel framed marginX={1} paddingX={1}>
+          {selectedProviderDetailLines.slice(providerDetailWindow.start, providerDetailWindow.end).map((line, index) => <Text
+            key={`${providerDetailWindow.start + index}:${line}`}
+            {...line.startsWith('!') ? tuiTextStyle(theme.tokens.warning) : {}}
+            wrap="truncate-end"
+          >{line}</Text>)}
+        </TuiScrollablePanel>
+        <TuiActionFooter
+          status={<TuiHintLine>
+            {providerDetailWindow.start + 1}–{providerDetailWindow.end} / {selectedProviderDetailLines.length}
+          </TuiHintLine>}
+          actions={<TuiHintLine>{providerDetailActionHint}</TuiHintLine>}
+        />
+      </TuiPane>
+    }
+    return <TuiPane title={tuiMessage(locale, 'pane.provider')} titleTone="default" height={stdout.rows}>
+      <TuiScrollablePanel framed marginX={1} paddingX={1}>
+        {providerCenter.snapshot === undefined && providerCenter.phase === 'loading'
+          ? <TuiLoadingState message={tuiMessage(locale, 'provider.loading')} columns={Math.max(1, columns - 6)} />
+          : providerCenter.snapshot === undefined
+            ? <TuiEmptyState
+              message={tuiMessage(locale, 'provider.refreshFailed')}
+              tone="error"
+            />
+            : providerRows.length === 0
+              ? <TuiEmptyState message={tuiMessage(locale, 'provider.empty')} tone="warning" />
+              : visibleProviderRows.map((row, index) => {
+                const absoluteIndex = providerVisibleStart + index
+                const models = row.modelCount === undefined
+                  ? tuiMessage(locale, 'provider.models.unknown')
+                  : tuiMessage(locale, 'provider.models.count', { count: row.modelCount })
+                const settings = row.settings === undefined
+                  ? tuiMessage(locale, 'provider.settings.none')
+                  : row.settings.registered
+                    ? row.settings.namespace
+                    : tuiMessage(locale, 'provider.settings.unregistered')
+                const route = tuiMessage(locale, row.active ? 'provider.state.active' : 'provider.state.dormant')
+                return <TuiListRow
+                  key={row.id}
+                  selected={absoluteIndex === effectiveProviderSelection}
+                  height={providerRowHeight}
+                  title={`${row.name} (${row.id})`}
+                  trailing={providerAuthenticationLabel(row, locale)}
+                  trailingTone={row.authentication === 'configured'
+                    ? 'success'
+                    : row.authentication === 'unavailable' ? 'error' : 'warning'}
+                  description={`${route}${row.declared ? ` · ${tuiMessage(locale, 'provider.state.custom')}` : ''} · ${models} · ${settings}`}
+                />
+              })}
+      </TuiScrollablePanel>
+      <TuiActionFooter
+        status={<TuiHintLine tone={providerCenter.phase === 'error' ? 'error' : 'muted'}>{phaseStatus}</TuiHintLine>}
+        actions={<TuiHintLine>{tuiMessage(locale, providerCenter.onboarding !== undefined
+          ? providerCreationTarget === undefined ? 'provider.onboarding.hintNoAdd' : 'provider.onboarding.hint'
+          : providerCreationTarget === undefined ? 'provider.hint.list' : 'provider.hint.listAdd')}</TuiHintLine>}
+      />
     </TuiPane>
   }
 
@@ -3144,9 +7430,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                 ? <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}>{tuiMessage(locale, 'startup.placeholder')}</Text>
                 : line}
             </Text>)}
-            {attachmentLine !== undefined && <Text wrap="truncate-end" {...tuiTextStyle(theme.tokens.accent)}>
-              {tuiMessage(locale, 'common.attachments', { attachments: attachmentLine })}
-            </Text>}
+            {attachmentRailView}
           </Box>
         </Box>
         <Box flexDirection="column" alignItems="center" width={startupFrame.width} flexShrink={0}>
@@ -3203,35 +7487,6 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           : pluginHubDialog.phase === 'handoff'
             ? tuiMessage(locale, 'plugin.working.handoff')
             : undefined
-    const footer = pluginHubDialog.phase === 'handoff'
-      ? tuiMessage(locale, 'plugin.footer.handoff')
-      : pluginHubDialog.discoveryDetail !== undefined
-        ? tuiMessage(locale, 'plugin.footer.discoveryDetail')
-        : pluginHubDialog.profileMutations === false && detail && pluginHubDialog.detail !== undefined
-          ? pluginHubDialog.detail.latestVersion?.installable === true
-            ? tuiMessage(locale, 'plugin.footer.install', {
-              command: `dsh plugin --profile tui add --save-exact ${pluginHubDialog.detail.packageName}@${pluginHubDialog.detail.latestVersion.version}`,
-            })
-            : tuiMessage(locale, 'plugin.footer.notInstallable')
-          : pluginHubDialog.profileMutations === false && pluginHubDialog.view === 'installed'
-            ? pluginHubInstalled === undefined
-              ? tuiMessage(locale, 'plugin.footer.installed.external')
-              : tuiMessage(locale, 'plugin.footer.remove', {
-                command: `dsh plugin --profile tui remove ${pluginHubInstalled.packageName}`,
-              })
-            : confirmation
-              ? tuiMessage(locale, 'plugin.footer.confirm')
-              : detail && pluginHubDialog.detail !== undefined
-                ? pluginHubDialog.detail.latestVersion?.installable === true
-                  ? tuiMessage(locale, 'plugin.footer.detail.install')
-                  : tuiMessage(locale, 'plugin.footer.detail.unavailable')
-                : pluginHubDialog.view === 'installed'
-                  ? tuiMessage(locale, 'plugin.footer.installed')
-                  : pluginHubDialog.view === 'discovery'
-                    ? tuiMessage(locale, 'plugin.footer.discovery')
-                    : tuiMessage(locale, pluginHubHasCategories
-                      ? 'plugin.footer.discover'
-                      : 'plugin.footer.discover.noCategories')
     const progress = pluginHubDialog.progress
     return <TuiPane title={tuiMessage(locale, 'pane.plugins')} height={stdout.rows}>
       <TuiSection paddingX={2}>
@@ -3297,18 +7552,19 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                   />
                 })}
       </TuiScrollablePanel>
-      <TuiSection height={2} paddingX={2}>
-        <TuiHintLine>{footer}</TuiHintLine>
-        {!detail && !confirmation && pluginHubDialog.view !== 'installed' && pluginHubRows.length > 0
-          && <TuiHintLine>
+      <TuiActionFooter
+        status={!detail && !confirmation && pluginHubDialog.view !== 'installed' && pluginHubRows.length > 0
+          ? <TuiHintLine>
             {tuiMessage(locale, 'common.showing.range', {
               start: pluginHubVisibleStart + 1, end: pluginHubVisibleEnd,
             })}
             {pluginHubDialog.loadingMore
               ? tuiMessage(locale, 'plugin.loading.more')
               : pluginHubNextCursor !== undefined ? tuiMessage(locale, 'plugin.more.available') : ''}
-          </TuiHintLine>}
-      </TuiSection>
+          </TuiHintLine>
+          : undefined}
+        actions={<TuiHintLine>{pluginHubFooterLine}</TuiHintLine>}
+      />
     </TuiPane>
   }
 
@@ -3383,6 +7639,57 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             : <Text>{tuiMessage(locale, 'fresh.confirm')}</Text>}
         </TuiSection>
       </TuiSection>
+      <TuiSection height={1} paddingX={2}>
+        <TuiHintLine>{tuiMessage(locale, freshSessionDialog.phase === 'creating'
+          ? 'common.esc.close' : 'fresh.confirm')}</TuiHintLine>
+      </TuiSection>
+    </TuiPane>
+  }
+
+  if (goalPlanOpen && interaction === undefined && goalPlanSurface !== undefined) {
+    const goal = goalPlanSurface.goal
+    const plan = goalPlanSurface.plan
+    return <TuiPane title={tuiMessage(locale, 'pane.goalPlan')} height={stdout.rows}>
+      <TuiSection paddingX={2} height={2}>
+        <Text bold>{tuiMessage(locale, 'goalPlan.title')}</Text>
+        <TuiHintLine>{tuiMessage(locale, 'goalPlan.authoritative')}</TuiHintLine>
+      </TuiSection>
+      <TuiScrollablePanel paddingX={2}>
+        {goalEditDraft !== undefined
+          ? <TuiSection framed tone="accent" title={tuiMessage(locale, 'goalPlan.edit.title')}>
+            <Text wrap="wrap">{terminalSafe(goalEditDraft)}█</Text>
+            <TuiHintLine>{tuiMessage(locale, 'goalPlan.edit.boundary')}</TuiHintLine>
+          </TuiSection>
+          : goalClearConfirmation
+            ? <TuiSection framed tone="warning" title={tuiMessage(locale, 'goalPlan.clear.title')}>
+              <Text wrap="wrap">{tuiMessage(locale, 'goalPlan.clear.confirm')}</Text>
+              {goal === undefined ? undefined : <TuiHintLine>{terminalSafe(goal.objective)}</TuiHintLine>}
+            </TuiSection>
+            : <>
+              {goal === undefined
+                ? <TuiEmptyState message={tuiMessage(locale, 'goalPlan.goal.none')} />
+                : <TuiSection framed tone="accent" title={tuiMessage(locale, 'goalPlan.goal.title')}>
+                  <Text wrap="wrap">{terminalSafe(goal.objective)}</Text>
+                  <Text>{tuiMessage(locale, 'goalPlan.goal.phase', {
+                    phase: tuiMessage(locale, `goalPlan.phase.${goal.phase}`),
+                  })}</Text>
+                  <Text>{tuiMessage(locale, 'goalPlan.detail.rounds', {
+                    current: goalPlanSurface.roundsStarted ?? 0, maximum: goal.maxGoalRounds,
+                  })}</Text>
+                  {goal.blockedReason === undefined ? undefined
+                    : <TuiHintLine tone="warning">{terminalSafe(goal.blockedReason.message)}</TuiHintLine>}
+                </TuiSection>}
+              {plan?.effective === true && <TuiSection framed tone="warning" title={tuiMessage(locale, 'goalPlan.plan.title')}>
+                <Text>{tuiMessage(locale, plan.pending ? 'goalPlan.detail.planPending' : 'goalPlan.detail.plan')}</Text>
+              </TuiSection>}
+            </>}
+      </TuiScrollablePanel>
+      <TuiActionFooter
+        status={goalPlanError !== ''
+          ? <Text {...tuiTextStyle(theme.tokens.error)} wrap="truncate-end">{goalPlanError}</Text>
+          : busy ? <TuiHintLine>{tuiMessage(locale, 'goalPlan.working')}</TuiHintLine> : undefined}
+        actions={<TuiHintLine>{goalPlanDialogActions.map(item => item.label).join(' · ')}</TuiHintLine>}
+      />
     </TuiPane>
   }
 
@@ -3421,14 +7728,584 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             ? <TuiLoadingState message={tuiMessage(locale, 'rewind.waiting')} />
             : <TuiLoadingState message={tuiMessage(locale, 'rewind.preparing')} />}
       </TuiScrollablePanel>
-      <TuiSection height={2} paddingX={2}>
-        {effectiveError !== ''
-          ? <Text {...tuiTextStyle(theme.tokens.error)} wrap="truncate-end">{terminalSafe(effectiveError)}</Text>
-          : <TuiHintLine>{rewindDialog.phase === 'browsing' && rewindConfirmation === undefined
+      <TuiActionFooter
+        status={<TuiHintLine tone="error">{effectiveError === '' ? '' : terminalSafe(effectiveError)}</TuiHintLine>}
+        actions={<TuiHintLine>{rewindConfirmation !== undefined
+          ? activeDraft
+            ? [
+              tuiMessage(locale, 'rewind.stash'),
+              tuiMessage(locale, 'rewind.discard'),
+              tuiMessage(locale, 'rewind.cancel'),
+            ].join(' · ')
+            : tuiMessage(locale, 'rewind.confirm')
+          : rewindDialog.phase === 'browsing'
             ? tuiMessage(locale, 'rewind.footer.browse')
             : rewindDialog.phase === 'rewinding'
               ? tuiMessage(locale, 'rewind.footer.cancel') : tuiMessage(locale, 'common.esc.close')}</TuiHintLine>}
+      />
+    </TuiPane>
+  }
+
+  if (trajectory !== undefined && interaction === undefined) {
+    const facts = trajectoryDetail !== undefined
+      ? trajectoryTimingFacts(trajectory.entries, trajectory.entries.indexOf(trajectoryDetail))
+      : undefined
+    const inspectorLines = trajectoryDetail === undefined ? [] : trajectoryInspectorTab === 'input'
+      ? [trajectoryDetail.input ?? tuiMessage(locale, 'trajectory.inspector.none')]
+      : trajectoryInspectorTab === 'output'
+        ? [trajectoryDetail.output ?? tuiMessage(locale, 'trajectory.inspector.none')]
+        : trajectoryInspectorTab === 'timing'
+          ? [
+            tuiMessage(locale, 'trajectory.inspector.duration', {
+              duration: formatTrajectoryDuration(facts?.durationMs),
+            }),
+            tuiMessage(locale, 'trajectory.inspector.ttft', { duration: formatTrajectoryDuration(facts?.ttftMs) }),
+            tuiMessage(locale, 'trajectory.inspector.llm', { duration: formatTrajectoryDuration(facts?.llmMs) }),
+            tuiMessage(locale, 'trajectory.inspector.tool', { duration: formatTrajectoryDuration(facts?.toolMs) }),
+          ]
+          : [
+            trajectoryDetail.label,
+            ...(trajectoryDetail.detail === undefined ? [] : [trajectoryDetail.detail]),
+            ...(trajectoryDetail.usage === undefined ? [] : [tuiMessage(locale, 'trajectory.inspector.usage', {
+              input: String((trajectoryDetail.usage as { inputTokens?: number }).inputTokens ?? '?'),
+              output: String((trajectoryDetail.usage as { outputTokens?: number }).outputTokens ?? '?'),
+            })]),
+            ...(trajectoryDetail.interrupted ? [tuiMessage(locale, 'trajectory.inspector.interrupted')] : []),
+            ...(trajectoryDetail.error === undefined ? [] : [tuiMessage(locale, 'trajectory.inspector.error', {
+              code: trajectoryDetail.error.code,
+            })]),
+            `seq ${trajectoryDetail.seq} · ${new Date(trajectoryDetail.time).toISOString()}`,
+          ]
+    return <TuiPane title={tuiMessage(locale, 'trajectory.header')} height={stdout.rows}>
+      <TuiSection paddingX={2} height={trajectoryQuery !== '' || trajectorySearchEditing ? 4 : 3}>
+        <Text bold>{tuiMessage(locale, 'trajectory.header')}</Text>
+        <Text {...tuiTextStyle(theme.tokens.muted)}>{tuiMessage(locale, 'trajectory.stats', {
+          turns: String(trajectory.turnCount),
+          steps: String(trajectory.stepCount),
+          events: String(trajectory.totalEvents),
+        })}</Text>
+        <TuiHintLine>{tuiMessage(locale, 'trajectory.loaded', {
+          loaded: String(trajectory.entries.length), omitted: String(trajectory.omitted),
+          tail: tuiMessage(locale, trajectoryTailFollow ? 'trajectory.tail.on' : 'trajectory.tail.off'),
+        })}</TuiHintLine>
+        {(trajectoryQuery !== '' || trajectorySearchEditing) && <Text {...tuiTextStyle(theme.tokens.selection)}>
+          / {terminalSafe(trajectoryQuery)}{trajectorySearchEditing ? '█' : ''}
+        </Text>}
       </TuiSection>
+      {trajectoryDetail !== undefined
+        ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
+          <TuiSection title={trajectoryKindLabel(trajectoryDetail.kind, locale)} tone="accent" paddingX={0}>
+            <Text>{(['summary', 'input', 'output', 'timing'] as const).map((tab, index) => <Text
+              key={tab}
+              bold={trajectoryInspectorTab === tab}
+              {...trajectoryInspectorTab === tab ? tuiTextStyle(theme.tokens.selection) : tuiTextStyle(theme.tokens.muted)}
+            >{index === 0 ? '' : ' · '}{tuiMessage(locale, `trajectory.tab.${tab}`)}</Text>)}</Text>
+            {inspectorLines.flatMap(line => terminalWrappedLines(terminalSafe(line), Math.max(1, columns - 6)))
+              .map((line, index) => <Text key={`${index}:${line}`}>{line}</Text>)}
+          </TuiSection>
+        </TuiScrollablePanel>
+        : <TuiScrollablePanel paddingX={2}>
+          {visibleTrajectoryItems.length === 0
+            ? <TuiEmptyState tone="warning" message={tuiMessage(locale, 'trajectory.empty')} />
+            : visibleTrajectoryItems.map((entry, visibleIndex) => {
+              const index = trajectoryVisibleStart + visibleIndex
+              const kindTag = trajectoryKindLabel(entry.kind, locale)
+              const timing = entry.durationMs !== undefined ? ` · ${formatTrajectoryDuration(entry.durationMs)}` : ''
+              const timeline = formatTuiTrajectoryTimeline(entry, trajectoryTimeline)
+              const badge = entry.error !== undefined ? ` · ${entry.error.code}` : ''
+              const interrupted = entry.interrupted ? ' !' : ''
+              const folded = entry.kind === 'turn' && entry.turn !== undefined
+                ? trajectoryCollapsedTurns.has(entry.turn)
+                : entry.kind === 'step' && entry.turn !== undefined && entry.step !== undefined
+                  ? trajectoryCollapsedSteps.has(`${entry.turn}:${entry.step}`)
+                  : false
+              const tree = `${'  '.repeat(Math.min(4, entry.depth))}${entry.kind === 'turn' || entry.kind === 'step'
+                ? folded ? '▸ ' : '▾ ' : '· '}`
+              return <TuiListRow
+                key={entry.key}
+                selected={index === effectiveTrajectorySelection}
+                height={trajectoryRowHeight}
+                title={`${tree}${kindTag} · ${terminalSafe(entry.label).slice(0, 60)}`}
+                description={`${timeline} · seq ${entry.seq}${timing}${badge}${interrupted}`}
+              />
+            })}
+        </TuiScrollablePanel>}
+      <TuiActionFooter
+        status={trajectoryEntries.length > trajectoryVisibleCount && trajectoryDetail === undefined
+          ? <TuiHintLine>{tuiMessage(locale, 'common.showing', {
+            start: trajectoryVisibleStart + 1,
+            end: trajectoryVisibleStart + visibleTrajectoryItems.length,
+            total: trajectoryEntries.length,
+          })}</TuiHintLine>
+          : undefined}
+        actions={<TuiHintLine>{trajectoryDetail !== undefined
+          ? tuiMessage(locale, 'trajectory.footer.detail')
+          : tuiMessage(locale, 'trajectory.footer.list')}</TuiHintLine>}
+      />
+    </TuiPane>
+  }
+
+  if (hostPluginCenter !== undefined && interaction === undefined) {
+    const filterLabel = tuiMessage(locale, `hostPlugins.filter.${hostPluginFilter}`)
+    return <TuiPane title={tuiMessage(locale, 'hostPlugins.header')} height={stdout.rows}>
+      <TuiSection paddingX={2} height={3}>
+        <Text bold>{tuiMessage(locale, 'hostPlugins.header')}</Text>
+        <Text>
+          <Text bold={hostPluginTab === 'plugins'} {...hostPluginTab === 'plugins'
+            ? tuiTextStyle(theme.tokens.selection) : {}}>{tuiMessage(locale, 'hostPlugins.tab.plugins')}</Text>
+          <Text {...tuiTextStyle(theme.tokens.muted)}> · </Text>
+          <Text bold={hostPluginTab === 'settings'} {...hostPluginTab === 'settings'
+            ? tuiTextStyle(theme.tokens.selection) : {}}>{tuiMessage(locale, 'hostPlugins.tab.settings')}</Text>
+          <Text {...tuiTextStyle(theme.tokens.muted)}> · Tab</Text>
+        </Text>
+        {hostPluginTab === 'plugins' && <TuiHintLine>{filterLabel} · F</TuiHintLine>}
+      </TuiSection>
+      {hostPluginTab === 'plugins' && hostPluginQuery.length > 0 && <TuiSection framed direction="row" paddingX={1} marginX={1}>
+        <Text {...tuiTextStyle(theme.tokens.selection)}>{tuiMessage(locale, 'composer.find')} › </Text>
+        <Text>{terminalSafe(hostPluginQuery)}</Text>
+      </TuiSection>}
+      {((hostPluginTab === 'plugins' && hostPluginCenter.inventoryState !== 'ready')
+        || (hostPluginTab === 'settings' && hostPluginCenter.settingsState !== 'ready'))
+        && hostPluginDetail === undefined && hostSettingsDetail === undefined
+        && <TuiSection paddingX={2}>
+          <Text {...tuiTextStyle(theme.tokens.warning)}>{tuiMessage(locale,
+            hostPluginTab === 'plugins'
+              ? `hostPlugins.source.${hostPluginCenter.inventoryState}` as 'hostPlugins.source.unavailable'
+              : `hostPlugins.source.${hostPluginCenter.settingsState}` as 'hostPlugins.source.unavailable')}</Text>
+        </TuiSection>}
+      {hostPluginDetail !== undefined
+        ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
+          <TuiSection title={terminalSafe(hostPluginDetail.moduleName)} tone="accent" paddingX={0}>
+            <Text>{tuiMessage(locale, 'hostPlugins.detail.module', { module: hostPluginDetail.moduleName })}</Text>
+            <Text>{tuiMessage(locale, 'hostPlugins.detail.entryId', { id: String(hostPluginDetail.entry.entryId) })}</Text>
+            <Text>{tuiMessage(locale, 'hostPlugins.detail.enabled', { enabled: String(hostPluginDetail.enabled) })}</Text>
+            <Text>{tuiMessage(locale, 'hostPlugins.detail.phase', { phase: hostPluginDetail.phaseLabel })}</Text>
+            <Text wrap="wrap">{tuiMessage(locale, 'hostPlugins.detail.configBoundary')}</Text>
+          </TuiSection>
+        </TuiScrollablePanel>
+        : hostSettingsDetail !== undefined
+          ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
+            <TuiSection title={String(hostSettingsDetail.ns)} tone="accent" paddingX={0}>
+              <Text>{tuiMessage(locale, 'hostPlugins.settings.revision', {
+                revision: String(hostSettingsDetail.revision), applies: hostSettingsDetail.applies,
+              })}</Text>
+              <Text>{hostPluginCenter.settingsWritable
+                ? tuiMessage(locale, 'hostPlugins.settings.writable')
+                : tuiMessage(locale, 'hostPlugins.settings.readOnly')}</Text>
+            </TuiSection>
+            {hostSettingsFields.length === 0
+              ? <TuiEmptyState message={tuiMessage(locale, 'hostPlugins.settings.unsupported')} />
+              : hostSettingsFields.map((field, index) => {
+                const draft = hostSettingsDrafts[field.id]
+                const value = draft?.reset === true
+                  ? tuiMessage(locale, 'hostPlugins.settings.resetValue', { value: field.value })
+                  : draft?.text ?? field.value
+                const badge = draft === undefined
+                  ? field.overridden
+                    ? tuiMessage(locale, 'hostPlugins.settings.overridden')
+                    : tuiMessage(locale, 'hostPlugins.settings.inherited')
+                  : tuiMessage(locale, 'hostPlugins.settings.staged')
+                return <TuiListRow
+                  key={field.id}
+                  selected={index === effectiveHostSettingsFieldSelection}
+                  height={2}
+                  title={`${field.id}: ${terminalSafe(value)}`}
+                  description={`${badge}${hostSettingsEditing && index === effectiveHostSettingsFieldSelection
+                    ? ` · ${tuiMessage(locale, 'hostPlugins.settings.editing')}` : ''}`}
+                />
+              })}
+            {hostSettingsError !== '' && <Text {...tuiTextStyle(theme.tokens.error)}>{terminalSafe(hostSettingsError)}</Text>}
+          </TuiScrollablePanel>
+          : <TuiScrollablePanel paddingX={2}>
+            {visibleHostPluginItems.length === 0
+              ? <TuiEmptyState tone="warning" message={tuiMessage(locale,
+                hostPluginTab === 'plugins' ? 'hostPlugins.empty' : 'hostPlugins.settings.empty')} />
+              : hostPluginTab === 'plugins'
+                ? (visibleHostPluginItems as readonly TuiHostPluginRow[]).map((row, visibleIndex) => {
+                  const index = hostPluginVisibleStart + visibleIndex
+                  const badge = row.enabled
+                    ? row.phaseLabel
+                    : `${tuiMessage(locale, 'hostPlugins.filter.disabled')} · ${row.phaseLabel}`
+                  return <TuiListRow
+                    key={String(row.entry.entryId)}
+                    selected={index === effectiveHostPluginSelection}
+                    height={hostPluginRowHeight}
+                    title={terminalSafe(row.moduleName)}
+                    description={badge}
+                  />
+                })
+                : (visibleHostPluginItems as readonly {
+                  ns: unknown
+                  revision: number
+                  applies: string
+                  hasUserOverride: boolean
+                }[]).map((row, visibleIndex) => {
+                  const index = hostPluginVisibleStart + visibleIndex
+                  const override = row.hasUserOverride
+                    ? tuiMessage(locale, 'hostPlugins.settings.overridden')
+                    : tuiMessage(locale, 'hostPlugins.settings.inherited')
+                  return <TuiListRow
+                    key={String(row.ns)}
+                    selected={index === effectiveHostPluginSelection}
+                    height={hostPluginRowHeight}
+                    title={String(row.ns)}
+                    description={`${tuiMessage(locale, 'hostPlugins.settings.revision', {
+                      revision: String(row.revision), applies: row.applies,
+                    })} · ${override}`}
+                  />
+                })}
+          </TuiScrollablePanel>}
+      <TuiActionFooter
+        status={hostPluginItems.length > hostPluginVisibleCount
+          ? <TuiHintLine>{tuiMessage(locale, 'common.showing', {
+            start: hostPluginVisibleStart + 1,
+            end: hostPluginVisibleStart + visibleHostPluginItems.length,
+            total: hostPluginItems.length,
+          })}</TuiHintLine>
+          : undefined}
+        actions={<TuiHintLine>{hostSettingsDetail !== undefined
+          ? tuiMessage(locale, hostSettingsCanEdit
+            ? 'hostPlugins.footer.settingsDetail' : 'hostPlugins.footer.settingsReadOnly')
+          : hostPluginDetail !== undefined
+            ? tuiMessage(locale, 'hostPlugins.footer.detail')
+            : hostPluginTab === 'plugins'
+              ? tuiMessage(locale, 'hostPlugins.footer.plugins')
+              : tuiMessage(locale, 'hostPlugins.footer.settings')}</TuiHintLine>}
+      />
+    </TuiPane>
+  }
+
+  if (presetManager !== undefined && interaction === undefined) {
+    const effectiveError = presetManagerError || ''
+    return <TuiPane title={tuiMessage(locale, 'presets.header')} height={stdout.rows}>
+      <TuiSection paddingX={2} height={3}>
+        <Text bold>{presetManagerRows.length === 0
+          ? tuiMessage(locale, 'presets.loading')
+          : tuiMessage(locale, 'presets.header')}</Text>
+        <TuiHintLine>{presetManager.authorable
+          ? tuiMessage(locale, 'presets.action.copy').slice(2)
+          : tuiMessage(locale, 'presets.notAuthorable')}</TuiHintLine>
+      </TuiSection>
+      {presetManagerCopyDraft !== undefined
+        ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
+          <TuiSection title={tuiMessage(locale, 'presets.copy.title')} tone="accent" paddingX={0}>
+            <Text wrap="wrap">{presetManagerCopyDraft.step === 'id'
+              ? tuiMessage(locale, 'presets.copy.idPrompt')
+              : tuiMessage(locale, 'presets.copy.namePrompt')}</Text>
+            <Text wrap="wrap">{terminalSafe(presetManagerCopyDraft.step === 'id'
+              ? presetManagerCopyDraft.idDraft : presetManagerCopyDraft.nameDraft)}█</Text>
+          </TuiSection>
+        </TuiScrollablePanel>
+        : presetManagerDeleteConfirm !== undefined
+          ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
+            <TuiSection title={terminalSafe(presetManagerDeleteConfirm.name)} tone="warning" paddingX={0}>
+              <Text wrap="wrap">{tuiMessage(locale, 'presets.delete.confirm', {
+                name: presetManagerDeleteConfirm.name,
+                id: presetManagerDeleteConfirm.preset.id,
+              })}</Text>
+              {presetManagerDeleteConfirm.current
+                && <Text wrap="wrap">{tuiMessage(locale, 'presets.delete.currentImpact')}</Text>}
+              {presetManagerDeleteConfirm.isDefault
+                && <Text wrap="wrap">{tuiMessage(locale, 'presets.delete.defaultImpact')}</Text>}
+              <Text>{tuiMessage(locale, 'presets.delete.yes')}</Text>
+              <Text>{tuiMessage(locale, 'presets.delete.no')}</Text>
+            </TuiSection>
+          </TuiScrollablePanel>
+          : presetManagerDetail !== undefined
+            ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
+              <TuiSection title={terminalSafe(presetManagerDetail.name)} tone="accent" paddingX={0}>
+                <Text>{tuiMessage(locale, 'presets.detail.trust', {
+                  trust: tuiMessage(locale, presetManagerDetail.trust === 'system' ? 'presets.system' : 'presets.user'),
+                })}</Text>
+                <Text>{tuiMessage(locale, 'presets.detail.source', {
+                  source: presetManagerDetail.trust === 'system'
+                    ? tuiMessage(locale, 'presets.source.deployment')
+                    : tuiMessage(locale, 'presets.source.user'),
+                })}</Text>
+                <Text>{presetManagerDetail.current && currentPresetModel !== undefined
+                  ? tuiMessage(locale, 'presets.detail.model.current', { model: currentPresetModel })
+                  : tuiMessage(locale, 'presets.detail.model.deferred')}</Text>
+                <Text>{presetManagerDetail.current && currentPresetPermission !== undefined
+                  ? tuiMessage(locale, 'presets.detail.permission.current', { permission: currentPresetPermission })
+                  : tuiMessage(locale, 'presets.detail.permission.deferred')}</Text>
+                {presetManagerDetail.description !== undefined
+                  && <Text wrap="wrap">{terminalSafe(presetManagerDetail.description)}</Text>}
+                <Text>{tuiMessage(locale, 'presets.detail.path', { path: presetManagerDetail.preset.path })}</Text>
+                {presetManagerComposition?.id === presetManagerDetail.preset.id
+                  && (presetManagerComposition.phase === 'loading'
+                    ? <TuiLoadingState message={tuiMessage(locale, 'presets.composition.loading')} />
+                    : <TuiSection title={tuiMessage(locale, 'presets.composition.title')} paddingX={0}>
+                      <Text wrap="wrap">{presetManagerComposition.text}</Text>
+                      {presetManagerComposition.truncated === true
+                        && <TuiHintLine>{tuiMessage(locale, 'presets.composition.truncated')}</TuiHintLine>}
+                    </TuiSection>)}
+                {presetManagerDetail.isDefault && <Text bold>{tuiMessage(locale, 'presets.detail.default')}</Text>}
+                {presetManagerDetail.current && <Text bold>{tuiMessage(locale, 'presets.detail.current')}</Text>}
+                {presetManagerDetail.broken !== undefined
+                  && <Text {...tuiTextStyle(theme.tokens.error)}>{tuiMessage(locale, 'presets.broken', {
+                    reason: presetManagerDetail.broken,
+                  })}</Text>}
+                {!props.pathOpenerAvailable
+                  && <TuiHintLine>{tuiMessage(locale, 'presets.detail.remotePath')}</TuiHintLine>}
+              </TuiSection>
+            </TuiScrollablePanel>
+            : <TuiScrollablePanel paddingX={2}>
+              {visiblePresetManagerItems.length === 0
+                ? <TuiEmptyState tone="warning" message={tuiMessage(locale, 'presets.empty')} />
+                : visiblePresetManagerItems.map((row, visibleIndex) => {
+                  const index = presetManagerVisibleStart + visibleIndex
+                  const badges = [
+                    row.current ? tuiMessage(locale, 'presets.current') : undefined,
+                    row.isDefault ? tuiMessage(locale, 'presets.default') : undefined,
+                  ].filter(Boolean).join(' · ')
+                  return <TuiListRow
+                    key={row.preset.id}
+                    selected={index === effectivePresetManagerSelection}
+                    height={presetManagerRowHeight}
+                    title={terminalSafe(row.name)}
+                    description={`${tuiMessage(locale, row.trust === 'system' ? 'presets.system' : 'presets.user')}${badges ? ` · ${badges}` : ''}`}
+                  />
+                })}
+            </TuiScrollablePanel>}
+      <TuiActionFooter
+        status={effectiveError !== ''
+          ? <Text {...tuiTextStyle(theme.tokens.error)} wrap="truncate-end">{terminalSafe(effectiveError)}</Text>
+          : presetManagerRows.length > presetManagerVisibleCount
+            ? <TuiHintLine>{tuiMessage(locale, 'common.showing', {
+              start: presetManagerVisibleStart + 1,
+              end: presetManagerVisibleStart + visiblePresetManagerItems.length,
+              total: presetManagerRows.length,
+            })}</TuiHintLine>
+            : undefined}
+        actions={<TuiHintLine>{presetManagerCopyDraft !== undefined
+          ? tuiMessage(locale, 'sessions.footer.edit')
+          : presetManagerDeleteConfirm !== undefined
+            ? tuiMessage(locale, 'sessions.footer.confirm')
+            : presetManagerDetail !== undefined
+              ? [
+                presetManagerDetail.canSetDefault ? tuiMessage(locale, 'presets.action.setDefault') : undefined,
+                presetManagerDetail.canCopy ? tuiMessage(locale, 'presets.action.copy') : undefined,
+                presetManagerDetail.canDelete ? tuiMessage(locale, 'presets.action.delete') : undefined,
+                tuiMessage(locale, 'presets.action.view'),
+                props.pathOpenerAvailable ? tuiMessage(locale, 'presets.action.openFile') : undefined,
+                props.pathOpenerAvailable ? tuiMessage(locale, 'presets.action.open') : undefined,
+                tuiMessage(locale, 'presets.action.close'),
+              ].filter(Boolean).join(' · ')
+              : tuiMessage(locale, 'presets.action.close')}</TuiHintLine>}
+      />
+    </TuiPane>
+  }
+
+  if (sessionManager !== undefined && interaction === undefined) {
+    const effectiveError = sessionManagerError || sessionManager.error || ''
+    const archiveLabel = tuiMessage(locale, `sessions.archive.${sessionManagerArchive}`)
+    const editorTitle = sessionManagerEdit?.kind === 'workspace-add'
+      ? tuiMessage(locale, 'sessions.workspace.add')
+      : sessionManagerEdit?.kind === 'workspace-rename'
+        ? tuiMessage(locale, 'sessions.workspace.rename')
+        : tuiMessage(locale, 'sessions.session.rename')
+    if (directoryBrowser !== undefined) {
+      const path = directoryBrowserPage?.path ?? directoryBrowser.requestedPath ?? ''
+      const browserError = directoryBrowser.error || effectiveError
+      return <TuiPane title={tuiMessage(locale, 'pane.sessions')} height={stdout.rows}>
+        <TuiSection paddingX={2} height={3}>
+          <Text bold>{tuiMessage(locale, 'sessions.directory.title')}</Text>
+          <TuiHintLine>{tuiMessage(locale, 'sessions.directory.hidden', {
+            state: tuiMessage(locale, directoryBrowser.showHidden
+              ? 'sessions.directory.hiddenShown' : 'sessions.directory.hiddenHidden'),
+          })}</TuiHintLine>
+          <TuiHintLine>{directoryBrowserPage?.truncated === true
+            ? tuiMessage(locale, 'sessions.directory.truncated')
+            : directoryBrowser.phase === 'loading' ? tuiMessage(locale, 'sessions.directory.loading') : ''}</TuiHintLine>
+        </TuiSection>
+        <TuiSection framed direction="row" paddingX={1} marginX={1}>
+          <Text {...tuiTextStyle(theme.tokens.selection)}>{tuiMessage(locale, 'sessions.directory.path', {
+            path: terminalSafe(path),
+          })}</Text>
+        </TuiSection>
+        {directoryBrowserPage === undefined
+          ? <TuiScrollablePanel paddingX={2}><TuiLoadingState
+            message={tuiMessage(locale, 'sessions.directory.loading')}
+          /></TuiScrollablePanel>
+          : <TuiScrollablePanel paddingX={2}>
+            {visibleDirectoryRows.length === 0
+              ? <TuiEmptyState message={tuiMessage(locale, 'sessions.directory.empty')} />
+              : visibleDirectoryRows.map((row, visibleIndex) => {
+                const index = directoryVisibleStart + visibleIndex
+                return <TuiListRow
+                  key={`${row.kind}:${row.path}`}
+                  selected={index === effectiveDirectorySelection}
+                  height={1}
+                  title={row.kind === 'select-current'
+                    ? tuiMessage(locale, 'sessions.directory.selectCurrent')
+                    : `${row.hidden ? '·' : '▸'} ${row.name}`}
+                  {...row.kind === 'select-current' ? { trailing: terminalSafe(row.path) } : {}}
+                />
+              })}
+          </TuiScrollablePanel>}
+        <TuiActionFooter
+          status={browserError !== ''
+            ? <Text {...tuiTextStyle(theme.tokens.error)} wrap="truncate-end">{terminalSafe(browserError)}</Text>
+            : directoryBrowserPage !== undefined && directoryBrowserPage.rows.length > directoryVisibleCount
+              ? <TuiHintLine>{tuiMessage(locale, 'common.showing', {
+                start: directoryVisibleStart + 1,
+                end: directoryVisibleStart + visibleDirectoryRows.length,
+                total: directoryBrowserPage.rows.length,
+              })}</TuiHintLine>
+              : undefined}
+          actions={<TuiHintLine>{tuiMessage(locale, 'sessions.directory.footer')}</TuiHintLine>}
+        />
+      </TuiPane>
+    }
+    return <TuiPane title={tuiMessage(locale, 'pane.sessions')} height={stdout.rows}>
+      <TuiSection paddingX={2} height={3}>
+        <Text bold>{sessionManager.phase === 'loading'
+          ? tuiMessage(locale, 'sessions.loading')
+          : sessionManager.phase === 'mutating'
+            ? tuiMessage(locale, 'sessions.mutating')
+            : tuiMessage(locale, 'sessions.count', {
+              sessions: sessionManagerProjection.sessions.length,
+              workspaces: sessionManagerProjection.workspaces.length,
+            })}</Text>
+        <Text>
+          <Text bold={sessionManagerTab === 'sessions'} {...sessionManagerTab === 'sessions'
+            ? tuiTextStyle(theme.tokens.selection) : {}}>{tuiMessage(locale, 'sessions.tab.sessions')}</Text>
+          <Text {...tuiTextStyle(theme.tokens.muted)}> · </Text>
+          <Text bold={sessionManagerTab === 'workspaces'} {...sessionManagerTab === 'workspaces'
+            ? tuiTextStyle(theme.tokens.selection) : {}}>{tuiMessage(locale, 'sessions.tab.workspaces')}</Text>
+          <Text {...tuiTextStyle(theme.tokens.muted)}> · Tab</Text>
+        </Text>
+        <TuiHintLine>{sessionManagerTab === 'sessions'
+          ? tuiMessage(locale, 'sessions.filters', {
+            scope: tuiMessage(locale, `sessions.scope.${sessionManagerScope}`),
+            archive: archiveLabel,
+            sort: tuiMessage(locale, `sessions.sort.${sessionManagerSort}`),
+            group: tuiMessage(locale, sessionManagerGroup ? 'sessions.group.on' : 'sessions.group.off'),
+          })
+          : tuiMessage(locale, 'sessions.workspace.retention')}</TuiHintLine>
+      </TuiSection>
+      <TuiSection framed direction="row" paddingX={1} marginX={1}>
+        <Text {...tuiTextStyle(theme.tokens.selection)}>{tuiMessage(locale, 'composer.find')} › </Text>
+        <Text>{terminalSafe(sessionManagerQuery)}</Text>
+      </TuiSection>
+      {sessionManager.phase !== 'ready'
+        ? <TuiScrollablePanel paddingX={2}><TuiLoadingState message={tuiMessage(locale,
+          sessionManager.phase === 'loading' ? 'sessions.reading' : 'sessions.mutating')} /></TuiScrollablePanel>
+        : sessionManagerEdit !== undefined
+          ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
+            <TuiSection title={editorTitle} tone="accent" paddingX={0}>
+              <Text wrap="wrap">{terminalSafe(sessionManagerEdit.draft)}█</Text>
+              {sessionManagerEdit.kind === 'workspace-add'
+                ? <TuiHintLine>{tuiMessage(locale, 'sessions.workspace.addBoundary')}</TuiHintLine>
+                : undefined}
+            </TuiSection>
+          </TuiScrollablePanel>
+          : sessionManagerConfirm !== undefined
+            ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
+              <TuiSection title={tuiMessage(locale, 'sessions.confirm.title')} tone="warning" paddingX={0}>
+                <Text wrap="wrap">{tuiMessage(locale, sessionManagerConfirm === 'workspace-delete'
+                  ? 'sessions.confirm.workspaceDelete'
+                  : sessionManagerConfirm === 'session-archive'
+                    ? 'sessions.confirm.archive' : 'sessions.confirm.unarchive')}</Text>
+                {sessionManagerConfirm === 'workspace-delete' && selectedManagedWorkspace !== undefined
+                  ? <TuiHintLine>{selectedManagedWorkspace.title} · {selectedManagedWorkspace.path}</TuiHintLine>
+                  : selectedManagedSession === undefined ? undefined
+                    : <TuiHintLine>
+                      {selectedManagedSession.candidate.title} · {selectedManagedSession.candidate.record.header.id}
+                    </TuiHintLine>}
+              </TuiSection>
+            </TuiScrollablePanel>
+            : sessionManagerDetail
+              ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
+                {selectedManagedSession !== undefined
+                  ? <TuiSection title={terminalSafe(selectedManagedSession.candidate.title)} tone="accent" paddingX={0}>
+                    <Text>{tuiMessage(locale, 'sessions.detail.id', { id: selectedManagedSession.candidate.record.header.id })}</Text>
+                    <Text>{tuiMessage(locale, 'sessions.detail.workspace', { workspace: selectedManagedSession.workspaceTitle })}</Text>
+                    <Text>{tuiMessage(locale, 'sessions.detail.cwd', { cwd: selectedManagedSession.candidate.workspaceLabel })}</Text>
+                    <Text>{tuiMessage(locale, 'sessions.detail.state', {
+                      state: selectedManagedSession.current
+                        ? tuiMessage(locale, 'common.current')
+                        : selectedManagedSession.archived
+                          ? tuiMessage(locale, 'sessions.archive.archived')
+                          : tuiMessage(locale, 'sessions.archive.active'),
+                    })}</Text>
+                    {selectedManagedSession.candidate.preview.length === 0
+                      ? <TuiHintLine>{tuiMessage(locale, 'resume.preview.empty')}</TuiHintLine>
+                      : selectedManagedSession.candidate.preview.map(line => <Text key={`${line.seq}:${line.kind}`} wrap="wrap">
+                        {terminalSafe(line.text)}
+                      </Text>)}
+                  </TuiSection>
+                  : selectedManagedWorkspace !== undefined
+                    ? <TuiSection title={terminalSafe(selectedManagedWorkspace.title)} tone="accent" paddingX={0}>
+                      <Text>{tuiMessage(locale, 'sessions.detail.id', { id: selectedManagedWorkspace.id })}</Text>
+                      <Text>{tuiMessage(locale, 'sessions.detail.path', { path: selectedManagedWorkspace.path })}</Text>
+                      <Text>{tuiMessage(locale, 'sessions.detail.state', {
+                        state: tuiMessage(locale, selectedManagedWorkspace.status === 'ok'
+                          ? 'sessions.workspace.ok' : 'sessions.workspace.missing'),
+                      })}</Text>
+                      <Text>{tuiMessage(locale, 'sessions.detail.sessionCount', {
+                        count: selectedManagedWorkspace.sessionIds.length,
+                      })}</Text>
+                    </TuiSection>
+                    : <TuiEmptyState message={tuiMessage(locale, 'sessions.empty')} />}
+              </TuiScrollablePanel>
+              : <TuiScrollablePanel paddingX={2}>
+                {visibleSessionManagerItems.length === 0
+                  ? <TuiEmptyState tone="warning" message={tuiMessage(locale, 'sessions.empty')} />
+                  : sessionManagerTab === 'sessions'
+                    ? (visibleSessionManagerItems as readonly TuiSessionManagerRow[]).map((row, visibleIndex) => {
+                      const index = sessionManagerVisibleStart + visibleIndex
+                      const status = row.current
+                        ? tuiMessage(locale, 'common.current')
+                        : row.archived ? tuiMessage(locale, 'sessions.archive.archived')
+                          : row.candidate.record.live ? tuiMessage(locale, 'common.live') : tuiMessage(locale, 'common.persisted')
+                      return <TuiListRow
+                        key={row.candidate.record.header.id}
+                        selected={index === effectiveSessionManagerSelection}
+                        height={sessionManagerRowHeight}
+                        title={terminalSafe(sessionManagerGroup
+                          ? row.groupStart
+                            ? `▾ ${row.workspaceTitle} / ${row.candidate.title}`
+                            : `  ${row.candidate.title}`
+                          : row.candidate.title)}
+                        description={`${terminalSafe(row.workspaceTitle)} · ${formatTuiRelativeTime(row.candidate.updatedAt, Date.now())}`}
+                        detail={`${status} · ${row.candidate.record.header.id}`}
+                      />
+                    })
+                    : (visibleSessionManagerItems as readonly TuiWorkspaceManagerRow[]).map((row, visibleIndex) => {
+                      const index = sessionManagerVisibleStart + visibleIndex
+                      return <TuiListRow
+                        key={row.id}
+                        selected={index === effectiveSessionManagerSelection}
+                        height={sessionManagerRowHeight}
+                        title={terminalSafe(row.title)}
+                        description={terminalSafe(row.path)}
+                        detail={`${tuiMessage(locale, row.status === 'ok'
+                          ? 'sessions.workspace.ok' : 'sessions.workspace.missing')} · ${tuiMessage(locale,
+                          'sessions.detail.sessionCount', { count: row.sessionIds.length })}`}
+                      />
+                    })}
+              </TuiScrollablePanel>}
+      <TuiActionFooter
+        status={effectiveError !== ''
+          ? <Text {...tuiTextStyle(theme.tokens.error)} wrap="truncate-end">{terminalSafe(effectiveError)}</Text>
+          : sessionManagerItems.length > sessionManagerVisibleCount
+            ? <TuiHintLine>{tuiMessage(locale, 'common.showing', {
+              start: sessionManagerVisibleStart + 1,
+              end: sessionManagerVisibleStart + visibleSessionManagerItems.length,
+              total: sessionManagerItems.length,
+            })}</TuiHintLine>
+            : undefined}
+        actions={<TuiHintLine>{sessionManagerEdit !== undefined
+          ? tuiMessage(locale, 'sessions.footer.edit')
+          : sessionManagerConfirm !== undefined
+            ? tuiMessage(locale, 'sessions.footer.confirm')
+            : sessionManagerDetail
+              ? tuiMessage(locale, sessionManagerTab === 'sessions'
+                ? sessionDetailFooterKey : 'sessions.footer.workspaceDetail')
+              : tuiMessage(locale, sessionManagerTab === 'sessions'
+                ? 'sessions.footer.sessions' : 'sessions.footer.workspaces')}</TuiHintLine>}
+      />
     </TuiPane>
   }
 
@@ -3546,10 +8423,23 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
               </TuiScrollablePanel>
             </Box>}
           </Box>}
-      <TuiSection height={2} paddingX={2}>
-        {effectiveError !== ''
+      <TuiActionFooter
+        status={effectiveError !== ''
           ? <Text {...tuiTextStyle(theme.tokens.error)} wrap="truncate-end">{terminalSafe(effectiveError)}</Text>
-          : <TuiHintLine>{resumeDialog.phase === 'resuming'
+          : resumeCandidates.length > resumeVisibleCount
+            ? <TuiHintLine>{tuiMessage(locale, 'common.showing', {
+              start: resumeVisibleStart + 1,
+              end: resumeVisibleStart + visibleResumeCandidates.length,
+              total: resumeCandidates.length,
+            })}</TuiHintLine>
+            : undefined}
+        actions={<TuiHintLine>{resumeConfirmation !== undefined
+          ? [
+            tuiMessage(locale, 'resume.stash'),
+            tuiMessage(locale, 'resume.discard'),
+            tuiMessage(locale, 'resume.cancel'),
+          ].join(' · ')
+          : resumeDialog.phase === 'resuming'
             ? tuiMessage(locale, 'resume.footer.cancel')
             : narrowResume
               ? tuiMessage(locale, 'resume.footer.narrow', {
@@ -3557,14 +8447,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                   ? 'resume.direction.preview' : 'resume.direction.list'),
               })
               : tuiMessage(locale, 'resume.footer.wide')}</TuiHintLine>}
-        {resumeCandidates.length > resumeVisibleCount && <TuiHintLine>
-          {tuiMessage(locale, 'common.showing', {
-            start: resumeVisibleStart + 1,
-            end: resumeVisibleStart + visibleResumeCandidates.length,
-            total: resumeCandidates.length,
-          })}
-        </TuiHintLine>}
-      </TuiSection>
+      />
     </TuiPane>
   }
 
@@ -3595,6 +8478,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           ? transcriptScreenMap : undefined}
         selection={screenSelection?.surface === 'transcript' && screenSelection.map === transcriptScreenMap
           ? screenSelection.range : undefined}
+        columns={transcriptColumns}
       />}
     </Box>
     {!helpVisible && detailHeight > 0 && (footerDetailItem !== undefined || focusedTarget !== undefined) && <TuiScrollablePanel
@@ -3614,6 +8498,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
               screenSelection?.map === detailScreenMap ? screenSelection?.range : undefined,
             )}
           </React.Fragment>)}
+        {feedbackActionsVisible && <TuiHintLine tone="accent" bold>{feedbackActionLine}</TuiHintLine>}
+        {deliverableActionsVisible && <TuiHintLine tone="accent" bold>{deliverableActionLine}</TuiHintLine>}
         <TuiHintLine>
           {detailLines.length === 0 ? 0 : detailOffset + 1}–{Math.min(
             detailOffset + detailRows, detailLines.length,
@@ -3703,9 +8589,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       {composerLayout.lines.map((line, index) => <Text key={`${index}:${line}`}>
         {index === 0 ? '> ' : '  '}{line}
       </Text>)}
-      {attachmentLine !== undefined && <Text wrap="truncate-end" {...tuiTextStyle(theme.tokens.accent)}>
-        {tuiMessage(locale, 'common.attachments', { attachments: attachmentLine })}
-      </Text>}
+      {attachmentRailView}
     </TuiSection>}
     {suggestionPanel}
     {!helpVisible && historySearch !== undefined && <Box paddingX={2} flexShrink={0}>
@@ -3736,6 +8620,30 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     {!helpVisible && stashedDraft !== undefined && <Box paddingX={2} flexShrink={0}>
       <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}>{tuiMessage(locale, 'draft.stashed')}</Text>
     </Box>}
+    {visibleGoalPlanSurface !== undefined && <TuiSection paddingX={2} height={1}>
+      <Text wrap="truncate-end">
+        {visibleGoalPlanSurface.goal === undefined ? undefined : <>
+          <Text bold {...tuiTextStyle(theme.tokens.accent)}>{tuiMessage(locale, 'goalPlan.strip.goal', {
+            phase: tuiMessage(locale, `goalPlan.phase.${visibleGoalPlanSurface.goal.phase}`),
+          })}</Text>
+          <Text> · {terminalSafe(visibleGoalPlanSurface.goal.objective)}</Text>
+        </>}
+        {visibleGoalPlanSurface.goal !== undefined && visibleGoalPlanSurface.plan?.effective === true ? '  |  ' : ''}
+        {visibleGoalPlanSurface.plan?.effective === true && <Text bold {...tuiTextStyle(theme.tokens.warning)}>
+          {tuiMessage(locale, visibleGoalPlanSurface.plan.pending ? 'goalPlan.strip.planPending' : 'goalPlan.strip.plan')}
+        </Text>}
+        <Text {...tuiTextStyle(theme.tokens.muted)}> · Alt+G</Text>
+      </Text>
+    </TuiSection>}
+    {queueCardVisible && <TuiSection paddingX={2} height={1}>
+      <Text {...tuiTextStyle(theme.tokens.warning)} wrap="truncate-end">
+        {tuiMessage(locale, 'queue.card', {
+          count: queue.items.length,
+          step: queue.nextStepCount,
+          turn: queue.nextTurnCount,
+        })}
+      </Text>
+    </TuiSection>}
     <TuiSection paddingX={2} height={1}>
       {agentStatus === 'running'
         ? <Text wrap="truncate-end">
@@ -3759,9 +8667,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                       : agentStatus === 'running' ? 'composer.steer' : 'composer.prompt')} › </Text>}
               {index === 0 ? '' : '  '}{line}
             </Text>)}
-            {attachmentLine !== undefined && <Text wrap="truncate-end" {...tuiTextStyle(theme.tokens.accent)}>
-              {tuiMessage(locale, 'common.attachments', { attachments: attachmentLine })}
-            </Text>}
+            {attachmentRailView}
           </Box>
         </TuiSection>
         : <TuiSection framed tone="warning" paddingX={1}>
@@ -3775,14 +8681,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       {extensionStatus.length > 0 && <Text wrap="truncate-end">{extensionStatus.join(' · ')}</Text>}
       {workOpen
         ? <Text {...tuiTextStyle(theme.tokens.selection)} bold wrap="truncate-end">
-          {tuiMessage(locale, 'footer.work.title', {
-            position: work.items.length === 0 ? '0/0' : `${effectiveWorkSelection + 1}/${work.items.length}`,
-          })}
-          {' · '}{tuiMessage(locale, 'footer.work.select')}
-          {selectedWorkItem?.inspectable === true ? ` · ${tuiMessage(locale, 'footer.work.open')}` : ''}
-          {selectedWorkItem?.action === undefined || selectedWorkItem.action === 'none'
-            ? '' : ` · ${tuiMessage(locale, 'footer.work.stop')}`}
-          {' · '}{tuiMessage(locale, 'common.esc.close')}
+          {workFooterLine}
         </Text>
         : footerDetail !== undefined
           ? <Text {...tuiTextStyle(theme.tokens.selection)} wrap="truncate-end">{tuiMessage(locale, 'footer.detail')}</Text>
@@ -3805,7 +8704,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                         : tuiMessage(locale, 'footer.rewind.actions')}
                     </Text>
                     : <Text wrap="truncate-end">{helpVisible
-                      ? tuiMessage(locale, 'footer.help')
+                      ? helpFooterLine
                       : transcriptSearch !== undefined
                         ? tuiMessage(locale, 'footer.transcript.query', {
                           query: JSON.stringify(transcriptSearch.query),
@@ -3823,7 +8722,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                           : focus?.mode === 'browse'
                             ? tuiMessage(locale, 'footer.browse')
                             : focus?.mode === 'detail'
-                              ? tuiMessage(locale, 'footer.detail.close')
+                              ? transcriptDetailFooterLine
                               : footerStatus}</Text>}
     </TuiSection>
   </Box>

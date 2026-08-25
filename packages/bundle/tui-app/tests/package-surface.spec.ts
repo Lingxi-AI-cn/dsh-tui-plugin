@@ -52,7 +52,7 @@ describe('post-install TUI package surface', () => {
   const top = manifests[0]!
 
   it('publishes one same-version Lingxi package family without install hooks or source exports', () => {
-    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.4-rc.8']))
+    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.5-rc.8']))
     for (const entry of manifests) {
       expect(entry.name).toMatch(/^@lingxi-ai-cn\/dsh-/u)
       expect(entry.repository?.url).toBe(REPOSITORY)
@@ -124,6 +124,13 @@ describe('post-install TUI package surface', () => {
     expect(rows.find(entry => entry.id === 'agent-presets')).toMatchObject({
       name: '@deepseek-ai/dsh-agent-presets', inject: ['tuiStartup'],
     })
+    expect(rows.find(entry => entry.id === 'message-feedback')?.name)
+      .toBe('@deepseek-ai/dsh-message-feedback')
+    expect(rows.find(entry => entry.id === 'directory-picker')).toMatchObject({
+      name: '@deepseek-ai/dsh-host-directory-picker-browse', config: { maxEntries: 1000 },
+    })
+    expect(rows.find(entry => entry.id === 'host-plugin-inventory')?.name)
+      .toBe('@deepseek-ai/dsh-host-plugin-inventory')
     expect(rows.some(entry => entry.id === 'tool-ask-user')).toBe(false)
     expect(rows.find(entry => entry.id === 'plugin-hub-local')?.config)
       .toMatchObject({ profile: 'tui', profileMutations: false })

@@ -9,7 +9,7 @@ import {
 } from '../src/compatibility.ts'
 
 const manifest = {
-  version: '0.1.4-rc.8',
+  version: '0.1.5-rc.8',
   peerDependencies: {
     '@deepseek-ai/dsh-app-boot': '0.1.0-rc.8',
     '@deepseek-ai/dsh-session': '0.1.0-rc.8',
@@ -29,13 +29,13 @@ describe('post-install TUI Host compatibility', () => {
       compatibility: 'compatible',
       dshVersion: '0.1.0-rc.8',
       supportedDshVersion: '0.1.0-rc.8',
-      tuiVersion: '0.1.4-rc.8',
+      tuiVersion: '0.1.5-rc.8',
       profile: 'tui',
       nodeVersion: process.versions.node,
       platform: process.platform,
       architecture: process.arch,
       agentPresetIds: ['standard', 'code', 'minimal', 'cordis'],
-      recoveryCommand: 'dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8',
+      recoveryCommand: 'dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8',
     })
   })
 
@@ -47,7 +47,7 @@ describe('post-install TUI Host compatibility', () => {
     expect(() => validateTuiHostCompatibility(manifest, [
       host('@deepseek-ai/dsh-app-boot', '0.1.0-rc.7'),
       host('@deepseek-ai/dsh-session'),
-    ], '/dsh-home/profiles/tui')).toThrow('dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8')
+    ], '/dsh-home/profiles/tui')).toThrow('dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8')
   })
 
   it('rejects a Host peer materialized inside the active profile', () => {
@@ -63,7 +63,7 @@ describe('post-install TUI Host compatibility', () => {
 
   it('allows workspace protocols only in the source checkout', () => {
     expect(validateTuiHostCompatibility({
-      version: '0.1.4-rc.8',
+      version: '0.1.5-rc.8',
       peerDependencies: { '@deepseek-ai/dsh-app-boot': 'workspace:*' },
     }, [host('@deepseek-ai/dsh-app-boot', 'development')], '/dsh-home/profiles/tui').dshVersion).toBe('development')
   })

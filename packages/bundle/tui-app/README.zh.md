@@ -2,14 +2,14 @@
 
 [English](README.md) | 中文
 
-这是叠加在官方 `dsh-base` profile 之上的后装原生终端 bundle。其 patch 会移除 base 的进程级 Agent plane，挂载官方 preset roster，以及 Host 侧的 Code Mode 与 Cordis runner，并把共享耐久 Session projection cache、原生 Session 归档写入服务、provider-neutral Plugin Hub service 与可信本地 [`@lingxi-ai-cn/dsh-plugin-hub-local`](../../interaction/plugin-hub-local/README.md) provider 等 surface service 保留在 Host plane。它解析 `dsh --profile tui [--resume <session-id>]`，并激活 [`@lingxi-ai-cn/dsh-tui-runtime`](../../ui/tui/README.md)。它不挂载 Web server、API Proxy、浏览器 runtime、Workspace UI 或 Agent installation tool。该包不提供全局 binary，也不修改已安装的 DSH 应用。
+这是叠加在官方 `dsh-base` profile 之上的后装原生终端 bundle。其 patch 会移除 base 的进程级 Agent plane，挂载官方 preset roster，以及 Host 侧的 Code Mode 与 Cordis runner，并把 Workspace、Session／file reference、耐久 projection cache、有界 directory picker、message feedback、Host plugin inventory、原生 Session 归档写入服务、provider-neutral Plugin Hub service 与可信本地 [`@lingxi-ai-cn/dsh-plugin-hub-local`](../../interaction/plugin-hub-local/README.md) provider 等 terminal-neutral owner 保留在 Host plane。它解析 `dsh --profile tui [--resume <session-id>]`，并激活 [`@lingxi-ai-cn/dsh-tui-runtime`](../../ui/tui/README.md)。它不挂载 Web server、API Proxy、浏览器 runtime、Workspace UI 或 Agent installation tool。该包不提供全局 binary，也不修改已安装的 DSH 应用。
 
 ## 安装与运行
 
 把确切版本的 TUI 安装到已有且版本匹配的 DSH 所管理的 profile 中，再通过现有 `dsh` binary 启动该 profile：
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
 dsh --profile tui
 ```
 
@@ -18,7 +18,7 @@ dsh --profile tui
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
 ```
 
 Session 与凭据存储在 profile 目录之外，不会被此次迁移删除。对于用户自己编写的 profile patch，应审查后重新应用，而不要把整个旧 profile 目录原样复制回来。
@@ -44,7 +44,7 @@ TUI 使用与 Web 相同的动态 `ctx.agentPresets` roster 和耐久 Session id
 | Minimal | `minimal` | 使用官方固定提示词，并且仅提供持久化 `bash` 与 `str_replace_editor`。 |
 | Creator | `cordis` | 提供 Standard 的能力，并增加 runtime 检查、plugin 实验与 preset 创作指导。 |
 
-`/mode` 与可操作 footer 会列出这些 system preset，以及 `$DSH_HOME/.agent-presets` 中健康的 user preset。空白 Session 会通过官方 recompose transaction 原地切换，并且只在新组装提交后记录 `agent-preset/selected`。一旦存在 `turn/start`，选择另一种模式会打开现有的新 Session 确认；取消会保持当前 Agent、transcript、draft 和 footer 不变，确认则以所选 preset 创建新 Session，并让旧 Session 继续可恢复。`/new`、`/clear` 与 `/rewind` 会继承当前 Session 的实际 preset。缺失或损坏的 preset 会继续显示，但不可选择；该 bundle 不增加 preset copy、edit 或 delete UI。
+`/mode` 与可操作 footer 会列出这些 system preset，以及 `$DSH_HOME/.agent-presets` 中健康的 user preset。空白 Session 会通过官方 recompose transaction 原地切换，并且只在新组装提交后记录 `agent-preset/selected`。一旦存在 `turn/start`，选择另一种模式会打开现有的新 Session 确认；取消会保持当前 Agent、transcript、draft 和 footer 不变，确认则以所选 preset 创建新 Session，并让旧 Session 继续可恢复。`/new`、`/clear` 与 `/rewind` 会继承当前 Session 的实际 preset。`/presets` 增加原子复制、检查、Host-open、user-owned 删除，以及在 preset owner 暴露 settings compare-and-set seam 时可用的未来默认值选择；缺失或损坏的 preset 保持可见但不可选择。
 
 ## 模型体验
 
@@ -64,7 +64,7 @@ TUI 使用与 Web 相同的动态 `ctx.agentPresets` roster 和耐久 Session id
 
 ## 已知限制与暂缓事项
 
-- **没有 preset 创作 UI**：`/mode` 可以选择已经安装且健康的 preset，但 copy、edit、delete 与 Creator 专用创作控件仍由官方 preset 机制和 Web surface 提供。
+- **Preset 源文件编辑使用 Host**：manager 负责默认选择、复制、检查与删除，但通过 Host 打开 composition 文件，不内嵌 YAML editor。
 - **Codex 登录只在 TUI 提供**：公开 bundle 增加原生 ChatGPT OAuth 与账户模型发现；Web Models 页面不运行该登录流程。
 - **插件修改使用外部 CLI**：官方 DSH `0.1.0-rc.8` 没有通用 pre-composition recovery hook，因此已发布 TUI 不会激活其下游专用的进程内 profile swap。
 - **只支持 TTY 应用**：重定向 stdin 或 stdout 会在激活前失败；无人值守自动化使用 headless profile。

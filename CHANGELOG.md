@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5-rc.8
+
+- Adds native Provider, Session/Workspace, Preset, and Host Plugin management surfaces, including capability-gated mutations, redacted settings, safe preset authoring, Session archive plus Host-gated restore, and provider logout.
+- Adds revision-aware pending-input queues, unified file and Session references, durable Goal/Plan status, per-Turn deliverables, and a searchable hierarchical Trajectory inspector.
+- Adds message feedback, durable image intake, terminal path paste, safer referenced-Session preflight, and exact mouse targets across the new dialogs, tabs, fields, and inline deliverable paths.
+- Preserves official DSH `0.1.0-rc.8` ownership boundaries: unsupported queue mutations and non-image durable attachments remain explicitly unavailable instead of being emulated in the TUI.
+
 ## 0.1.4-rc.8
 
 - Separates installed plugins, Registry entries, and GitHub repositories, with explicit installability filters, repository scan status, and mouse-accessible details and links.

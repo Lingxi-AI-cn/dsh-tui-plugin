@@ -6,10 +6,10 @@ import type {
 import { tuiCommandDescription, type TuiLocale } from './locale.ts'
 
 /** Origin of one TUI completion candidate. */
-export type TuiSuggestionKind = 'command' | 'path'
+export type TuiSuggestionKind = 'command' | 'path' | 'reference' | 'file' | 'session'
 
 /** Resolution state for a bounded TUI completion query. */
-export type TuiSuggestionStatus = 'ready' | 'loading' | 'empty' | 'truncated'
+export type TuiSuggestionStatus = 'ready' | 'loading' | 'empty' | 'truncated' | 'error'
 
 /** One insertable item supplied by a TUI completion source. */
 export interface TuiSuggestionItem {
@@ -29,6 +29,12 @@ export interface TuiSuggestionItem {
   commandPath?: readonly string[] | undefined
   /** Source that produced this item. */
   source: TuiSuggestionKind
+  /** Canonical reference kind, when this row came from an `@` owner. */
+  referenceKind?: 'file' | 'directory' | 'session' | undefined
+  /** Workspace-rooted path used by image attachment intake. */
+  referencePath?: string | undefined
+  /** Opaque owner identity carried by a canonical Session reference. */
+  referenceId?: string | undefined
 }
 
 /** Complete local state for one active TUI completion query. */
@@ -47,6 +53,8 @@ export interface TuiSuggestionState {
   items: readonly TuiSuggestionItem[]
   /** Query resolution state shown when candidates are unavailable or incomplete. */
   status: TuiSuggestionStatus
+  /** Partial or complete provider failure retained beside usable rows. */
+  error?: string | undefined
 }
 
 /** Text and insertion point produced by accepting a completion. */

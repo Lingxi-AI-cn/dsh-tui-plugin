@@ -11,7 +11,9 @@ import {
   type ToolResultView,
 } from './host.ts'
 import { terminalSafe } from './sanitize.ts'
+import { TuiAppendOnlySessionWindow } from './session-window.ts'
 import type { TuiKnownSessionEvent, TuiKnownSessionEventRenderResult } from './extensions.ts'
+import { projectTuiTurnDeliverables, type TuiDeliverableItem } from './deliverables.ts'
 
 /** Maximum child rows mounted inside one compact structured transcript block. */
 export const STRUCTURED_CHILD_LIMIT = 6
@@ -31,6 +33,14 @@ export interface TranscriptTextNode {
   label: string
   /** Terminal-safe display body. */
   text: string
+  /** Durable assistant message identity, present only for finalized assistant nodes. */
+  messageId?: string | undefined
+  /** Scheduler turn for a finalized assistant node. */
+  turn?: number | undefined
+  /** Scheduler step for a finalized assistant node. */
+  step?: number | undefined
+  /** Whether this is the final assistant message observed before its Turn ended. */
+  closing?: true | undefined
   /** Elapsed reasoning stream time for a completed Thinking block. */
   durationMs?: number | undefined
   /** Internal first reasoning event timestamp used while folding a stream. */
@@ -45,6 +55,10 @@ export interface TranscriptToolNode {
   key: string
   /** Durable call identity. */
   callId: string
+  /** Scheduler turn that owns this tool call, when recorded by the Host. */
+  turn?: number | undefined
+  /** Scheduler step that owns this tool call, when recorded by the Host. */
+  step?: number | undefined
   /** Registered tool name, or `unknown` for an unpaired result. */
   name: string
   /** Parsed call arguments when valid JSON, otherwise the original string. */
@@ -124,6 +138,20 @@ export interface TranscriptCompactionNode {
   error?: string | undefined
 }
 
+/** Successful file mutations appended immediately after one completed Turn. */
+export interface TranscriptDeliverablesNode {
+  /** Node discriminant. */
+  kind: 'deliverables'
+  /** Stable identity derived from the owning Turn. */
+  key: string
+  /** Scheduler Turn whose successful mutations are represented. */
+  turn: number
+  /** Complete bounded paths retained for detail and actions. */
+  items: readonly TuiDeliverableItem[]
+  /** Paths omitted by the complete-item safety bound. */
+  omitted: number
+}
+
 /** One semantic exploration run or authoritative scheduler group. */
 export interface TranscriptToolGroupNode {
   /** Node discriminant. */
@@ -145,6 +173,7 @@ export type TranscriptNode =
   | TranscriptTodoNode
   | TranscriptToolGroupNode
   | TranscriptCompactionNode
+  | TranscriptDeliverablesNode
 
 interface OptionalTranscriptEventMap {
   'tool/execution-group': {
@@ -358,6 +387,7 @@ class TranscriptFoldState {
   private readonly nodes: TranscriptNode[] = []
   private readonly nodeIndexByKey = new Map<string, number>()
   private readonly streamNodes = new Map<string, TranscriptTextNode>()
+  private readonly lastAssistantByTurn = new Map<number, TranscriptTextNode>()
   private readonly toolNodes = new Map<string, TranscriptToolNode>()
   private readonly executionGroups = new Map<string, TranscriptToolGroupNode>()
   private readonly groupByCall = new Map<string, TranscriptToolGroupNode>()
@@ -513,7 +543,8 @@ class TranscriptFoldState {
         if (existing !== undefined) return existing
         const args = parseArguments(member.arguments)
         const node: TranscriptToolNode = {
-          kind: 'tool', key: `tool:${callId}`, callId, name: member.name, args,
+          kind: 'tool', key: `tool:${callId}`, callId, turn: event.data.turn, step: event.data.step,
+          name: member.name, args,
           rawArguments: terminalSafe(member.arguments), state: 'queued',
           callView: presentCall(member.name, args, this.resolveTool),
         }
@@ -579,8 +610,14 @@ class TranscriptFoldState {
         type: 'assistant/message', seq: event.seq, text: '',
       })
       const assistantNode: TranscriptTextNode = rendered === undefined
-        ? { kind: 'text', key: `event:${event.seq}:assistant`, tone: 'assistant', label: 'Assistant', text: contentText(visible) }
-        : { kind: 'text', key: `event:${event.seq}:assistant`, ...rendered }
+        ? {
+          kind: 'text', key: `event:${event.seq}:assistant`, tone: 'assistant', label: 'Assistant', text: contentText(visible),
+          messageId: String(event.data.message.id), turn: event.data.turn, step: event.data.step,
+        }
+        : {
+          kind: 'text', key: `event:${event.seq}:assistant`, ...rendered,
+          messageId: String(event.data.message.id), turn: event.data.turn, step: event.data.step,
+        }
       const streamedAssistant = this.streamNodes.get(assistantKey)
       const streamedAssistantIndex = streamedAssistant === undefined
         ? -1
@@ -588,6 +625,7 @@ class TranscriptFoldState {
       const assistantIndex = streamedAssistantIndex < 0 ? this.nodes.length : streamedAssistantIndex
       if (streamedAssistantIndex < 0) this.pushRaw(assistantNode)
       else if (streamedAssistant !== undefined) this.replaceRaw(streamedAssistant, assistantNode)
+      this.lastAssistantByTurn.set(event.data.turn, assistantNode)
       if (reasoning.length > 0) {
         const reasoningNode: TranscriptTextNode = {
           kind: 'text', key: `event:${event.seq}:reasoning`, tone: 'reasoning', label: 'Thinking', text: contentText(reasoning),
@@ -610,10 +648,11 @@ class TranscriptFoldState {
       const args = parseArguments(event.data.arguments)
       const existing = this.toolNodes.get(callId)
       const node: TranscriptToolNode = existing === undefined ? {
-        kind: 'tool', key: `tool:${callId}`, callId, name: event.data.name, args,
+        kind: 'tool', key: `tool:${callId}`, callId, turn: event.data.turn, step: event.data.step,
+        name: event.data.name, args,
         rawArguments: terminalSafe(event.data.arguments), state: 'running',
         callView: presentCall(event.data.name, args, this.resolveTool), startedAt: event.time,
-      } : { ...existing, state: 'running', startedAt: event.time }
+      } : { ...existing, turn: event.data.turn, step: event.data.step, state: 'running', startedAt: event.time }
       if (existing === undefined) {
         this.toolNodes.set(callId, node)
         if (!this.groupByCall.has(callId)) this.pushRaw(node)
@@ -633,7 +672,8 @@ class TranscriptFoldState {
       const paired = this.toolNodes.get(callId)
       if (paired === undefined) {
         this.pushRaw({
-          kind: 'tool', key: `tool-result:${event.seq}`, callId, name: 'unknown', args: undefined,
+          kind: 'tool', key: `tool-result:${event.seq}`, callId, turn: event.data.turn, step: event.data.step,
+          name: 'unknown', args: undefined,
           rawArguments: '', state: 'error', callView: { card: 'generic', title: 'Unpaired tool result' },
           output: contentText(result.content), errorCode: event.data.error?.code,
         })
@@ -699,6 +739,19 @@ class TranscriptFoldState {
       return
     }
     if (event.type === 'turn/end') {
+      const lastAssistant = this.lastAssistantByTurn.get(event.data.turn)
+      if (lastAssistant !== undefined) {
+        const closing = { ...lastAssistant, closing: true as const }
+        this.replaceRaw(lastAssistant, closing)
+        this.lastAssistantByTurn.set(event.data.turn, closing)
+      }
+      const deliverables = projectTuiTurnDeliverables(this.nodes, event.data.turn)
+      if (deliverables.items.length > 0) {
+        this.pushRaw({
+          kind: 'deliverables', key: `deliverables:${event.data.turn}`, turn: event.data.turn,
+          items: deliverables.items, omitted: deliverables.omitted,
+        })
+      }
       const reason = event.data.reason
       if (reason.kind === 'error') {
         for (const tool of [...this.toolNodes.values()]) {
@@ -747,16 +800,14 @@ export class TuiTranscriptProjectionCache {
   private state: TranscriptFoldState | undefined
   private resolver: ToolDefinitionResolver | undefined
   private renderer: TuiKnownSessionEventRenderer | undefined
-  private eventCount = 0
-  private lastEvent: SessionEvent | undefined
+  private readonly window = new TuiAppendOnlySessionWindow<SessionEvent>()
 
   /** Drop all process-local fold state before a Session lifecycle replacement. */
   reset(): void {
     this.state = undefined
     this.resolver = undefined
     this.renderer = undefined
-    this.eventCount = 0
-    this.lastEvent = undefined
+    this.window.reset()
   }
 
   /**
@@ -771,11 +822,13 @@ export class TuiTranscriptProjectionCache {
     resolveTool?: ToolDefinitionResolver,
     renderKnownEvent?: TuiKnownSessionEventRenderer,
   ): readonly TranscriptNode[] {
-    const prefixMatches = this.eventCount === 0 || events.length >= this.eventCount
-      && events[this.eventCount - 1] === this.lastEvent
-    let reset = this.state === undefined || resolveTool !== this.resolver || renderKnownEvent !== this.renderer || !prefixMatches
+    let update = this.window.begin(
+      events,
+      this.state === undefined || resolveTool !== this.resolver || renderKnownEvent !== this.renderer,
+    )
+    let reset = update.reset
     if (!reset) {
-      for (let index = this.eventCount; index < events.length; index += 1) {
+      for (let index = update.startIndex; index < events.length; index += 1) {
         if (events[index]?.type === 'compaction/start') {
           reset = true
           break
@@ -786,17 +839,15 @@ export class TuiTranscriptProjectionCache {
       this.state = new TranscriptFoldState(resolveTool, renderKnownEvent)
       this.resolver = resolveTool
       this.renderer = renderKnownEvent
-      this.eventCount = 0
-      this.lastEvent = undefined
+      update = this.window.begin(events, true)
     }
     const state = this.state
     if (state === undefined) throw new Error('transcript projection state was not initialized')
-    for (let index = this.eventCount; index < events.length; index += 1) {
+    for (let index = update.startIndex; index < events.length; index += 1) {
       const event = events[index]
       if (event !== undefined) state.append(event)
     }
-    this.eventCount = events.length
-    this.lastEvent = events.at(-1)
+    this.window.commit(events)
     return state.snapshot()
   }
 }

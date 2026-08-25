@@ -29,8 +29,16 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 ### 以 Session 为中心的工作流
 
 - 使用 `/resume` 恢复历史工作，使用 `/new` 或 `/clear` 创建干净 Session，并可通过 `/rewind` 从更早的安全人类 turn 创建分支。
+- 使用 `/sessions` 跨 Workspace 浏览、筛选、重命名、归档和分叉 Session；只有 Host 提供取消归档能力时才显示恢复操作。通过 `/workspace` 与 Host 拥有的目录选择器创建或选择工作区根目录。
 - 浏览和搜索完整耐久 Transcript，查看完整块详情，在根 Agent 与存活子 Agent 之间切换，并监控可取消的后台工作。
 - 使用 `/export` 导出 Session 以便审阅或备份；prompt、工具活动和工作区路径会作为明确的诊断数据保留。
+
+### 原生工作管理与检查
+
+- 带 revision 的待输入卡片呈现 Host 支持的 steer 与 follow-up 队列，不在官方 rc.8 上虚构不受支持的队列 mutation。
+- 统一补全同时解析工作区文件与引用 Session；引用 Session 会在提交前进行 preflight，而原始 prompt 保持不变。
+- 耐久 Goal/Plan 状态、逐 Turn 交付物和正文输出路径提供详情、复制与受 Host 能力控制的打开操作。
+- `/trajectory` 提供可搜索、折叠的层级 Turn ledger 和有界 event inspector，适合检查长时间运行的 Session。
 
 ### 4 种真实 Agent 执行模式
 
@@ -50,6 +58,7 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 ### 模型、权限与人类决策
 
 - `/models` 发现已配置的提供方和模型，支持提供方拥有的认证流程，并在模型允许时选择精确推理强度。
+- `/provider` 提供脱敏、按能力开放的 Provider Center，用于 API key、endpoint、自定义 Provider、模型刷新和 Provider 拥有的登出操作。
 - 随包提供的 OpenAI Codex adapter 会显示 **使用 ChatGPT 登录**，把可刷新的 OAuth 凭据存到 `$DSH_HOME/oauth/openai-codex.json`，并动态发现当前登录账户可用的模型目录。
 - 图片 prompt 使用 Host 拥有的耐久附件服务，因此拖入的截图可以交给 Codex request，而不把私有文件系统路径写入提供方状态。
 - 审批请求和结构化用户问题通过有界原生对话框呈现，不混入普通 Transcript 状态；Agent 运行时，对话框输入也不会被 steer/follow-up 投递通道截获。
@@ -66,6 +75,7 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 - `/plugins` 明确分开已安装事实、Registry 收录与仅浏览的 GitHub 仓库；筛选器可区分全部收录与可安装版本，仓库详情会先显示扫描和发布状态，再由用户选择打开 GitHub。
 - Profile 变更继续使用官方 `dsh plugin` 路径；TUI 显示精确安装或移除命令，不建立第二套包管理权限。
 - `/doctor` 检查 Host/TUI 能力，`/context` 查看当前模型、权限、工具、skills 和 system prompt 贡献者。
+- `/presets` 可安全复制、删除和检查 Agent Preset 的来源与组合，按 Host 能力打开文件，并仅在 settings owner 提供 compare-and-set 时选择未来默认项；`/host-plugins` 检查规范 Loader 清单与 owner-defined settings。
 
 ## 常用命令
 
@@ -85,6 +95,9 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 | `/help` | 查看命令与当前有效交互按键 |
 | `/commands`、`/skills`、`/mcp`、`/tips` | 查看可用命令、Skills、MCP 工具与交互提示 |
 | `/provider`、`/update` | 查看 Provider 配置并检查兼容的 TUI 更新 |
+| `/workspace`、`/sessions` | 管理工作区根目录与持久 Session |
+| `/presets`、`/host-plugins` | 管理 Agent Preset 并检查 Host 插件配置 |
+| `/trajectory`、`/message-feedback` | 检查 Turn ledger 并管理消息反馈 |
 | `/btw` | 在不替换当前 Session 的情况下提出一次有界、无工具的旁路问题 |
 | `/quit`、`/exit` | 恢复终端并安全退出 |
 
@@ -94,11 +107,11 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 
 | DSH TUI | DeepSeek Harness | Node.js | 平台 |
 | --- | --- | --- | --- |
-| `0.1.4-rc.8` | 精确匹配 `0.1.0-rc.8` | `^22.19.0` 或 `>=24` | macOS 14 与 Ubuntu 24.04 CI |
+| `0.1.5-rc.8` | 精确匹配 `0.1.0-rc.8` | `^22.19.0` 或 `>=24` | macOS 14 与 Ubuntu 24.04 CI |
 
 只有在精确官方包 clean-room 安装、profile 组合、PTY 启动/退出和终端恢复验证完成后，才会增加对新 Harness 版本的支持。
 
-TUI 核心版本独立递增（这里是 `0.1.4`），最后的预发布后缀（`rc.8`）则始终表示兼容的官方 Harness 预发布版本。这样不会让用户把一次 TUI 迭代误认为上游 DSH 已升级。
+TUI 核心版本独立递增（这里是 `0.1.5`），最后的预发布后缀（`rc.8`）则始终表示兼容的官方 Harness 预发布版本。这样不会让用户把一次 TUI 迭代误认为上游 DSH 已升级。
 
 ## 安装
 
@@ -106,7 +119,7 @@ TUI 核心版本独立递增（这里是 `0.1.4`），最后的预发布后缀�
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.0-rc.8
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
 dsh --profile tui
 ```
 
@@ -129,7 +142,7 @@ dsh --profile tui
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
 ```
 
 Session 和凭据位于 profile 目录之外。只重新应用经过审查的自定义 patch，不要把旧 profile 整体复制回来。
@@ -149,7 +162,7 @@ Session 和凭据位于 profile 目录之外。只重新应用经过审查的自
 安装声明兼容当前官方 Harness 版本的精确 TUI 版本：
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
 ```
 
 Release tag 和 npm 版本不可覆盖或移动。不要混用不同 release candidate 的 package。

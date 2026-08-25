@@ -3,6 +3,8 @@
 import stringWidth from 'string-width'
 import type { TuiInteractionContext } from './keybindings.ts'
 import { tuiFooterPointerTargets, type TuiFooterItemId, type TuiFooterItemDescriptor } from './footer.ts'
+import type { TuiDeliverableInlineReference } from './deliverables.ts'
+import type { TuiScreenMap } from './screen-map.ts'
 
 /** One-based inclusive terminal rectangle. */
 export interface TuiPointerRect {
@@ -27,12 +29,18 @@ export type TuiPointerAction =
     readonly childCallId?: string | undefined
   }
   | {
+    readonly id: 'transcript.openFocused' | 'transcript.closeBrowse'
+  }
+  | {
     readonly id: 'footer.activate'
     readonly itemId: TuiFooterItemId
   }
   | {
     readonly id: 'work.select'
     readonly index: number
+  }
+  | {
+    readonly id: 'work.open' | 'work.stop' | 'work.close'
   }
   | {
     readonly id: 'pluginHub.toggleView'
@@ -44,6 +52,9 @@ export type TuiPointerAction =
   }
   | {
     readonly id: 'pluginHub.close'
+  }
+  | {
+    readonly id: 'pluginHub.refresh'
   }
   | {
     readonly id: 'pluginHub.sort'
@@ -70,7 +81,153 @@ export type TuiPointerAction =
     readonly view: 'list' | 'preview'
   }
   | {
-    readonly id: 'resume.close'
+    readonly id: 'resume.rename' | 'resume.stash' | 'resume.discard' | 'resume.close'
+  }
+  | {
+    readonly id: 'provider.accept'
+    readonly index?: number | undefined
+  }
+  | {
+    readonly id: 'provider.authenticate'
+  }
+  | {
+    readonly id: 'provider.editProfile' | 'provider.editEndpoint' | 'provider.editApiKey'
+      | 'provider.logout' | 'provider.remove' | 'provider.profileSave' | 'provider.confirm'
+      | 'provider.endpointReset' | 'provider.refresh'
+  }
+  | {
+    readonly id: 'provider.add'
+  }
+  | {
+    readonly id: 'provider.wizardAccept' | 'provider.wizardDiscover'
+  }
+  | {
+    readonly id: 'provider.wizardBack'
+  }
+  | {
+    readonly id: 'provider.wizardToggle'
+    readonly index?: number | undefined
+  }
+  | {
+    readonly id: 'provider.wizardSelect'
+    readonly index: number
+  }
+  | {
+    readonly id: 'provider.profileField'
+    readonly field: 'displayName' | 'protocol' | 'models'
+  }
+  | {
+    readonly id: 'provider.close'
+  }
+  | {
+    readonly id: 'rewind.select'
+    readonly index: number
+  }
+  | {
+    readonly id: 'rewind.accept' | 'rewind.stash' | 'rewind.discard' | 'rewind.close'
+  }
+  | {
+    readonly id: 'fresh.accept' | 'fresh.close'
+  }
+  | {
+    readonly id: 'sessionExport.accept' | 'sessionExport.scope' | 'sessionExport.close'
+  }
+  | {
+    readonly id: 'queue.open'
+  }
+  | {
+    readonly id: 'queue.accept'
+    readonly index?: number | undefined
+  }
+  | {
+    readonly id: 'queue.edit'
+  }
+  | {
+    readonly id: 'queue.delete'
+  }
+  | {
+    readonly id: 'queue.close'
+  }
+  | {
+    readonly id: 'goalPlan.open'
+  }
+  | {
+    readonly id: 'goalPlan.edit' | 'goalPlan.pause' | 'goalPlan.resume' | 'goalPlan.clear'
+      | 'goalPlan.exitPlan' | 'goalPlan.accept' | 'goalPlan.close'
+  }
+  | {
+    readonly id: 'sessionManager.tab'
+    readonly tab: 'sessions' | 'workspaces'
+  }
+  | {
+    readonly id: 'sessionManager.accept'
+    readonly index?: number | undefined
+  }
+  | {
+    readonly id: 'sessionManager.resume' | 'sessionManager.fork' | 'sessionManager.rename' | 'sessionManager.archive'
+      | 'sessionManager.add' | 'sessionManager.moveUp' | 'sessionManager.moveDown'
+      | 'sessionManager.delete' | 'sessionManager.scope' | 'sessionManager.archiveFilter'
+      | 'sessionManager.sort' | 'sessionManager.group' | 'sessionManager.refresh' | 'sessionManager.close'
+      | 'sessionManager.directoryParent' | 'sessionManager.directoryHome'
+      | 'sessionManager.directoryHidden' | 'sessionManager.directoryRefresh'
+  }
+  | {
+    readonly id: 'presetManager.accept'
+    readonly index?: number | undefined
+  }
+  | {
+    readonly id: 'presetManager.setDefault' | 'presetManager.copy' | 'presetManager.delete'
+      | 'presetManager.view' | 'presetManager.openFile' | 'presetManager.open' | 'presetManager.close'
+  }
+  | {
+    readonly id: 'hostPlugins.accept'
+    readonly index?: number | undefined
+  }
+  | {
+    readonly id: 'hostPlugins.field'
+    readonly index: number
+  }
+  | {
+    readonly id: 'hostPlugins.close' | 'hostPlugins.filter' | 'hostPlugins.refresh'
+      | 'hostPlugins.edit' | 'hostPlugins.cycle' | 'hostPlugins.save'
+      | 'hostPlugins.discard' | 'hostPlugins.reset'
+  }
+  | {
+    readonly id: 'hostPlugins.tab'
+    /** Omitted only by the footer shortcut, whose established behavior is to toggle. */
+    readonly tab?: 'plugins' | 'settings' | undefined
+  }
+  | {
+    readonly id: 'trajectory.accept'
+    readonly index?: number | undefined
+  }
+  | {
+    readonly id: 'trajectory.close' | 'trajectory.fold' | 'trajectory.search'
+      | 'trajectory.older' | 'trajectory.tail' | 'trajectory.cycleTab'
+  }
+  | {
+    readonly id: 'trajectory.tab'
+    readonly tab: 'summary' | 'input' | 'output' | 'timing'
+  }
+  | {
+    readonly id: 'feedback.like' | 'feedback.dislike' | 'feedback.clear' | 'feedback.note'
+    readonly messageId: string
+  }
+  | {
+    readonly id: 'attachment.remove'
+    readonly index: number
+  }
+  | {
+    readonly id: 'deliverables.open'
+    readonly index?: number | undefined
+  }
+  | {
+    readonly id: 'deliverables.copy'
+  }
+  | {
+    readonly id: 'deliverables.inline'
+    readonly path: string
+    readonly mode: 'open' | 'copy'
   }
   | {
     readonly id: 'dialog.option'
@@ -106,6 +263,115 @@ export interface TuiPointerRegion {
   readonly action: TuiPointerAction
   /** Disabled regions remain visible to diagnostics but never dispatch an action. */
   readonly disabledReason?: string | undefined
+}
+
+/** One footer action with an optional exact rendered label. */
+export type TuiPointerFooterAction = TuiPointerAction | {
+  readonly action: TuiPointerAction
+  readonly label: string
+}
+
+function footerActionValue(entry: TuiPointerFooterAction): TuiPointerAction {
+  return 'action' in entry ? entry.action : entry
+}
+
+function appendFooterPointerRegions(
+  regions: TuiPointerRegion[],
+  prefix: string,
+  actions: readonly TuiPointerFooterAction[],
+  columns: number,
+  row: number,
+  context: Extract<TuiInteractionContext, 'Dialog' | 'Detail' | 'PluginHub' | 'Work' | 'Transcript'>,
+  renderedLine?: string,
+  lineLeft = 3,
+): void {
+  const exact = actions.every(entry => 'action' in entry)
+  let exactLeft = lineLeft
+  let lineSearchStart = 0
+  actions.forEach((entry, index) => {
+    const action = footerActionValue(entry)
+    let left: number
+    let right: number
+    if (exact && 'action' in entry) {
+      const lineIndex = renderedLine?.indexOf(entry.label, lineSearchStart) ?? -1
+      if (renderedLine !== undefined && lineIndex < 0) return
+      left = lineIndex < 0 ? exactLeft : lineLeft + stringWidth((renderedLine ?? '').slice(0, lineIndex))
+      right = Math.min(columns, left + Math.max(1, stringWidth(entry.label)) - 1)
+      exactLeft = right + stringWidth(' · ') + 1
+      if (lineIndex >= 0) lineSearchStart = lineIndex + entry.label.length
+    } else {
+      left = Math.floor(index * columns / actions.length) + 1
+      right = Math.max(left, Math.floor((index + 1) * columns / actions.length))
+    }
+    if (left > columns) return
+    regions.push({
+      id: `${prefix}:footer:${index}`,
+      rect: { left, top: row, right, bottom: row },
+      context,
+      priority: 40,
+      action,
+    })
+  })
+}
+
+/** Inputs needed to map one rendered dialog footer without approximating action widths. */
+export interface TuiDialogFooterPointerOptions {
+  /** Stable region id prefix for the owning surface. */
+  readonly id: string
+  /** Complete terminal width. */
+  readonly columns: number
+  /** Physical row containing the rendered footer. */
+  readonly row: number
+  /** First physical cell occupied by the rendered line. */
+  readonly lineLeft?: number | undefined
+  /** Complete footer text exactly as rendered. */
+  readonly line: string
+  /** Visible action labels and their keyboard-equivalent actions. */
+  readonly actions: readonly TuiPointerFooterAction[]
+  /** Active surface context; defaults to a dialog-owned footer. */
+  readonly context?: Extract<TuiInteractionContext, 'Dialog' | 'Detail' | 'Transcript'> | undefined
+}
+
+/** Build exact label hit regions for a dialog footer. */
+export function tuiDialogFooterPointerRegions(
+  options: TuiDialogFooterPointerOptions,
+): readonly TuiPointerRegion[] {
+  const regions: TuiPointerRegion[] = []
+  appendFooterPointerRegions(
+    regions,
+    options.id,
+    options.actions,
+    Math.max(1, Math.floor(options.columns)),
+    Math.max(1, Math.floor(options.row)),
+    options.context ?? 'Dialog',
+    options.line,
+    Math.max(1, Math.floor(options.lineLeft ?? 3)),
+  )
+  return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
+/**
+ * Restrict visible transcript hit regions to durable rewind candidates.
+ * @param regions - physical transcript regions for the current viewport.
+ * @param candidateKeys - candidate event keys in owner selection order.
+ * @returns dialog-owned row regions that select, but do not immediately commit, a rewind boundary.
+ */
+export function tuiRewindCandidatePointerRegions(
+  regions: readonly TuiPointerRegion[],
+  candidateKeys: readonly string[],
+): readonly TuiPointerRegion[] {
+  const indexByKey = new Map(candidateKeys.map((key, index) => [key, index]))
+  return Object.freeze(regions.flatMap((region): TuiPointerRegion[] => {
+    if (region.action.id !== 'transcript.focus') return []
+    const index = indexByKey.get(region.action.key)
+    return index === undefined ? [] : [Object.freeze({
+      ...region,
+      id: `rewind:select:${index}`,
+      context: 'Dialog',
+      priority: 30,
+      action: { id: 'rewind.select' as const, index },
+    })]
+  }))
 }
 
 /** A region hit by a pointer press, including the current render generation. */
@@ -151,6 +417,7 @@ export function tuiFooterPointerRegions(
  * @param maxRows - physical rows allocated to the work panel.
  * @param columns - complete terminal width.
  * @param context - active Work input context.
+ * @param footer - optional exact rendered footer geometry and actions.
  * @returns immutable work selection regions.
  */
 export function tuiWorkPointerRegions(
@@ -159,6 +426,12 @@ export function tuiWorkPointerRegions(
   maxRows: number,
   columns: number,
   context: Extract<TuiInteractionContext, 'Work'>,
+  footer?: {
+    readonly row: number
+    readonly line: string
+    readonly lineLeft?: number | undefined
+    readonly actions: readonly TuiPointerFooterAction[]
+  },
 ): readonly TuiPointerRegion[] {
   const count = Math.max(0, Math.floor(itemCount))
   const capacity = Math.max(1, Math.floor(maxRows) - 4)
@@ -166,13 +439,20 @@ export function tuiWorkPointerRegions(
   const selected = count === 0 ? 0 : Math.min(Math.max(0, Math.floor(selectedIndex)), count - 1)
   const start = Math.max(0, Math.min(selected - Math.floor(capacity / 2), count - capacity))
   const right = Math.max(1, Math.floor(columns) - 2)
-  return Object.freeze(Array.from({ length: visible }, (_, offset) => Object.freeze({
+  const regions: TuiPointerRegion[] = Array.from({ length: visible }, (_, offset) => ({
     id: `work:${start + offset}`,
     rect: { left: 2, top: offset + 2, right, bottom: offset + 2 },
     context,
     priority: 20,
     action: { id: 'work.select' as const, index: start + offset },
-  })))
+  }))
+  if (footer !== undefined) {
+    appendFooterPointerRegions(
+      regions, 'work', footer.actions, Math.max(1, Math.floor(columns)),
+      footer.row, context, footer.line, footer.lineLeft ?? 2,
+    )
+  }
+  return Object.freeze(regions.map(region => Object.freeze(region)))
 }
 
 /** Inputs needed to publish Plugin Hub list, tab, and footer hit regions. */
@@ -215,6 +495,10 @@ export interface TuiPluginHubPointerOptions {
   readonly visibleStart: number
   /** Bounded row heights for the mounted list slice. */
   readonly rowHeights: readonly number[]
+  /** Exact rendered footer actions for the active Hub layer. */
+  readonly footerActions?: readonly TuiPointerFooterAction[] | undefined
+  /** Complete rendered footer line used to locate exact action labels. */
+  readonly footerLine?: string | undefined
   /** Active input context. */
   readonly context: Extract<TuiInteractionContext, 'PluginHub'>
 }
@@ -295,31 +579,46 @@ export function tuiPluginHubPointerRegions(
         action: { id: 'pluginHub.openRepository' },
       })
     }
-    regions.push({
-      id: 'pluginHub:detail-close',
-      rect: {
-        left: 1,
-        top: Math.max(1, Math.floor(options.rows)),
-        right: Math.max(1, Math.floor(options.columns)),
-        bottom: Math.max(1, Math.floor(options.rows)),
-      },
-      context: options.context,
-      priority: 30,
-      action: options.view === 'discovery' ? { id: 'pluginHub.openRepository' } : { id: 'pluginHub.close' },
-    })
+    if (options.footerActions === undefined) {
+      regions.push({
+        id: 'pluginHub:detail-close',
+        rect: {
+          left: 1,
+          top: Math.max(1, Math.floor(options.rows)),
+          right: Math.max(1, Math.floor(options.columns)),
+          bottom: Math.max(1, Math.floor(options.rows)),
+        },
+        context: options.context,
+        priority: 30,
+        action: options.view === 'discovery' ? { id: 'pluginHub.openRepository' } : { id: 'pluginHub.close' },
+      })
+    }
   } else if (options.phase === 'confirm') {
-    regions.push({
-      id: 'pluginHub:confirm',
-      rect: {
-        left: 1,
-        top: Math.max(1, Math.floor(options.rows)),
-        right: Math.max(1, Math.floor(options.columns)),
-        bottom: Math.max(1, Math.floor(options.rows)),
-      },
-      context: options.context,
-      priority: 30,
-      action: { id: 'pluginHub.accept' },
-    })
+    if (options.footerActions === undefined) {
+      regions.push({
+        id: 'pluginHub:confirm',
+        rect: {
+          left: 1,
+          top: Math.max(1, Math.floor(options.rows)),
+          right: Math.max(1, Math.floor(options.columns)),
+          bottom: Math.max(1, Math.floor(options.rows)),
+        },
+        context: options.context,
+        priority: 30,
+        action: { id: 'pluginHub.accept' },
+      })
+    }
+  }
+  if (options.footerActions !== undefined) {
+    appendFooterPointerRegions(
+      regions,
+      'pluginHub',
+      options.footerActions,
+      Math.max(1, Math.floor(options.columns)),
+      Math.max(1, Math.floor(options.rows)),
+      options.context,
+      options.footerLine,
+    )
   }
   return Object.freeze(regions.map(region => Object.freeze(region)))
 }
@@ -371,6 +670,18 @@ export interface TuiResumePointerOptions {
   readonly visibleCount: number
   /** Fixed row height used by the picker renderer. */
   readonly rowHeight: number
+  /** Exact localized scope labels rendered on the picker header row. */
+  readonly scopeTabs?: {
+    readonly row: number
+    readonly left: number
+    readonly workspaceLabel: string
+    readonly allLabel: string
+    readonly gap: string
+  } | undefined
+  /** Exact rendered footer actions for the current picker layer. */
+  readonly footerActions?: readonly TuiPointerFooterAction[] | undefined
+  /** Complete rendered footer line used to locate action labels. */
+  readonly footerLine?: string | undefined
   /** Active input context. */
   readonly context: Extract<TuiInteractionContext, 'Dialog'>
 }
@@ -387,23 +698,46 @@ export function tuiResumePointerRegions(
   options: TuiResumePointerOptions,
 ): readonly TuiPointerRegion[] {
   const regions: TuiPointerRegion[] = []
-  if (options.phase !== 'ready' || options.confirmation) return Object.freeze([])
-  regions.push(
-    {
-      id: 'resume:workspace-scope',
-      rect: { left: 3, top: 4, right: 20, bottom: 4 },
-      context: options.context,
-      priority: 40,
-      action: { id: 'resume.scope', scope: 'workspace' },
+  if (options.phase !== 'ready' || options.confirmation) {
+    if (options.footerActions !== undefined) appendFooterPointerRegions(
+      regions,
+      'resume',
+      options.footerActions,
+      Math.max(1, Math.floor(options.columns)),
+      Math.max(1, Math.floor(options.rows)),
+      options.context,
+      options.footerLine,
+    )
+    return Object.freeze(regions.map(region => Object.freeze(region)))
+  }
+  const scope = options.scopeTabs ?? {
+    row: 4, left: 3, workspaceLabel: 'This workspace', allLabel: 'All workspaces', gap: ' ',
+  }
+  const workspaceWidth = stringWidth(scope.workspaceLabel)
+  const allLeft = scope.left + workspaceWidth + stringWidth(scope.gap)
+  regions.push({
+    id: 'resume:workspace-scope',
+    rect: {
+      left: scope.left,
+      top: scope.row,
+      right: scope.left + Math.max(1, workspaceWidth) - 1,
+      bottom: scope.row,
     },
-    {
-      id: 'resume:all-scope',
-      rect: { left: 22, top: 4, right: 38, bottom: 4 },
-      context: options.context,
-      priority: 40,
-      action: { id: 'resume.scope', scope: 'all' },
+    context: options.context,
+    priority: 40,
+    action: { id: 'resume.scope', scope: 'workspace' },
+  }, {
+    id: 'resume:all-scope',
+    rect: {
+      left: allLeft,
+      top: scope.row,
+      right: allLeft + Math.max(1, stringWidth(scope.allLabel)) - 1,
+      bottom: scope.row,
     },
-  )
+    context: options.context,
+    priority: 40,
+    action: { id: 'resume.scope', scope: 'all' },
+  })
   if (options.listVisible) {
     const top = 9
     const right = options.previewVisible && !options.narrow
@@ -435,7 +769,17 @@ export function tuiResumePointerRegions(
       action: { id: 'resume.accept' },
     })
   }
-  if (options.previewVisible || options.listVisible) {
+  if (options.footerActions !== undefined) {
+    appendFooterPointerRegions(
+      regions,
+      'resume',
+      options.footerActions,
+      Math.max(1, Math.floor(options.columns)),
+      Math.max(1, Math.floor(options.rows)),
+      options.context,
+      options.footerLine,
+    )
+  } else if (options.previewVisible || options.listVisible) {
     const footerRow = Math.max(1, Math.floor(options.rows))
     regions.push({
       id: 'resume:accept',
@@ -625,6 +969,605 @@ export function tuiSuggestionPointerRegions(
   })))
 }
 
+/** Inputs needed to publish Provider Center list/detail pointer regions. */
+export interface TuiProviderPointerOptions {
+  /** Complete terminal width. */
+  readonly columns: number
+  /** Complete terminal height. */
+  readonly rows: number
+  /** Whether provider detail currently owns the panel. */
+  readonly detail: boolean
+  /** Whether the custom-provider wizard owns the panel. */
+  readonly wizard: boolean
+  /** Whether the wizard currently renders discovery candidates. */
+  readonly picker: boolean
+  /** Visible one-row wizard list kind, if any. */
+  readonly wizardListKind?: 'picker' | 'protocol' | undefined
+  /** Whether the list can open a writable custom-provider target. */
+  readonly canAdd: boolean
+  /** Whether the selected detail offers interactive authentication. */
+  readonly canAuthenticate: boolean
+  /** Exact rendered detail-footer labels and the keyboard-owned actions they expose. */
+  readonly detailActions?: readonly {
+    readonly id: 'provider.authenticate' | 'provider.editProfile' | 'provider.editEndpoint'
+      | 'provider.editApiKey' | 'provider.logout' | 'provider.remove' | 'provider.profileSave'
+      | 'provider.confirm' | 'provider.endpointReset' | 'provider.refresh' | 'provider.close'
+    readonly label: string
+  }[]
+  /** Index represented by the first visible provider row. */
+  readonly visibleStart: number
+  /** Number of visible provider rows. */
+  readonly visibleCount: number
+  /** Fixed physical height of each provider row. */
+  readonly rowHeight: number
+  /** First discovery-candidate index mounted by the picker. */
+  readonly candidateStart: number
+  /** Number of discovery candidates mounted by the picker. */
+  readonly candidateCount: number
+  /** First physical row for picker/protocol entries. */
+  readonly candidateTop?: number | undefined
+  /** Exact visible spans for existing-profile editor fields. */
+  readonly profileFields?: readonly {
+    readonly field: 'displayName' | 'protocol' | 'models'
+    readonly top: number
+    readonly bottom: number
+  }[] | undefined
+  /** Exact rendered wizard or list footer actions. */
+  readonly footerActions?: readonly TuiPointerFooterAction[] | undefined
+  /** Complete rendered footer line used to locate exact action labels. */
+  readonly footerLine?: string | undefined
+  /** Active modal context. */
+  readonly context: Extract<TuiInteractionContext, 'Dialog'>
+}
+
+/**
+ * Build Provider Center row and footer actions from its fixed terminal layout.
+ * @param options - current list/detail geometry and authentication capability.
+ * @returns immutable regions delegating to the same transitions as keyboard actions.
+ */
+export function tuiProviderPointerRegions(
+  options: TuiProviderPointerOptions,
+): readonly TuiPointerRegion[] {
+  const columns = Math.max(1, Math.floor(options.columns))
+  const rows = Math.max(1, Math.floor(options.rows))
+  const detailAction: TuiPointerAction = options.canAuthenticate
+    ? { id: 'provider.authenticate' }
+    : { id: 'provider.close' }
+  if (options.wizard) {
+    const regions: TuiPointerRegion[] = []
+    const wizardListKind = options.wizardListKind ?? (options.picker ? 'picker' : undefined)
+    if (wizardListKind !== undefined) {
+      for (let offset = 0; offset < Math.max(0, options.candidateCount); offset += 1) {
+        const index = options.candidateStart + offset
+        regions.push({
+          id: `provider:wizard:${wizardListKind}:${index}`,
+          rect: {
+            left: 2,
+            top: (options.candidateTop ?? 5) + offset,
+            right: Math.max(2, columns - 1),
+            bottom: (options.candidateTop ?? 5) + offset,
+          },
+          context: options.context,
+          priority: 35,
+          action: wizardListKind === 'picker'
+            ? { id: 'provider.wizardToggle', index }
+            : { id: 'provider.wizardSelect', index },
+        })
+      }
+    }
+    if (options.footerActions !== undefined) {
+      appendFooterPointerRegions(
+        regions, 'provider:wizard', options.footerActions, columns, rows, options.context, options.footerLine,
+      )
+    } else {
+      regions.push({
+        id: 'provider:wizard:accept',
+        rect: { left: 1, top: rows, right: Math.max(1, Math.floor(columns / 2)), bottom: rows },
+        context: options.context,
+        priority: 35,
+        action: { id: 'provider.wizardAccept' },
+      }, {
+        id: 'provider:wizard:back',
+        rect: { left: Math.max(1, Math.floor(columns / 2) + 1), top: rows, right: columns, bottom: rows },
+        context: options.context,
+        priority: 35,
+        action: { id: 'provider.wizardBack' },
+      })
+    }
+    return Object.freeze(regions.map(region => Object.freeze(region)))
+  }
+  if (options.detail) {
+    const fieldRegions = (options.profileFields ?? []).map((field): TuiPointerRegion => ({
+      id: `provider:profile-field:${field.field}`,
+      rect: {
+        left: 4,
+        top: field.top,
+        right: Math.max(4, columns - 3),
+        bottom: field.bottom,
+      },
+      context: options.context,
+      priority: 40,
+      action: { id: 'provider.profileField', field: field.field },
+    }))
+    if (options.detailActions !== undefined && options.detailActions.length > 0) {
+      let left = 3
+      const regions: TuiPointerRegion[] = [...fieldRegions]
+      for (const entry of options.detailActions) {
+        const width = Math.max(1, stringWidth(entry.label))
+        const right = Math.min(columns, left + width - 1)
+        if (left <= columns) regions.push({
+          id: `provider:${entry.id}`,
+          rect: { left, top: rows, right, bottom: rows },
+          context: options.context,
+          priority: 35,
+          action: { id: entry.id },
+        })
+        left = right + 4 // rendered separator is ` · `
+      }
+      return Object.freeze(regions.map(region => Object.freeze(region)))
+    }
+    return Object.freeze([...fieldRegions, Object.freeze({
+      id: options.canAuthenticate ? 'provider:authenticate' : 'provider:close',
+      rect: { left: 1, top: rows, right: columns, bottom: rows },
+      context: options.context,
+      priority: 35,
+      action: detailAction,
+    })])
+  }
+  const top = 4
+  const regions: TuiPointerRegion[] = Array.from({ length: Math.max(0, options.visibleCount) }, (_, offset) => ({
+    id: `provider:${options.visibleStart + offset}`,
+    rect: {
+      left: 2,
+      top: top + offset * options.rowHeight,
+      right: Math.max(2, columns - 1),
+      bottom: top + offset * options.rowHeight + options.rowHeight - 1,
+    },
+    context: options.context,
+    priority: 30,
+    action: { id: 'provider.accept', index: options.visibleStart + offset },
+  }))
+  if (options.footerActions !== undefined) {
+    appendFooterPointerRegions(
+      regions, 'provider', options.footerActions, columns, rows, options.context, options.footerLine,
+    )
+    return Object.freeze(regions.map(region => Object.freeze(region)))
+  }
+  if (options.canAdd) regions.push({
+    id: 'provider:add',
+    rect: { left: 1, top: rows, right: Math.max(1, Math.floor(columns / 2)), bottom: rows },
+    context: options.context,
+    priority: 25,
+    action: { id: 'provider.add' },
+  })
+  regions.push({
+    id: 'provider:close',
+    rect: {
+      left: options.canAdd ? Math.max(1, Math.floor(columns / 2) + 1) : 1,
+      top: rows, right: columns, bottom: rows,
+    },
+    context: options.context,
+    priority: 20,
+    action: { id: 'provider.close' },
+  })
+  return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
+/** Inputs needed to publish collapsed and expanded pending Queue regions. */
+export interface TuiQueuePointerOptions {
+  readonly columns: number
+  readonly rows: number
+  readonly open: boolean
+  readonly detail: boolean
+  readonly editing: boolean
+  readonly confirmingDelete: boolean
+  readonly canEdit: boolean
+  readonly canDelete: boolean
+  readonly collapsedRow?: number | undefined
+  readonly visibleStart: number
+  readonly visibleCount: number
+  readonly rowHeight: number
+  readonly footerActions?: readonly TuiPointerFooterAction[] | undefined
+  readonly footerLine?: string | undefined
+  readonly context: Extract<TuiInteractionContext, 'Composer' | 'Transcript' | 'Dialog'>
+}
+
+/**
+ * Build pointer regions from the same Queue card and full-screen list geometry as the renderer.
+ * @param options - exact Queue visibility, geometry, capabilities, and footer facts.
+ * @returns immutable regions for the current Queue render generation.
+ */
+export function tuiQueuePointerRegions(options: TuiQueuePointerOptions): readonly TuiPointerRegion[] {
+  const columns = Math.max(1, Math.floor(options.columns))
+  const rows = Math.max(1, Math.floor(options.rows))
+  if (!options.open) {
+    if (options.collapsedRow === undefined) return Object.freeze([])
+    return Object.freeze([Object.freeze({
+      id: 'queue:open',
+      rect: { left: 1, top: options.collapsedRow, right: columns, bottom: options.collapsedRow },
+      context: options.context,
+      priority: 35,
+      action: { id: 'queue.open' as const },
+    })])
+  }
+  const regions: TuiPointerRegion[] = []
+  if (!options.detail && !options.editing && !options.confirmingDelete) {
+    for (let offset = 0; offset < Math.max(0, options.visibleCount); offset += 1) {
+      const top = 4 + offset * options.rowHeight
+      regions.push({
+        id: `queue:${options.visibleStart + offset}`,
+        rect: { left: 2, top, right: Math.max(2, columns - 1), bottom: top + options.rowHeight - 1 },
+        context: 'Dialog',
+        priority: 35,
+        action: { id: 'queue.accept', index: options.visibleStart + offset },
+      })
+    }
+  }
+  if (options.footerActions !== undefined) {
+    appendFooterPointerRegions(
+      regions, 'queue', options.footerActions, columns, rows, 'Dialog', options.footerLine,
+    )
+    return Object.freeze(regions.map(region => Object.freeze(region)))
+  }
+  if (options.editing || options.confirmingDelete) {
+    regions.push({
+      id: 'queue:accept',
+      rect: { left: 1, top: rows, right: Math.max(1, Math.floor(columns / 2)), bottom: rows },
+      context: 'Dialog', priority: 40, action: { id: 'queue.accept' },
+    })
+  } else if (options.detail) {
+    const third = Math.max(1, Math.floor(columns / 3))
+    if (options.canEdit) regions.push({
+      id: 'queue:edit', rect: { left: 1, top: rows, right: third, bottom: rows },
+      context: 'Dialog', priority: 40, action: { id: 'queue.edit' },
+    })
+    if (options.canDelete) regions.push({
+      id: 'queue:delete', rect: { left: third + 1, top: rows, right: third * 2, bottom: rows },
+      context: 'Dialog', priority: 40, action: { id: 'queue.delete' },
+    })
+  }
+  regions.push({
+    id: 'queue:close',
+    rect: {
+      left: options.editing || options.confirmingDelete ? Math.max(1, Math.floor(columns / 2) + 1)
+        : options.detail ? Math.max(1, Math.floor(columns * 2 / 3) + 1) : 1,
+      top: rows, right: columns, bottom: rows,
+    },
+    context: 'Dialog', priority: 30, action: { id: 'queue.close' },
+  })
+  return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
+/**
+ * Map the complete one-line Goal/Plan strip to its keyboard-equivalent control dialog.
+ * @param columns - complete terminal width.
+ * @param row - one-based physical row containing the strip.
+ * @param context - current non-modal interaction context.
+ * @returns the single visible Goal/Plan open region.
+ */
+export function tuiGoalPlanPointerRegions(
+  columns: number,
+  row: number,
+  context: Extract<TuiInteractionContext, 'Composer' | 'Transcript'>,
+): readonly TuiPointerRegion[] {
+  const right = Math.max(1, Math.floor(columns))
+  const top = Math.max(1, Math.floor(row))
+  return Object.freeze([Object.freeze({
+    id: 'goalPlan:open',
+    rect: { left: 1, top, right, bottom: top },
+    context,
+    priority: 38,
+    action: { id: 'goalPlan.open' as const },
+  })])
+}
+
+/**
+ * Map visible Goal/Plan dialog footer actions to equal-width physical cells.
+ * @param columns - complete terminal width.
+ * @param rows - complete terminal height and footer row.
+ * @param actions - rendered actions and their localized labels.
+ * @returns immutable regions for actions that fit the rendered footer.
+ */
+export function tuiGoalPlanDialogPointerRegions(
+  columns: number,
+  rows: number,
+  actions: readonly {
+    readonly action: Extract<TuiPointerAction, { id: `goalPlan.${string}` }>
+    readonly label: string
+  }[],
+): readonly TuiPointerRegion[] {
+  const width = Math.max(1, Math.floor(columns))
+  const row = Math.max(1, Math.floor(rows))
+  let left = 3
+  const regions: TuiPointerRegion[] = []
+  for (const [index, item] of actions.entries()) {
+    const right = Math.min(width - 2, left + Math.max(1, stringWidth(item.label)) - 1)
+    if (left <= right) regions.push(Object.freeze({
+      id: `goalPlan:dialog:${index}`,
+      rect: { left, top: row, right, bottom: row },
+      context: 'Dialog',
+      priority: 40,
+      action: item.action,
+    }))
+    left = right + 4
+    if (left > width - 2) break
+  }
+  return Object.freeze(regions)
+}
+
+/** Inputs needed to map the Session Manager tabs, rows, and visible footer actions. */
+export interface TuiSessionManagerPointerOptions {
+  readonly columns: number
+  readonly rows: number
+  readonly listVisible: boolean
+  readonly visibleStart: number
+  readonly visibleCount: number
+  readonly rowHeight: number
+  /** First physical list row; defaults to the normal manager layout. */
+  readonly rowTop?: number
+  /** Whether the normal Sessions/Workspaces tabs are currently rendered. */
+  readonly showTabs?: boolean
+  /** Exact geometry of the localized Sessions/Workspaces labels. */
+  readonly tabs?: {
+    readonly row: number
+    readonly left: number
+    readonly labels: Readonly<Record<'sessions' | 'workspaces', string>>
+  } | undefined
+  readonly footerActions: readonly TuiPointerFooterAction[]
+  readonly footerLine?: string | undefined
+  readonly context: Extract<TuiInteractionContext, 'Dialog'>
+}
+
+/**
+ * Build physical Session Manager hit regions from its fixed full-screen layout.
+ * @param options - exact tabs, rows, footer, and dialog geometry.
+ * @returns immutable regions for the current Session Manager render generation.
+ */
+export function tuiSessionManagerPointerRegions(
+  options: TuiSessionManagerPointerOptions,
+): readonly TuiPointerRegion[] {
+  const columns = Math.max(1, Math.floor(options.columns))
+  const rows = Math.max(1, Math.floor(options.rows))
+  const regions: TuiPointerRegion[] = []
+  if (options.showTabs !== false) {
+    const labels = options.tabs?.labels ?? { sessions: 'Sessions', workspaces: 'Workspaces' }
+    const row = options.tabs?.row ?? 4
+    let left = options.tabs?.left ?? 3
+    for (const tab of ['sessions', 'workspaces'] as const) {
+      const width = stringWidth(labels[tab])
+      if (width > 0 && left <= columns) {
+        regions.push({
+          id: `sessionManager:tab:${tab}`,
+          rect: { left, top: row, right: Math.min(columns, left + width - 1), bottom: row },
+          context: options.context,
+          priority: 45,
+          action: { id: 'sessionManager.tab', tab },
+        })
+      }
+      left += width + stringWidth(' · ')
+    }
+  }
+  if (options.listVisible) {
+    for (let offset = 0; offset < Math.max(0, options.visibleCount); offset += 1) {
+      const top = (options.rowTop ?? 9) + offset * options.rowHeight
+      regions.push({
+        id: `sessionManager:${options.visibleStart + offset}`,
+        rect: { left: 2, top, right: Math.max(2, columns - 1), bottom: top + options.rowHeight - 1 },
+        context: options.context,
+        priority: 35,
+        action: { id: 'sessionManager.accept', index: options.visibleStart + offset },
+      })
+    }
+  }
+  const actions = options.footerActions.length === 0
+    ? [{ id: 'sessionManager.close' as const }]
+    : options.footerActions
+  appendFooterPointerRegions(regions, 'sessionManager', actions, columns, rows, options.context, options.footerLine)
+  return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
+/** Inputs needed to map the Preset Manager rows and visible footer actions. */
+export interface TuiPresetManagerPointerOptions {
+  readonly columns: number
+  readonly rows: number
+  readonly listVisible: boolean
+  readonly visibleStart: number
+  readonly visibleCount: number
+  readonly rowHeight: number
+  /** First physical list row; defaults to the legacy fixed layout. */
+  readonly listTop?: number | undefined
+  readonly footerActions: readonly TuiPointerFooterAction[]
+  readonly footerLine?: string | undefined
+  readonly context: Extract<TuiInteractionContext, 'Dialog'>
+}
+
+/** Build physical Preset Manager hit regions from its fixed full-screen layout. */
+export function tuiPresetManagerPointerRegions(
+  options: TuiPresetManagerPointerOptions,
+): readonly TuiPointerRegion[] {
+  const columns = Math.max(1, Math.floor(options.columns))
+  const rows = Math.max(1, Math.floor(options.rows))
+  const regions: TuiPointerRegion[] = []
+  if (options.listVisible) {
+    for (let offset = 0; offset < Math.max(0, options.visibleCount); offset += 1) {
+      const top = (options.listTop ?? 7) + offset * options.rowHeight
+      regions.push({
+        id: `presetManager:${options.visibleStart + offset}`,
+        rect: { left: 2, top, right: Math.max(2, columns - 1), bottom: top + options.rowHeight - 1 },
+        context: options.context,
+        priority: 35,
+        action: { id: 'presetManager.accept', index: options.visibleStart + offset },
+      })
+    }
+  }
+  const actions = options.footerActions.length === 0
+    ? [{ id: 'presetManager.close' as const }]
+    : options.footerActions
+  appendFooterPointerRegions(regions, 'presetManager', actions, columns, rows, options.context, options.footerLine)
+  return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
+/** Inputs needed to map the Trajectory ledger rows and visible footer actions. */
+export interface TuiTrajectoryPointerOptions {
+  readonly columns: number
+  readonly rows: number
+  readonly listVisible: boolean
+  readonly visibleStart: number
+  readonly visibleCount: number
+  readonly rowHeight: number
+  /** First physical row occupied by the list; defaults to the legacy fixed layout. */
+  readonly listTop?: number | undefined
+  /** Exact inspector-tab geometry, present only while detail is rendered. */
+  readonly inspectorTabs?: {
+    readonly row: number
+    readonly left: number
+    readonly labels: Readonly<Record<'summary' | 'input' | 'output' | 'timing', string>>
+  } | undefined
+  readonly footerActions: readonly TuiPointerFooterAction[]
+  readonly footerLine?: string | undefined
+  readonly context: Extract<TuiInteractionContext, 'Dialog'>
+}
+
+/** Build physical Trajectory hit regions from its fixed full-screen layout. */
+export function tuiTrajectoryPointerRegions(
+  options: TuiTrajectoryPointerOptions,
+): readonly TuiPointerRegion[] {
+  const columns = Math.max(1, Math.floor(options.columns))
+  const rows = Math.max(1, Math.floor(options.rows))
+  const regions: TuiPointerRegion[] = []
+  if (options.inspectorTabs !== undefined) {
+    const tabs = ['summary', 'input', 'output', 'timing'] as const
+    let left = Math.max(1, Math.floor(options.inspectorTabs.left))
+    for (const tab of tabs) {
+      const width = stringWidth(options.inspectorTabs.labels[tab])
+      if (width > 0 && left <= columns) {
+        regions.push({
+          id: `trajectory:tab:${tab}`,
+          rect: {
+            left,
+            top: options.inspectorTabs.row,
+            right: Math.min(columns, left + width - 1),
+            bottom: options.inspectorTabs.row,
+          },
+          context: options.context,
+          priority: 45,
+          action: { id: 'trajectory.tab', tab },
+        })
+      }
+      left += width + stringWidth(' · ')
+    }
+  }
+  if (options.listVisible) {
+    for (let offset = 0; offset < Math.max(0, options.visibleCount); offset += 1) {
+      const top = (options.listTop ?? 7) + offset * options.rowHeight
+      regions.push({
+        id: `trajectory:${options.visibleStart + offset}`,
+        rect: { left: 2, top, right: Math.max(2, columns - 1), bottom: top + options.rowHeight - 1 },
+        context: options.context,
+        priority: 35,
+        action: { id: 'trajectory.accept', index: options.visibleStart + offset },
+      })
+    }
+  }
+  const actions = options.footerActions.length === 0
+    ? [{ id: 'trajectory.close' as const }]
+    : options.footerActions
+  appendFooterPointerRegions(regions, 'trajectory', actions, columns, rows, options.context, options.footerLine)
+  return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
+/** Inputs needed to map the Host Plugin Center rows and visible footer actions. */
+export interface TuiHostPluginCenterPointerOptions {
+  readonly columns: number
+  readonly rows: number
+  readonly listVisible: boolean
+  readonly visibleStart: number
+  readonly visibleCount: number
+  readonly rowHeight: number
+  /** First physical row occupied by the list; defaults to the legacy fixed layout. */
+  readonly listTop?: number | undefined
+  /** Exact geometry of the always-visible Loaded/Settings labels. */
+  readonly tabs?: {
+    readonly row: number
+    readonly left: number
+    readonly labels: Readonly<Record<'plugins' | 'settings', string>>
+  } | undefined
+  /** Visible editable field rows in a Settings detail panel. */
+  readonly settingsFields?: {
+    readonly rowTop: number
+    readonly count: number
+    readonly rowHeight: number
+  } | undefined
+  readonly footerActions: readonly TuiPointerFooterAction[]
+  readonly footerLine?: string | undefined
+  readonly context: Extract<TuiInteractionContext, 'Dialog'>
+}
+
+/** Build physical Host Plugin Center hit regions from its fixed full-screen layout. */
+export function tuiHostPluginCenterPointerRegions(
+  options: TuiHostPluginCenterPointerOptions,
+): readonly TuiPointerRegion[] {
+  const columns = Math.max(1, Math.floor(options.columns))
+  const rows = Math.max(1, Math.floor(options.rows))
+  const regions: TuiPointerRegion[] = []
+  if (options.tabs !== undefined) {
+    const tabs = ['plugins', 'settings'] as const
+    let left = Math.max(1, Math.floor(options.tabs.left))
+    for (const tab of tabs) {
+      const width = stringWidth(options.tabs.labels[tab])
+      if (width > 0 && left <= columns) {
+        regions.push({
+          id: `hostPlugins:tab:${tab}`,
+          rect: {
+            left,
+            top: options.tabs.row,
+            right: Math.min(columns, left + width - 1),
+            bottom: options.tabs.row,
+          },
+          context: options.context,
+          priority: 45,
+          action: { id: 'hostPlugins.tab', tab },
+        })
+      }
+      left += width + stringWidth(' · ')
+    }
+  }
+  if (options.settingsFields !== undefined) {
+    for (let index = 0; index < Math.max(0, options.settingsFields.count); index += 1) {
+      const top = options.settingsFields.rowTop + index * options.settingsFields.rowHeight
+      regions.push({
+        id: `hostPlugins:field:${index}`,
+        rect: {
+          left: 2,
+          top,
+          right: Math.max(2, columns - 1),
+          bottom: top + options.settingsFields.rowHeight - 1,
+        },
+        context: options.context,
+        priority: 35,
+        action: { id: 'hostPlugins.field', index },
+      })
+    }
+  }
+  if (options.listVisible) {
+    for (let offset = 0; offset < Math.max(0, options.visibleCount); offset += 1) {
+      const top = (options.listTop ?? 7) + offset * options.rowHeight
+      regions.push({
+        id: `hostPlugins:${options.visibleStart + offset}`,
+        rect: { left: 2, top, right: Math.max(2, columns - 1), bottom: top + options.rowHeight - 1 },
+        context: options.context,
+        priority: 35,
+        action: { id: 'hostPlugins.accept', index: options.visibleStart + offset },
+      })
+    }
+  }
+  const actions = options.footerActions.length === 0
+    ? [{ id: 'hostPlugins.close' as const }]
+    : options.footerActions
+  appendFooterPointerRegions(regions, 'hostPlugins', actions, columns, rows, options.context, options.footerLine)
+  return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
 function finiteCell(value: number): number | undefined {
   if (!Number.isFinite(value)) return undefined
   const cell = Math.floor(value)
@@ -721,4 +1664,243 @@ export class TuiPointerRegionRegistry {
     const region = candidates[0]
     return region === undefined ? undefined : Object.freeze({ generation: this.currentGeneration, region })
   }
+}
+
+/** Inputs needed to map feedback action hit targets on a transcript message row. */
+export interface TuiFeedbackPointerOptions {
+  readonly columns: number
+  readonly row: number
+  readonly hasFeedback: boolean
+  readonly messageId: string
+  readonly labels: {
+    readonly like: string
+    readonly dislike: string
+    readonly note: string
+    readonly clear: string
+  }
+  readonly context: Extract<TuiInteractionContext, 'Detail'>
+}
+
+/** Build feedback action hit regions for one assistant message row in the transcript. */
+export function tuiFeedbackPointerRegions(
+  options: TuiFeedbackPointerOptions,
+): readonly TuiPointerRegion[] {
+  const columns = Math.max(1, Math.floor(options.columns))
+  const regions: TuiPointerRegion[] = []
+  let left = 3
+  const actions: readonly {
+    readonly id: 'feedback.like' | 'feedback.dislike' | 'feedback.clear' | 'feedback.note'
+    readonly label: string
+  }[] = [
+    { id: 'feedback.like', label: options.labels.like },
+    { id: 'feedback.dislike', label: options.labels.dislike },
+    ...(options.hasFeedback ? [
+      { id: 'feedback.note' as const, label: options.labels.note },
+      { id: 'feedback.clear' as const, label: options.labels.clear },
+    ] : []),
+  ]
+  for (const action of actions) {
+    const buttonWidth = stringWidth(action.label)
+    if (left > columns - 2) break
+    const right = Math.min(columns - 2, left + Math.max(1, buttonWidth) - 1)
+    regions.push({
+      id: `${action.id}:${options.messageId}:${options.row}`,
+      rect: { left, top: options.row, right, bottom: options.row },
+      context: options.context,
+      priority: 25,
+      action: { id: action.id, messageId: options.messageId },
+    })
+    left = right + 4
+  }
+  return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
+/** Inputs needed to map visible deliverable path rows in transcript detail. */
+export interface TuiDeliverablesPointerOptions {
+  readonly columns: number
+  readonly startRow: number
+  readonly visibleStart: number
+  readonly visibleCount: number
+  readonly total: number
+  readonly context: Extract<TuiInteractionContext, 'Detail'>
+}
+
+/** Build one Host-open hit target for each visible delivered path. */
+export function tuiDeliverablesPointerRegions(
+  options: TuiDeliverablesPointerOptions,
+): readonly TuiPointerRegion[] {
+  const right = Math.max(3, Math.floor(options.columns) - 2)
+  const count = Math.max(0, Math.min(options.visibleCount, options.total - options.visibleStart))
+  return Object.freeze(Array.from({ length: count }, (_, offset) => Object.freeze({
+    id: `deliverables:open:${options.visibleStart + offset}`,
+    rect: {
+      left: 3,
+      top: options.startRow + offset,
+      right,
+      bottom: options.startRow + offset,
+    },
+    context: options.context,
+    priority: 25,
+    action: { id: 'deliverables.open' as const, index: options.visibleStart + offset },
+  })))
+}
+
+/** Inputs needed to map the visible Deliverables action line. */
+export interface TuiDeliverableActionPointerOptions {
+  readonly columns: number
+  readonly row: number
+  readonly line: string
+  readonly copyLabel: string
+  readonly openLabel?: string | undefined
+  readonly context: Extract<TuiInteractionContext, 'Detail'>
+}
+
+/** Build exact Copy/Open hit regions for the selected delivered path. */
+export function tuiDeliverableActionPointerRegions(
+  options: TuiDeliverableActionPointerOptions,
+): readonly TuiPointerRegion[] {
+  const regions: TuiPointerRegion[] = []
+  appendFooterPointerRegions(
+    regions,
+    'deliverables:action',
+    [
+      { action: { id: 'deliverables.copy' }, label: options.copyLabel },
+      ...(options.openLabel === undefined ? [] : [{
+        action: { id: 'deliverables.open' as const }, label: options.openLabel,
+      }]),
+    ],
+    Math.max(1, Math.floor(options.columns)),
+    Math.max(1, Math.floor(options.row)),
+    options.context,
+    options.line,
+  )
+  return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
+/** One inline deliverable reference attached to its assistant transcript block. */
+export interface TuiDeliverableInlinePointerReference extends TuiDeliverableInlineReference {
+  /** Semantic transcript block whose rendered cells contain the inline code. */
+  readonly semanticBlockKey: string
+}
+
+/** Inputs needed to map verified inline deliverable text across wrapped screen rows. */
+export interface TuiDeliverableInlinePointerOptions {
+  readonly map: TuiScreenMap
+  /** One-based terminal row occupied by map row zero. */
+  readonly topRow: number
+  readonly references: readonly TuiDeliverableInlinePointerReference[]
+  readonly openerAvailable: boolean
+  readonly context: Extract<TuiInteractionContext, 'Composer' | 'Transcript'>
+}
+
+interface InlineScreenCell {
+  readonly row: number
+  readonly column: number
+  readonly start: number
+  readonly end: number
+}
+
+/**
+ * Map only owner-proven closing-message inline paths to exact rendered cells.
+ * Soft-wrapped paths may produce one region per physical row; ordinary prose,
+ * gutters, padding, and non-selectable headings never receive a path action.
+ */
+export function tuiDeliverableInlinePointerRegions(
+  options: TuiDeliverableInlinePointerOptions,
+): readonly TuiPointerRegion[] {
+  const regions: TuiPointerRegion[] = []
+  const keys = new Set(options.references.map(reference => reference.semanticBlockKey))
+  for (const key of keys) {
+    let text = ''
+    const cells: InlineScreenCell[] = []
+    let previousMapRow: TuiScreenMap['rows'][number] | undefined
+    for (const row of options.map.rows) {
+      if (row.semanticBlockKey !== key
+        || !row.cells.some(cell => cell.source === 'text' && cell.selectable)) continue
+      if (previousMapRow !== undefined && !previousMapRow.softWrap) text += '\n'
+      for (const [column, cell] of row.cells.entries()) {
+        if (cell.source !== 'text' || !cell.selectable || cell.continuation || cell.grapheme === '') continue
+        const start = text.length
+        text += cell.grapheme
+        cells.push(Object.freeze({ row: row.row, column, start, end: text.length }))
+      }
+      previousMapRow = row
+    }
+    for (const [referenceIndex, reference] of options.references.entries()) {
+      if (reference.semanticBlockKey !== key || reference.text === '') continue
+      let searchStart = 0
+      for (let occurrence = 0; occurrence < 64;) {
+        const matchStart = text.indexOf(reference.text, searchStart)
+        if (matchStart < 0) break
+        const matchEnd = matchStart + reference.text.length
+        const matched = cells.filter(cell => cell.end > matchStart && cell.start < matchEnd)
+        let group: InlineScreenCell[] = []
+        const publish = (): void => {
+          if (group.length === 0) return
+          const first = group.at(0)
+          const last = group.at(-1)
+          if (first === undefined || last === undefined) return
+          const top = Math.max(1, Math.floor(options.topRow + first.row))
+          regions.push({
+            id: `deliverables:inline:${referenceIndex}:${occurrence}:${first.row}`,
+            rect: {
+              left: first.column + 1,
+              top,
+              right: last.column + 1,
+              bottom: top,
+            },
+            context: options.context,
+            priority: 46,
+            action: {
+              id: 'deliverables.inline',
+              path: reference.path,
+              mode: options.openerAvailable ? 'open' : 'copy',
+            },
+          })
+          group = []
+        }
+        for (const cell of matched) {
+          const previous = group.at(-1)
+          if (previous !== undefined && (previous.row !== cell.row || previous.column + 1 !== cell.column)) publish()
+          group.push(cell)
+        }
+        publish()
+        occurrence += 1
+        searchStart = matchEnd
+      }
+    }
+  }
+  return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
+/** Inputs needed to map attachment rail remove buttons. */
+export interface TuiAttachmentRailPointerOptions {
+  readonly columns: number
+  readonly startRow: number
+  readonly count: number
+  readonly left?: number
+  readonly right?: number
+  readonly context: Extract<TuiInteractionContext, 'Composer' | 'Dialog'>
+}
+
+/** Build attachment rail hit regions for the remove button on each chip. */
+export function tuiAttachmentRailPointerRegions(
+  options: TuiAttachmentRailPointerOptions,
+): readonly TuiPointerRegion[] {
+  const columns = Math.max(1, Math.floor(options.columns))
+  const leftBound = Math.max(1, Math.min(columns, Math.floor(options.left ?? 1)))
+  const rightBound = Math.max(leftBound, Math.min(columns, Math.floor(options.right ?? columns)))
+  const regions: TuiPointerRegion[] = []
+  for (let i = 0; i < options.count; i += 1) {
+    const row = options.startRow + i
+    const removeLeft = Math.max(leftBound, rightBound - 4)
+    regions.push({
+      id: `attachment:remove:${i}`,
+      rect: { left: removeLeft, top: row, right: rightBound, bottom: row },
+      context: options.context,
+      priority: 25,
+      action: { id: 'attachment.remove', index: i },
+    })
+  }
+  return Object.freeze(regions.map(region => Object.freeze(region)))
 }

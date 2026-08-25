@@ -22,7 +22,7 @@
 
 插件会在每次请求时解析当前 Host 的耐久附件服务，并将其传给 `PiAiAdapter`。支持图片的 Codex route 因此可以读取 Session log 中确切 `ImageAttachmentRef` 所指向的字节；服务缺失或对象不可用时会在 provider I/O 前失败，而不会静默丢弃图片内容。
 
-公开 TUI bundle 会挂载这条路由，但不会代用户登录。交互界面读取 `ctx.llm.authentication('openai-codex')`，以其公布的 `oauth` 方法运行 `ctx.llm.login()`，并提供 provider-neutral 的提示与进度通知。TUI 通过 `/models` 暴露该流程。本适配器有意不接受 API key 或粘贴的 access token。
+公开 TUI bundle 会挂载这条路由，但不会代用户登录。交互界面读取 `ctx.llm.authentication('openai-codex')`，以其公布的 `oauth` 方法运行 `ctx.llm.login()`，并提供 provider-neutral 的提示与进度通知。已认证状态会公布 `canLogout`；`ctx.llm.logout('openai-codex')` 只通过本适配器的 credential-store owner 删除其持久 OAuth 凭据，并刷新 provider 状态。TUI 通过 `/models` 暴露登录流程，并通过 `/provider` 暴露完整的登录／退出状态。本适配器有意不接受 API key 或粘贴的 access token。
 
 ## 动态模型目录
 

@@ -97,11 +97,13 @@ interface OpenAICodexAuthenticationInfo {
   configured: boolean
   source?: string
   methods: readonly { id: string; name: string }[]
+  canLogout?: boolean
 }
 
 interface OpenAICodexRc8AuthenticationHost {
   authentication?: (provider: string) => Promise<OpenAICodexAuthenticationInfo>
   login?: (provider: string, method: string, interaction: OpenAICodexAuthenticationInteraction) => Promise<void>
+  logout?: (provider: string) => Promise<void>
 }
 
 /**
@@ -220,6 +222,7 @@ export class OpenAICodexAdapter extends PiAiAdapter {
       configured: check !== undefined,
       ...check?.source === undefined ? {} : { source: check.source },
       methods: [{ id: 'oauth', name: 'Sign in with ChatGPT' }],
+      canLogout: true,
     }
   }
 
@@ -284,10 +287,11 @@ export class OpenAICodexAdapter extends PiAiAdapter {
  */
 export function installOpenAICodexRc8AuthenticationBridge(
   runtime: object,
-  adapter: Pick<OpenAICodexAdapter, 'authentication' | 'login'>,
+  adapter: Pick<OpenAICodexAdapter, 'authentication' | 'login' | 'logout'>,
 ): (() => void) | undefined {
   const host = runtime as OpenAICodexRc8AuthenticationHost
-  if (typeof host.authentication === 'function' || typeof host.login === 'function') return undefined
+  if (typeof host.authentication === 'function' || typeof host.login === 'function'
+    || typeof host.logout === 'function') return undefined
 
   const authentication = (provider: string): Promise<OpenAICodexAuthenticationInfo> => provider === OPENAI_CODEX_PROVIDER
     ? adapter.authentication(provider)
@@ -305,13 +309,24 @@ export function installOpenAICodexRc8AuthenticationBridge(
     }
     return adapter.login(provider, method, interaction)
   }
+  const logout = (provider: string): Promise<void> => {
+    if (provider !== OPENAI_CODEX_PROVIDER) {
+      return Promise.reject(new LlmError(
+        `provider "${provider}" offers no persisted authentication`,
+        'AUTH_UNSUPPORTED',
+      ))
+    }
+    return adapter.logout(provider)
+  }
   Object.defineProperties(host, {
     authentication: { configurable: true, value: authentication },
     login: { configurable: true, value: login },
+    logout: { configurable: true, value: logout },
   })
   return () => {
     if (Object.getOwnPropertyDescriptor(host, 'authentication')?.value === authentication) delete host.authentication
     if (Object.getOwnPropertyDescriptor(host, 'login')?.value === login) delete host.login
+    if (Object.getOwnPropertyDescriptor(host, 'logout')?.value === logout) delete host.logout
   }
 }
 

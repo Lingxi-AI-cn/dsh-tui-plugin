@@ -134,6 +134,31 @@ export function TuiSection(props: {
 }
 
 /**
+ * Render one pointer-owned two-row footer with a stable physical action row.
+ * The first row is always reserved for status, error, count, or an explicit
+ * blank placeholder; the second row always contains the visible actions.
+ * This keeps exact-label pointer regions on the terminal's final row aligned
+ * with what Ink renders in every loading, error, and overflow branch.
+ *
+ * @param props - optional status row, required action row, and horizontal padding.
+ * @returns one fixed two-row footer whose action row is always last.
+ */
+export function TuiActionFooter(props: {
+  readonly status?: ReactNode | undefined
+  readonly actions: ReactNode
+  readonly paddingX?: number | undefined
+}): React.ReactElement {
+  return <TuiSection height={2} paddingX={props.paddingX ?? 2}>
+    <Box height={1} flexShrink={0} overflow="hidden">
+      {props.status ?? <Text> </Text>}
+    </Box>
+    <Box height={1} flexShrink={0} overflow="hidden">
+      {props.actions}
+    </Box>
+  </TuiSection>
+}
+
+/**
  * Render a flexing bounded body for list and detail panels.
  * @param props - body height, frame, spacing, tone, and rows.
  * @returns one overflow-clipped body.

@@ -29,8 +29,16 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 ### Session-centered workflows
 
 - Resume persisted work with `/resume`, start clean with `/new` or `/clear`, and branch safely from an earlier completed human turn with `/rewind`.
+- Browse, filter, rename, archive, and fork Sessions across Workspaces with `/sessions`; restore is shown when the Host exposes its unarchive capability. Create or select workspace roots through `/workspace` and the Host-owned directory picker.
 - Browse and search the complete durable transcript, inspect full block details, move between the root and live child Agents, and monitor cancellable background work.
 - Export a Session for review or backup with `/export`; prompts, tool activity, and workspace paths remain explicit diagnostic data.
+
+### Native work management and inspection
+
+- Revision-aware pending-input cards expose the Host-supported steer and follow-up lanes without inventing unsupported queue mutations on official rc.8.
+- Unified completion resolves both workspace files and referenced Sessions; referenced Sessions are preflighted before submission while the original prompt remains intact.
+- Durable Goal and Plan status, per-Turn deliverables, and inline output paths provide direct detail, copy, and Host-gated open actions.
+- `/trajectory` presents a searchable, foldable, hierarchical Turn ledger and bounded event inspector designed for long-running Sessions.
 
 ### Four real Agent execution modes
 
@@ -50,6 +58,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 ### Models, permissions, and human decisions
 
 - `/models` discovers configured providers and models, supports provider-owned authentication flows, and selects the exact reasoning effort when available.
+- `/provider` provides a redacted, capability-gated Provider Center for API keys, endpoints, custom providers, model refresh, and provider-owned logout.
 - The bundled OpenAI Codex adapter offers **Sign in with ChatGPT**, stores refreshable OAuth credentials under `$DSH_HOME/oauth/openai-codex.json`, and discovers the signed-in account's current model catalog dynamically.
 - Image prompts use the Host-owned durable attachment service, so dropped screenshots remain available to the Codex request without embedding private filesystem paths in provider state.
 - Approval requests and structured user questions are presented as bounded native dialogs instead of leaking into ordinary transcript state, and their input remains isolated from steer/follow-up delivery while an Agent is running.
@@ -66,6 +75,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 - `/plugins` separates installed-profile truth, Registry entries, and browse-only GitHub repositories; filters can distinguish all Registry entries from installable versions, while repository details expose scan and publication status before opening GitHub.
 - Profile changes remain on the official `dsh plugin` path; the TUI shows exact install or removal commands rather than creating a second package-management authority.
 - `/doctor` reports Host/TUI capabilities and `/context` shows the loaded model, permission, tools, skills, and prompt contributors.
+- `/presets` manages installed Agent Presets with safe copy, delete, source/composition inspection, Host-gated file opening, and future-default selection when the settings owner exposes compare-and-set; `/host-plugins` inspects the canonical Loader inventory and owner-defined settings.
 
 ## Command overview
 
@@ -85,6 +95,9 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 | `/help` | List commands and effective interaction bindings |
 | `/commands`, `/skills`, `/mcp`, `/tips` | Inspect available commands, skills, MCP tools, and interaction guidance |
 | `/provider`, `/update` | Inspect provider setup and check for a compatible TUI release |
+| `/workspace`, `/sessions` | Manage workspace roots and persisted Sessions |
+| `/presets`, `/host-plugins` | Manage Agent Presets and inspect Host plugin configuration |
+| `/trajectory`, `/message-feedback` | Inspect the Turn ledger and manage message feedback |
 | `/btw` | Ask one bounded tool-free side question without replacing the active Session |
 | `/quit`, `/exit` | Restore the terminal and exit safely |
 
@@ -94,11 +107,11 @@ The current public TUI release is deliberately pinned to the matching official H
 
 | DSH TUI | DeepSeek Harness | Node.js | Platforms |
 | --- | --- | --- | --- |
-| `0.1.4-rc.8` | exactly `0.1.0-rc.8` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
+| `0.1.5-rc.8` | exactly `0.1.0-rc.8` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
 
 Support for a newer Harness version is added only after exact-package clean-room installation, profile composition, PTY startup/exit, and terminal-restoration verification.
 
-The TUI core version advances independently (`0.1.4` here), while the final prerelease suffix (`rc.8`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
+The TUI core version advances independently (`0.1.5` here), while the final prerelease suffix (`rc.8`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
 
 ## Install
 
@@ -106,7 +119,7 @@ Install the exact supported official Harness, then add DSH TUI to a dedicated `t
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.0-rc.8
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
 dsh --profile tui
 ```
 
@@ -129,7 +142,7 @@ The canonical profile contains exactly `@deepseek-ai/dsh-base` followed by `@lin
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
 ```
 
 Sessions and credentials live outside the profile directory. Reapply only reviewed custom patches; do not copy the old profile back wholesale.
@@ -149,7 +162,7 @@ Sessions and credentials live outside the profile directory. Reapply only review
 Install the exact TUI version that declares compatibility with the installed official Harness version:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
 ```
 
 Release tags and npm versions are immutable. Do not mix package versions from different release candidates.

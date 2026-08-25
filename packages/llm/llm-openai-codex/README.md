@@ -22,7 +22,7 @@ Default storage is `$DSH_HOME/oauth/openai-codex.json` for the owner-only OAuth 
 
 The plugin resolves the active Host's durable attachment service at request time and passes it to `PiAiAdapter`. Image-capable Codex routes can therefore read the exact `ImageAttachmentRef` bytes retained by the Session log; a missing service or unavailable object fails before provider I/O instead of silently dropping image content.
 
-The public TUI bundle mounts this route without signing a user in. An interactive surface reads `ctx.llm.authentication('openai-codex')`, runs `ctx.llm.login()` with the advertised `oauth` method, and supplies provider-neutral prompts and progress notifications. The TUI exposes that flow through `/models`. API keys and pasted access tokens are deliberately not accepted by this adapter.
+The public TUI bundle mounts this route without signing a user in. An interactive surface reads `ctx.llm.authentication('openai-codex')`, runs `ctx.llm.login()` with the advertised `oauth` method, and supplies provider-neutral prompts and progress notifications. Authenticated state advertises `canLogout`; `ctx.llm.logout('openai-codex')` removes only this adapter's persisted OAuth credential through its credential-store owner and refreshes provider state. The TUI exposes login through `/models` and the complete login/logout status through `/provider`. API keys and pasted access tokens are deliberately not accepted by this adapter.
 
 ## Dynamic model catalog
 

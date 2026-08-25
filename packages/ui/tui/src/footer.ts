@@ -15,11 +15,12 @@ import { tuiMessage, type TuiLocale } from './locale.ts'
 import { tuiAgentModeDescription, tuiAgentModeName } from './mode.ts'
 import type { TuiWorkSummary } from './work.ts'
 import type { TuiSpeedProjection } from './live-feedback.ts'
+import type { TuiGoalPlanSurface } from './goal-plan.ts'
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 /** Stable action targets exposed by the native TUI footer. */
-export type TuiFooterItemId = 'model' | 'mode' | 'permission' | 'work' | 'speed' | 'context' | 'workspace' | 'transcript'
+export type TuiFooterItemId = 'model' | 'mode' | 'permission' | 'goalPlan' | 'work' | 'speed' | 'context' | 'workspace' | 'transcript'
 
 /** One actionable status item derived from authoritative runtime state. */
 export interface TuiFooterItemDescriptor {
@@ -30,7 +31,7 @@ export interface TuiFooterItemDescriptor {
   /** Compact current value shown in the status row. */
   readonly value: string
   /** Enter behavior for this item. */
-  readonly action: 'models' | 'modes' | 'permissions' | 'work' | 'detail' | 'bottom'
+  readonly action: 'models' | 'modes' | 'permissions' | 'goalPlan' | 'work' | 'detail' | 'bottom'
   /** Complete read-only detail shown for local status items. */
   readonly detailLines: readonly string[]
 }
@@ -81,6 +82,8 @@ export interface TuiFooterSources {
   readonly speed?: TuiSpeedProjection | undefined
   /** Authoritative background-work counters. */
   readonly work?: TuiWorkSummary | undefined
+  /** Compact durable Goal/Plan state used only when the full strip is folded. */
+  readonly goalPlan?: TuiGoalPlanSurface | undefined
   /** Full Session workspace path. */
   readonly workspace?: string | undefined
   /** Current mounted transcript page. */
@@ -154,6 +157,33 @@ export function tuiFooterItems(
         tuiMessage(locale, 'footer.permission.available', {
           presets: permissions.options.filter(option => option.value !== 'custom').map(option => option.name).join(', '),
         }),
+      ],
+    ))
+  }
+
+  const goalPlan = sources.goalPlan
+  if (goalPlan !== undefined) {
+    const goal = goalPlan.goal
+    const plan = goalPlan.plan
+    const value = [
+      goal === undefined ? undefined : tuiMessage(locale, 'goalPlan.footer.goal', { phase: goal.phase }),
+      plan?.effective === true ? tuiMessage(locale, plan.pending
+        ? 'goalPlan.footer.planPending' : 'goalPlan.footer.plan') : undefined,
+    ].filter((part): part is string => part !== undefined).join(' + ')
+    items.push(item(
+      'goalPlan',
+      tuiMessage(locale, 'footer.label.goalPlan'),
+      value,
+      'goalPlan',
+      [
+        ...goal === undefined ? [] : [
+          tuiMessage(locale, 'goalPlan.detail.goal', { objective: goal.objective }),
+          tuiMessage(locale, 'goalPlan.detail.rounds', {
+            current: goalPlan.roundsStarted ?? 0, maximum: goal.maxGoalRounds,
+          }),
+        ],
+        ...plan?.effective === true ? [tuiMessage(locale, plan.pending
+          ? 'goalPlan.detail.planPending' : 'goalPlan.detail.plan')] : [],
       ],
     ))
   }

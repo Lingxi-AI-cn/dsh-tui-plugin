@@ -7,6 +7,10 @@ import {
 } from './keybindings.ts'
 import { TUI_LOCALES, type TuiLocale } from './locale.ts'
 import type { TuiTerminalBackground, TuiTerminalColorDepth } from './terminal-session.ts'
+import {
+  DEFAULT_TUI_SESSION_MANAGER_PREFERENCES,
+  type TuiSessionManagerPreferences,
+} from './session-manager.ts'
 
 /** Persisted built-in terminal theme names. */
 export const TUI_THEME_PREFERENCES = ['auto', 'dark', 'light', 'no-color'] as const
@@ -36,6 +40,9 @@ export type TuiResolvedThemePreference = Exclude<TuiThemePreference, 'auto'>
 /** Settings namespace owned by the native TUI. */
 export const TUI_SETTINGS_NAMESPACE = settingsNamespace('tui')
 
+/** Exact first-run Provider onboarding copy/flow version acknowledged by the user. */
+export const TUI_PROVIDER_ONBOARDING_VERSION = 1 as const
+
 /** User settings consumed live by the native TUI. */
 export interface TuiSettings {
   /** Built-in semantic terminal theme. */
@@ -50,6 +57,10 @@ export interface TuiSettings {
   activity: TuiActivityPreference
   /** Per-action replacements for built-in key gestures. */
   keybindings: TuiKeybindingOverrides
+  /** Last native-TUI Provider onboarding version acknowledged through Host settings. */
+  providerOnboardingVersion?: number
+  /** Persisted Session Manager scope, archive, sort, and grouping controls. */
+  sessionManager: TuiSessionManagerPreferences
 }
 
 /** Defaults used without a settings provider and below its user layer. */
@@ -59,6 +70,7 @@ export const DEFAULT_TUI_SETTINGS: TuiSettings = Object.freeze({
   mouse: 'auto',
   activity: 'dots',
   keybindings: Object.freeze({}),
+  sessionManager: DEFAULT_TUI_SESSION_MANAGER_PREFERENCES,
 })
 
 const TUI_SETTINGS_FIELDS = z.object({
@@ -68,6 +80,14 @@ const TUI_SETTINGS_FIELDS = z.object({
   mouse: z.union([...TUI_MOUSE_PREFERENCES]).default(DEFAULT_TUI_SETTINGS.mouse),
   activity: z.union([...TUI_ACTIVITY_PREFERENCES]).default(DEFAULT_TUI_SETTINGS.activity),
   keybindings: TUI_KEYBINDING_OVERRIDES_SCHEMA.default(DEFAULT_TUI_SETTINGS.keybindings),
+  providerOnboardingVersion: z.number().step(1).min(1),
+  sessionManager: z.object({
+    scope: z.union(['workspace', 'all']).default(DEFAULT_TUI_SESSION_MANAGER_PREFERENCES.scope),
+    archive: z.union(['active', 'archived', 'all']).default(DEFAULT_TUI_SESSION_MANAGER_PREFERENCES.archive),
+    sort: z.union(['updated-desc', 'updated-asc', 'title', 'workspace'])
+      .default(DEFAULT_TUI_SESSION_MANAGER_PREFERENCES.sort),
+    groupByWorkspace: z.boolean().default(DEFAULT_TUI_SESSION_MANAGER_PREFERENCES.groupByWorkspace),
+  }).default(DEFAULT_TUI_SESSION_MANAGER_PREFERENCES),
 })
 
 /** Persisted native-TUI settings schema, including effective-binding validation. */
@@ -85,6 +105,10 @@ export const TUI_SETTINGS_SCHEMA = z.transform(TUI_SETTINGS_FIELDS, (settings) =
     mouse: settings.mouse ?? DEFAULT_TUI_SETTINGS.mouse,
     activity: settings.activity ?? DEFAULT_TUI_SETTINGS.activity,
     keybindings,
+    sessionManager: settings.sessionManager ?? DEFAULT_TUI_SESSION_MANAGER_PREFERENCES,
+    ...settings.providerOnboardingVersion === undefined
+      ? {}
+      : { providerOnboardingVersion: settings.providerOnboardingVersion },
   }
 }, true) as unknown as z<TuiSettings>
 

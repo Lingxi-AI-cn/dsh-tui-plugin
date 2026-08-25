@@ -34,6 +34,10 @@ function logicalDetailLines(node: TranscriptNode, child?: TranscriptToolNode, wi
     ...(node.error === undefined ? [] : [`Error: ${node.error}`]),
     ...(node.summary ?? '').split('\n'),
   ].filter(Boolean)
+  if (node.kind === 'deliverables') return [
+    ...node.items.map((item, index) => `${index + 1}. ${item.operation} · ${item.path}`),
+    ...(node.omitted === 0 ? [] : [`+${node.omitted}`]),
+  ]
   return node.tools.map(tool => `${toolStateMark(tool)} ${detailTitle(tool)}`)
 }
 

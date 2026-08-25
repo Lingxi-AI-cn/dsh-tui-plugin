@@ -10,9 +10,24 @@ import type {
   CommandRuntime,
 } from '@deepseek-ai/dsh-commands'
 import type { SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
+import type { FileReferenceService, FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
+import type {
+  SessionReferenceCandidate,
+  SessionReferenceInput,
+} from '@deepseek-ai/dsh-session-reference'
+import type { Agent as HostAgent } from '@deepseek-ai/dsh-agent'
+import type { GoalProjection, GoalRef, GoalService } from '@deepseek-ai/dsh-goal'
+import type { PlanProjection } from '@deepseek-ai/dsh-plan-mode'
 import { settingsNamespace as hostSettingsNamespace } from '@deepseek-ai/dsh-settings'
+import { credentialRef as hostCredentialRef } from '@deepseek-ai/dsh-credentials'
 import type { Context as HostContext } from '@deepseek-ai/cordis'
 import type { AgentPreset, AgentPresets as HostAgentPresets } from '@deepseek-ai/dsh-agent-presets'
+import type {
+  Workspace, WorkspaceId, WorkspaceRegistry as HostWorkspaceRegistry,
+} from '@deepseek-ai/dsh-workspace'
+import type {
+  DirectoryPickerCapability, DirectoryListing,
+} from '@deepseek-ai/dsh-host-directory-picker'
 
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-cmdline'
@@ -27,7 +42,9 @@ import type {} from '@deepseek-ai/dsh-user-questions'
 
 export type { Context } from '@deepseek-ai/cordis'
 export { AttachmentError } from '@deepseek-ai/dsh-attachment'
-export type { EncodedImageAttachment, ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
+export type {
+  EncodedImageAttachment, ImageAttachmentLimits, ImageAttachmentRef, ImageMediaType,
+} from '@deepseek-ai/dsh-attachment'
 export { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 export { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 export type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
@@ -47,8 +64,12 @@ export type { AgentPreset } from '@deepseek-ai/dsh-agent-presets'
 export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { JobId } from '@deepseek-ai/dsh-jobs'
 export type { JobSnapshot, JobStatus } from '@deepseek-ai/dsh-jobs'
-export { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
-export type { ContentBlock, LlmConfigurableProvider, StreamChunk, UserMessage } from '@deepseek-ai/dsh-llm'
+export { createUserMessage, errorChain, freezeMessage, normalizeApiKey } from '@deepseek-ai/dsh-llm'
+export type {
+  ContentBlock, LlmConfigurableProvider, LlmDiscoveredModel, LlmModelDiscoveryRequest,
+  StreamChunk, TokenUsage, UserMessage,
+} from '@deepseek-ai/dsh-llm'
+export { MessageId } from '@deepseek-ai/dsh-llm/brand'
 export { runNativeCommand } from '@deepseek-ai/dsh-native-command'
 export type { PermissionSelect } from '@deepseek-ai/dsh-permission-presets'
 export {
@@ -58,12 +79,35 @@ export {
   SESSION_FORMAT_VERSION,
   SessionId,
 } from '@deepseek-ai/dsh-session'
-export type { SessionEvent, SessionId as SessionIdType, TodoItem } from '@deepseek-ai/dsh-session'
+export type { SessionEvent, SessionId as SessionIdType, TodoItem, TurnEndReason } from '@deepseek-ai/dsh-session'
 export type { SessionProjectionCache } from '@deepseek-ai/dsh-session-projection-cache'
 export type { SessionRecord } from '@deepseek-ai/dsh-session-query'
 export { installSettingsSection } from '@deepseek-ai/dsh-settings'
+export type {
+  SettingsDescriptor, SettingsNamespace, SettingsPathOp, SettingsProvider,
+} from '@deepseek-ai/dsh-settings'
+export { activeAtToken, formatFileMention } from '@deepseek-ai/dsh-file-reference'
+export type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
+export { formatSessionReferenceMention } from '@deepseek-ai/dsh-session-reference'
+export type {
+  PluginEntryId, PluginFiberPhase, PluginInventoryEntry,
+} from '@deepseek-ai/dsh-host-plugin-inventory/types'
+export type {
+  MessageFeedbackDeleteResult, MessageFeedbackListResult, MessageFeedbackPutResult,
+  MessageFeedbackRating, MessageFeedbackVersion,
+} from '@deepseek-ai/dsh-message-feedback'
 /** Validate one TUI-owned settings namespace through the supported Host API. */
 export const settingsNamespace = hostSettingsNamespace
+
+/** Resolve the shared Host settings owner through the reviewed adapter boundary. */
+export function hostSettings(ctx: HostContext): import('@deepseek-ai/dsh-settings').SettingsProvider {
+  const settings = ctx.get('settings')
+  if (settings === undefined) throw new Error('TUI settings service is unavailable')
+  return settings
+}
+/** Validate one provider credential reference through the supported Host API. */
+export const credentialRef = hostCredentialRef
+export type { CredentialInfo, CredentialProvider, CredentialRef } from '@deepseek-ai/dsh-credentials'
 export type {
   SubagentDescendantListEntry,
   SubagentResult,
@@ -91,17 +135,114 @@ export type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 
 /** Preset operations the native TUI is allowed to use from the official Host. */
 export type TuiAgentPresets = Pick<HostAgentPresets,
-  'list' | 'resolve' | 'mount' | 'recompose' | 'composedPreset'>
+  'list' | 'resolve' | 'mount' | 'recompose' | 'composedPreset'
+  | 'read' | 'copy' | 'remove' | 'defaultId' | 'authorable' | 'roots'> & {
+    /** Newer owner mutation; absent on the exact official rc.8 Host. */
+    setDefault?(id: string, expectedRevision: number): Promise<void>
+    /** Settings revision paired with {@link setDefault}. */
+    readonly defaultRevision?: number
+  }
 
 /** Resolve the required preset roster through the reviewed Host adapter. */
 export function hostAgentPresets(ctx: HostContext): TuiAgentPresets {
   const presets = ctx.get('agentPresets')
   if (presets === undefined) throw new Error('TUI Agent preset service is unavailable')
-  return presets
+  return presets as unknown as TuiAgentPresets
 }
 
 /** Keep the imported preset row type on the public Host boundary. */
 export type TuiAgentPreset = AgentPreset
+
+/** Workspace operations the native TUI consumes from the durable Host owner. */
+export type TuiWorkspaceRegistry = Pick<HostWorkspaceRegistry,
+  'archivedSessionIds' | 'archiveSession' | 'create' | 'delete' | 'get' | 'insertBefore' | 'list' | 'resolveByPath'> & {
+    /** Remove one id from the durable archive set. */
+    unarchiveSession?(sessionId: HostSessionId): Promise<void>
+  }
+
+/** Resolve the required durable Workspace owner through the reviewed Host adapter. */
+export function hostWorkspaceRegistry(ctx: HostContext): TuiWorkspaceRegistry {
+  const registry = ctx.get('workspaceRegistry')
+  if (registry === undefined) throw new Error('TUI Workspace registry is unavailable')
+  return registry
+}
+
+/** Keep Workspace entity and identity types on the public TUI Host boundary. */
+export type { Workspace as TuiWorkspace, WorkspaceId as TuiWorkspaceId }
+
+/** Optional Host-owned directory interaction used when creating a Workspace. */
+export function hostDirectoryPickerCapability(ctx: HostContext): DirectoryPickerCapability | undefined {
+  return ctx.get('directoryPicker')?.capability()
+}
+
+/** Keep directory browsing facts on the official Host owner boundary. */
+export type {
+  DirectoryPickerCapability as TuiDirectoryPickerCapability,
+  DirectoryListing as TuiDirectoryListing,
+}
+
+/** Bounded Host file-reference discovery consumed by the unified composer panel. */
+export type TuiFileReferences = Pick<FileReferenceService, 'list'>
+
+/** Resolve the mounted file-reference owner. */
+export function hostFileReferences(ctx: HostContext): TuiFileReferences {
+  const references = ctx.get('fileReferences')
+  if (references === undefined) throw new Error('TUI file-reference discovery is unavailable')
+  return references
+}
+
+/** Session-reference discovery and pre-submit validation consumed by the TUI. */
+export interface TuiSessionReferences {
+  listCandidates(
+    agent: HostAgent,
+    query?: string,
+    limit?: number,
+    signal?: AbortSignal,
+  ): Promise<(SessionReferenceCandidate & { readonly updatedAt: number })[]>
+  validateText(
+    agent: HostAgent,
+    text: string,
+    signal?: AbortSignal,
+  ): Promise<readonly Required<SessionReferenceInput>[]>
+}
+
+/** Resolve the mounted canonical Session-reference owner. */
+export function hostSessionReferences(ctx: HostContext): TuiSessionReferences {
+  const references = ctx.get('sessionReferenceResolver')
+  if (references === undefined) throw new Error('TUI Session-reference service is unavailable')
+  const candidate = references as unknown as {
+    listCandidates: TuiSessionReferences['listCandidates']
+    validateText?: TuiSessionReferences['validateText']
+  }
+  return {
+    async listCandidates(agent, query, limit, signal) {
+      const rows = await candidate.listCandidates(agent, query, limit, signal)
+      return rows.map(row => Object.freeze({
+        ...row,
+        updatedAt: typeof row.updatedAt === 'number' ? row.updatedAt : row.createdAt,
+      }))
+    },
+    validateText: typeof candidate.validateText === 'function'
+      ? (agent, text, signal) => candidate.validateText?.(agent, text, signal) ?? Promise.resolve([])
+      : () => Promise.resolve([]),
+  }
+}
+
+export type { FileReferenceCandidate as TuiFileReferenceCandidate }
+export type TuiSessionReferenceCandidate = SessionReferenceCandidate & { readonly updatedAt: number }
+
+/** Goal mutations exposed by the active Agent-scoped preset. */
+export type TuiGoals = Pick<GoalService, 'edit' | 'pause' | 'resume' | 'clear'>
+
+/** Resolve the exact active Agent's Goal owner instead of the root Host tree. */
+export function hostGoals(agent: HostAgent): TuiGoals {
+  const goals = agent.ctx.get('goals')
+  if (goals === undefined) throw new Error('TUI Goal service is unavailable for this Agent mode')
+  return goals
+}
+
+export type { GoalProjection as TuiGoalProjection, GoalRef as TuiGoalRef }
+export type { PlanProjection as TuiPlanProjection }
 
 /** Localized descriptions accepted by newer command registries and ignored by older ones. */
 export type CommandLocalizedDescriptions = Readonly<Record<string, string>>
@@ -260,11 +401,13 @@ export interface LlmAuthenticationInfo {
   readonly configured: boolean
   readonly source?: string
   readonly methods: readonly { readonly id: string; readonly name: string }[]
+  readonly canLogout?: boolean
 }
 
 interface AuthenticationCapableLlm {
   authentication(provider: string): Promise<LlmAuthenticationInfo>
   login(provider: string, method: string, interaction: LlmAuthenticationInteraction): Promise<void>
+  logout(provider: string): Promise<void>
 }
 
 /**
@@ -299,6 +442,20 @@ export function hostLogin(
     return Promise.reject(new Error('This DeepSeek Harness version does not expose interactive provider authentication.'))
   }
   return candidate.login(provider, method, interaction)
+}
+
+/**
+ * Run provider-owned logout when the Host or bundled compatibility bridge exposes it.
+ * @param llm - active Host LLM runtime.
+ * @param provider - registered provider route.
+ * @returns promise settled after the provider-owned credential removal finishes.
+ */
+export function hostLogout(llm: LlmRuntime, provider: string): Promise<void> {
+  const candidate = llm as LlmRuntime & Partial<AuthenticationCapableLlm>
+  if (typeof candidate.logout !== 'function') {
+    return Promise.reject(new Error('This DeepSeek Harness version does not expose provider logout.'))
+  }
+  return candidate.logout(provider)
 }
 
 interface PathCompletionCapableFileSystem {

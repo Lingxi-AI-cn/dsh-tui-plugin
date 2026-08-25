@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-tui",
   "description": "Post-install native terminal UI bundle for DeepSeek Harness",
-  "version": "0.1.4-rc.8",
+  "version": "0.1.5-rc.8",
   "publishConfig": {
     "access": "public"
   },
@@ -95,7 +95,19 @@
     "@deepseek-ai/dsh-user-questions": "0.1.0-rc.8",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "3.18.1",
-    "@earendil-works/pi-ai": "0.82.1"
+    "@earendil-works/pi-ai": "0.82.1",
+    "@deepseek-ai/dsh-credentials": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-file-reference": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-file-reference-local": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-host-directory-picker": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-host-directory-picker-browse": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-host-plugin-inventory": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-goal": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-message-feedback": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-plan-mode": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-reference": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-workspace": "0.1.0-rc.8"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis-plugin-loader": {
@@ -232,6 +244,42 @@
     },
     "@earendil-works/pi-ai": {
       "optional": true
+    },
+    "@deepseek-ai/dsh-credentials": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-file-reference": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-file-reference-local": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-host-directory-picker": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-host-directory-picker-browse": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-host-plugin-inventory": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-goal": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-message-feedback": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-plan-mode": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session-reference": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-typert-protocol": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-workspace": {
+      "optional": true
     }
   },
   "devDependencies": {
@@ -280,6 +328,18 @@
     "@deepseek-ai/dsh-user-questions": "0.1.0-rc.8",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "3.18.1",
-    "@earendil-works/pi-ai": "0.82.1"
+    "@earendil-works/pi-ai": "0.82.1",
+    "@deepseek-ai/dsh-credentials": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-file-reference": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-file-reference-local": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-host-directory-picker": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-host-directory-picker-browse": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-host-plugin-inventory": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-goal": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-message-feedback": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-plan-mode": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-reference": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-workspace": "0.1.0-rc.8"
   }
 }

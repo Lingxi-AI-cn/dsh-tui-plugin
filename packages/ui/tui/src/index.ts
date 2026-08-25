@@ -5,22 +5,30 @@
 
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
-import { basename, extname, resolve } from 'node:path'
+import { basename, dirname, extname, resolve } from 'node:path'
 import React from 'react'
 import { render, type Instance } from 'ink'
 import {
-  AttachmentError,
   createUserMessage,
+  credentialRef,
   errorChain,
   hostAuthentication,
   hostAgentPresets,
-  hostCompletePaths,
+  hostDirectoryPickerCapability,
+  hostGoals,
+  hostFileReferences,
+  hostSessionReferences,
+  hostSettings,
   hostLogin,
+  hostLogout,
   hostReadSessionPreview,
+  hostWorkspaceRegistry,
+  formatFileMention,
   assembleContextFor,
   installModelSelection,
   installSettingsSection,
   JobId,
+  MessageId,
   resolveSessionForkAnchor,
   resolveSessionPreset,
   SESSION_FORMAT_VERSION,
@@ -39,14 +47,12 @@ import {
   type CommandResult,
   type Context,
   type ContextPressureProjection,
-  type FsPathCompletionResult,
   type JobSnapshot,
   type ImageAttachmentRef,
   type ImageMediaType,
   type LlmAuthenticationEvent,
   type LlmAuthenticationInteraction,
   type LlmAuthenticationPrompt,
-  type LlmConfigurableProvider,
   type ModelSelection,
   type ModelSelectionRef,
   type PermissionSelect,
@@ -60,6 +66,9 @@ import {
   type SubagentRunEndInfo,
   type SubagentRunInfo,
   type TokenUsageProjection,
+  type TuiAgentPresets,
+  type TuiGoalProjection,
+  type TuiPlanProjection,
 } from './host.ts'
 import { SessionLogExportError } from '@lingxi-ai-cn/dsh-session-export'
 import { PluginHubError, type PluginCatalogSort, type PluginCategory, type PluginChangePlan, type PluginId } from '@lingxi-ai-cn/dsh-plugin-hub'
@@ -74,14 +83,34 @@ import {
   type TuiInteractionDescriptor,
 } from './keybindings.ts'
 import { openExternalUrl } from './open-url.ts'
+import { canOpenExternalPath, openExternalPath } from './open-path.ts'
 import {
   sortTuiResumeCandidates, summarizeTuiResumeCandidate,
   type TuiResumeCandidate, type TuiResumeDialogSnapshot, type TuiResumePresetSummary,
 } from './resume.ts'
 import {
+  collectTuiWorkspaceRows,
+  type TuiSessionManagerDialogSnapshot,
+  type TuiWorkspaceManagerRow,
+} from './session-manager.ts'
+import {
   type TuiFreshSessionCommand, type TuiFreshSessionDialogSnapshot,
 } from './session-lifecycle.ts'
 import { tuiAgentModeName, tuiAgentModeOptions } from './mode.ts'
+import {
+  collectTuiPresetManager, readTuiPresetComposition, setTuiDefaultPreset, type TuiPresetManagerSnapshot,
+} from './preset-manager.ts'
+import {
+  collectTuiHostPluginCenter,
+  type TuiHostPluginCenterSnapshot,
+  type TuiHostSettingsMutation,
+} from './host-plugin-center.ts'
+import { TuiTrajectoryProjectionCache, type TuiTrajectorySnapshot } from './trajectory.ts'
+import {
+  processDeleteResult, processPutResult, projectMessageFeedback,
+  type TuiMessageFeedbackSnapshot,
+  type TuiMessageFeedbackMutationState,
+} from './message-feedback.ts'
 import {
   resolveTuiSessionExportDirectory, type TuiSessionExportDialogSnapshot,
   type TuiSessionExportFormat,
@@ -105,7 +134,7 @@ import {
 } from './clipboard.ts'
 import {
   DEFAULT_TUI_SETTINGS, resolveTuiTheme, TUI_ACTIVITY_PREFERENCES, TUI_SETTINGS_NAMESPACE, TUI_SETTINGS_SCHEMA,
-  TUI_MOUSE_PREFERENCES, TUI_THEME_PREFERENCES,
+  TUI_MOUSE_PREFERENCES, TUI_PROVIDER_ONBOARDING_VERSION, TUI_THEME_PREFERENCES,
   TuiThemeProvider, type TuiActivityPreference, type TuiCustomThemeDefinition, type TuiSettings, type TuiTheme,
 } from './theme.tsx'
 import { listTuiCustomThemes, loadTuiCustomTheme } from './custom-theme.ts'
@@ -136,22 +165,33 @@ import { projectTuiLoadedContext, type TuiLoadedContextSnapshot } from './loaded
 import { TuiExtensionRegistry } from './extensions.ts'
 import { tuiGroupedCommandHelpLines, tuiMcpStatusLines, tuiUsageTipLines } from './command-help.ts'
 import { checkTuiUpdate, tuiUpdateStatus, type TuiUpdateStatus } from './update.ts'
+import {
+  collectTuiProviderCenter, createTuiCustomProvider, discoverTuiCustomProviderModels,
+  removeTuiProviderProfile, saveTuiProviderApiKey, saveTuiProviderEndpoint, saveTuiProviderProfile,
+  TuiCustomProviderError, TuiProviderApiKeyError, TuiProviderEndpointError,
+  TuiProviderProfileError, TuiProviderRemoveError,
+  tuiProviderOnboardingReadiness,
+  type TuiCustomProviderDraft, type TuiCustomProviderModelDraft,
+  type TuiProviderCenterDialogSnapshot, type TuiProviderCreationTarget, type TuiProviderProfileDraft,
+} from './provider-center.ts'
+import {
+  collectTuiReferenceResolution, preflightTuiReferenceText, type TuiReferenceResolution,
+} from './references.ts'
+import {
+  createTuiGoalPlanProjectionFrame, updateTuiGoalPlanProjectionFrame,
+  type TuiGoalPlanProjectionFrame,
+} from './goal-plan.ts'
+import { preflightAttachments, projectAttachmentRail, tuiAttachmentStoreErrorMessage } from './attachment-intake.ts'
 
 export const name = 'tui'
 
 export const inject = [
   'agentDefaultModel', 'agents', 'sessions', 'sessionPersistence',
   'agentPresets',
-  'sessionQuery', 'commands', 'userQuestions', 'approval', 'llm', 'tools',
-  'fs', 'sessionLogExporter', 'jobs', 'subagents',
+  'sessionQuery', 'workspaceRegistry', 'commands', 'userQuestions', 'approval', 'llm', 'tools',
+  'fs', 'fileReferences', 'sessionReferenceResolver', 'sessionLogExporter', 'jobs', 'subagents',
   'attachments', 'subprocess',
 ]
-
-const PATH_COMPLETION_LIMITS = {
-  maxDepth: 4,
-  maxItems: 32,
-  maxScannedEntries: 256,
-} as const
 
 const IMAGE_EXTENSIONS: Readonly<Record<string, ImageMediaType>> = {
   '.png': 'image/png',
@@ -217,7 +257,16 @@ interface RuntimeDisposers {
   tipsCommand?: () => void
   btwCommand?: () => void
   workspaceCommand?: () => void
+  sessionsCommand?: () => void
+  presetsCommand?: () => void
+  hostPluginsCommand?: () => void
+  trajectoryCommand?: () => void
+  feedbackCommand?: () => void
   llmAdaptersUpdated?: () => void
+  settingsDocumentUpdated?: () => void
+  hostPluginStatus?: () => void
+  credentialsUpdated?: () => void
+  workspaceChanged?: () => void
   resumeCommand?: () => void
   clearCommand?: () => void
   newCommand?: () => void
@@ -256,6 +305,14 @@ interface ActiveOperation {
 
 interface ActiveAgentSwitch extends ActiveOperation {
   kind: 'resume' | 'fresh' | 'rewind'
+}
+
+interface DetachedRewindSource {
+  readonly id: SessionId
+  readonly cwd: string
+  readonly events: readonly SessionEvent[]
+  readonly selection: ModelSelection
+  readonly preset: string
 }
 
 interface ActiveTuiAgentView {
@@ -324,11 +381,23 @@ class TuiController {
   private readonly tokenUsage = new ValueStore<TokenUsageProjection | undefined>(undefined)
   private readonly contextBreakdown = new ValueStore<ContextBreakdownProjection | undefined>(undefined)
   private readonly sessionStats = new ValueStore<SessionStatsProjection | undefined>(undefined)
+  private readonly goalProjection = new ValueStore<TuiGoalProjection | null | undefined>(undefined)
+  private readonly planProjection = new ValueStore<TuiPlanProjection | undefined>(undefined)
+  private goalPlanProjectionFrame: TuiGoalPlanProjectionFrame<Agent['session']> | undefined
   private readonly resumeDialog = new ValueStore<TuiResumeDialogSnapshot | undefined>(undefined)
+  private readonly sessionManager = new ValueStore<TuiSessionManagerDialogSnapshot | undefined>(undefined)
+  private readonly presetManagerStore = new ValueStore<TuiPresetManagerSnapshot | undefined>(undefined)
+  private readonly hostPluginCenterStore = new ValueStore<TuiHostPluginCenterSnapshot | undefined>(undefined)
+  private readonly trajectoryStore = new ValueStore<TuiTrajectorySnapshot | undefined>(undefined)
+  private readonly trajectoryProjection = new TuiTrajectoryProjectionCache()
+  private readonly messageFeedbackStore = new ValueStore<TuiMessageFeedbackSnapshot | undefined>(undefined)
+  private readonly feedbackMutationStore = new ValueStore<TuiMessageFeedbackMutationState>({ status: 'idle' })
+  private feedbackMutationGeneration = 0
   private readonly freshSessionDialog = new ValueStore<TuiFreshSessionDialogSnapshot | undefined>(undefined)
   private readonly rewindDialog = new ValueStore<TuiRewindDialogSnapshot | undefined>(undefined)
   private readonly sessionExportDialog = new ValueStore<TuiSessionExportDialogSnapshot | undefined>(undefined)
   private readonly pluginHubDialog = new ValueStore<TuiPluginHubDialogSnapshot | undefined>(undefined)
+  private readonly providerCenter = new ValueStore<TuiProviderCenterDialogSnapshot | undefined>(undefined)
   private readonly work = new ValueStore<TuiWorkSnapshot>(EMPTY_TUI_WORK_SNAPSHOT)
   private readonly disposers: RuntimeDisposers = {}
   private readonly workRootDisposers: (() => void)[] = []
@@ -353,8 +422,15 @@ class TuiController {
   private exitAfterCommand: Agent | undefined
   private activeSessionExport: ActiveOperation | undefined
   private pluginHubOperation: ActiveOperation | undefined
+  private providerCenterRefresh: ActiveOperation | undefined
+  private providerCenterOperation: ActiveOperation | undefined
   private inkMounted: (() => void) | undefined
   private resumeScan: ActiveOperation | undefined
+  private sessionManagerScan: ActiveOperation | undefined
+  private sessionManagerGeneration = 0
+  private sessionManagerRefreshTimer: ReturnType<typeof setTimeout> | undefined
+  private trajectoryLimit = 256
+  private detachedRewindSource: DetachedRewindSource | undefined
   private activeAgentSwitch: ActiveAgentSwitch | undefined
   private activeView: ActiveTuiAgentView | undefined
   private resumeGeneration = 0
@@ -362,7 +438,9 @@ class TuiController {
   private rewindGeneration = 0
   private sessionExportGeneration = 0
   private pluginHubGeneration = 0
+  private providerCenterGeneration = 0
   private startupGuidanceGeneration = 0
+  private providerOnboardingAcknowledged = false
   private composerPrefillRevision = 0
   private updateCheck: ActiveOperation | undefined
   private themeLoad: ActiveOperation | undefined
@@ -457,6 +535,7 @@ class TuiController {
       this.selection = prepared.selection
       this.modelSelection.set(prepared.selectedModel)
       this.agentMode.set(prepared.preset)
+      void this.refreshFeedback()
       this.scheduleStartupGuidanceRefresh(prepared.selectedModel)
       this.refreshAgentDerivedState(handle.agent)
       this.installRuntimeBindings()
@@ -479,6 +558,7 @@ class TuiController {
       await mounted
       this.inkMounted = undefined
       this.scheduleUpdateCheck()
+      void this.maybeOpenProviderOnboarding(handle.agent)
       const pluginHub = this.ctx.get('pluginHub')
       if (pluginHub !== undefined && pluginHub.hasProvider()) await pluginHub.markMaintenanceReady()
       await this.instance.waitUntilExit()
@@ -506,6 +586,8 @@ class TuiController {
       label: 'root',
       acceptsInput: true,
     })
+    const directoryPicker = hostDirectoryPickerCapability(this.ctx)
+    const workspaceRegistry = this.ctx.get('workspaceRegistry') as unknown as { unarchiveSession?: unknown } | undefined
     const app = React.createElement(TuiApp, {
       agent,
       view,
@@ -525,24 +607,32 @@ class TuiController {
       tokenUsage: this.tokenUsage,
       contextBreakdown: this.contextBreakdown,
       sessionStats: this.sessionStats,
+      goalProjection: this.goalProjection,
+      planProjection: this.planProjection,
       resumeDialog: this.resumeDialog,
+      sessionManager: this.sessionManager,
+      ...(directoryPicker === undefined ? {} : { directoryPicker }),
       freshSessionDialog: this.freshSessionDialog,
       rewindDialog: this.rewindDialog,
       sessionExportDialog: this.sessionExportDialog,
       pluginHubDialog: this.pluginHubDialog,
+      providerCenter: this.providerCenter,
       work: this.work,
       extensions: this.ctx.tuiExtensions,
       maxResumeOptions: this.config.maxResumeOptions ?? 8,
       commands: activeView === undefined ? this.commandCatalog.list(root) : [],
       interactionRegistry: this.interactionRegistry,
       activityPreference: this.activityPreference,
-      completePaths: (query, signal) => this.completePaths(root, agent, query, signal),
+      completeReferences: (query, signal) => this.completeReferences(root, agent, query, signal),
       onAttachPath: path => this.attachPath(root, agent, path),
+      onTerminalPathPaste: paths => this.pasteTerminalPaths(root, agent, paths),
       onInputCursor: (target) => { this.terminal.setInputCursor(target) },
       onSelectionMouseMode: enabled => this.terminal.setSelectionMouseMode(enabled),
       initialTerminalInput: this.terminal.takeBufferedInput(),
       onCopy: text => this.terminal.copyToClipboard(text),
       onOpenUrl: url => this.openTuiUrl(url),
+      onOpenPath: path => this.openTuiPath(root, path),
+      pathOpenerAvailable: canOpenExternalPath(),
       onSubmit: (text: string, mode?: TuiSubmitMode, attachments?: readonly TuiComposerImageAttachment[]) => activeView === undefined
         ? this.submit(root, text, mode, attachments)
         : this.submitChild(root, activeView, text, attachments),
@@ -552,6 +642,52 @@ class TuiController {
       onResume: candidate => this.activateResume(root, candidate),
       onResumeForRename: candidate => this.activateResume(root, candidate, 'rename'),
       onCloseResume: () => { this.closeResume() },
+      onCloseSessionManager: () => { this.closeSessionManager() },
+      onRefreshSessionManager: () => this.refreshSessionManager(root),
+      sessionManagerPreferences: this.settingsSource().sessionManager,
+      onUpdateSessionManagerPreferences: patch => this.updateSessionManagerPreferences(patch),
+      presetManager: this.presetManagerStore,
+      onClosePresetManager: () => { this.closePresetManager() },
+      onRefreshPresetManager: () => this.refreshPresetManager(root),
+      onCopyPreset: (sourceId, newId, displayName) => this.copyPreset(root, sourceId, newId, displayName),
+      onDeletePreset: id => this.deletePreset(root, id),
+      onSetDefaultPreset: (id, expectedRevision) => this.setDefaultPreset(root, id, expectedRevision),
+      onReadPresetComposition: id => readTuiPresetComposition(hostAgentPresets(root.ctx), id),
+      onOpenPresetFile: id => this.openPresetFile(root, id),
+      onOpenPresetLocation: id => this.openPresetLocation(root, id),
+      hostPluginCenter: this.hostPluginCenterStore,
+      onCloseHostPluginCenter: () => { this.closeHostPluginCenter() },
+      onRefreshHostPluginCenter: () => this.refreshHostPluginCenter(),
+      onMutateHostSettings: mutation => this.mutateHostSettings(mutation),
+      trajectory: this.trajectoryStore,
+      onCloseTrajectory: () => { this.closeTrajectory() },
+      onRefreshTrajectory: () => { this.openTrajectory() },
+      onLoadOlderTrajectory: () => { this.loadOlderTrajectory() },
+      messageFeedback: this.messageFeedbackStore,
+      feedbackMutation: this.feedbackMutationStore,
+      onSubmitFeedback: async (messageId: string, rating: 'positive' | 'negative', note?: string) => {
+        await this.submitFeedback(messageId, rating, note)
+      },
+      onClearFeedback: async (messageId: string) => {
+        await this.clearFeedback(messageId)
+      },
+      onRefreshFeedback: async () => {
+        await this.refreshFeedback()
+      },
+      onResumeManagedSession: candidate => this.activateManagedResume(root, candidate),
+      onForkManagedSession: candidate => this.openManagedFork(root, candidate),
+      onRenameManagedSession: (candidate, title) => this.renameManagedSession(root, candidate, title),
+      onArchiveManagedSession: (candidate, archived) => this.setManagedSessionArchived(root, candidate, archived),
+      canUnarchiveManagedSessions: typeof workspaceRegistry?.unarchiveSession === 'function',
+      onCreateManagedWorkspace: path => this.createManagedWorkspace(root, path),
+      onRenameManagedWorkspace: (workspace, title) => this.renameManagedWorkspace(root, workspace, title),
+      onMoveManagedWorkspace: (workspace, direction) => this.moveManagedWorkspace(root, workspace, direction),
+      onDeleteManagedWorkspace: workspace => this.deleteManagedWorkspace(root, workspace),
+      onEditGoal: objective => this.editGoal(root, objective),
+      onPauseGoal: () => this.pauseGoal(root),
+      onResumeGoal: () => this.resumeGoal(root),
+      onClearGoal: () => this.clearGoal(root),
+      onExitPlan: () => this.submit(root, '/plan off').then(() => undefined),
       onConfirmFreshSession: () => this.activateFreshSession(root),
       onCloseFreshSession: () => { this.closeFreshSession() },
       onRewind: candidate => this.activateRewind(root, candidate),
@@ -573,6 +709,16 @@ class TuiController {
       onPluginHubSort: () => this.sortPluginHub(root),
       onPluginHubCategory: () => this.cyclePluginHubCategory(root),
       onPluginHubInstallable: () => this.togglePluginHubInstallable(root),
+      onCloseProviderCenter: () => { this.closeProviderCenter() },
+      onRefreshProviderCenter: () => this.refreshProviderCenter(root),
+      onAuthenticateProvider: provider => this.authenticateProvider(root, provider),
+      onLogoutProvider: provider => this.logoutProvider(root, provider),
+      onSaveProviderApiKey: (provider, key) => this.saveProviderApiKey(root, provider, key),
+      onSaveProviderEndpoint: (provider, endpoint) => this.saveProviderEndpoint(root, provider, endpoint),
+      onSaveProviderProfile: (provider, draft) => this.saveProviderProfile(root, provider, draft),
+      onRemoveProvider: provider => this.removeProvider(root, provider),
+      onDiscoverCustomProviderModels: (target, draft) => this.discoverCustomProviderModels(root, target, draft),
+      onCreateCustomProvider: (target, draft) => this.createCustomProvider(root, target, draft),
       onMounted: () => { this.inkMounted?.() },
       onOpenHelp: () => { this.helpOpen.set(true) },
       onCloseHelp: () => { this.helpOpen.set(false) },
@@ -588,55 +734,59 @@ class TuiController {
       React.createElement(TuiLocaleProvider, { locale: this.locale }, app))
   }
 
-  private async completePaths(
+  private async completeReferences(
     root: Agent,
     agent: Agent,
     query: string,
     signal: AbortSignal,
-  ): Promise<FsPathCompletionResult> {
-    if (!this.ownsView(root, agent)) throw new Error('TUI Agent view changed before path completion')
-    const cwd = agent.session.header.cwd ?? process.cwd()
-    const target = await this.ctx.fs.resolve(cwd, { signal })
-    return hostCompletePaths(this.ctx.fs, target, query, { ...PATH_COMPLETION_LIMITS, signal })
+  ): Promise<TuiReferenceResolution> {
+    if (!this.ownsView(root, agent)) throw new Error('TUI Agent view changed before reference completion')
+    return collectTuiReferenceResolution(query, {
+      files: (value, activeSignal) => hostFileReferences(this.ctx).list(agent, value, activeSignal),
+      sessions: (value, activeSignal) => hostSessionReferences(this.ctx)
+        .listCandidates(agent, value, 24, activeSignal),
+    }, signal)
   }
 
   private async attachPath(root: Agent, agent: Agent, path: string): Promise<ImageAttachmentRef> {
     if (!this.ownsView(root, agent)) throw new Error('TUI Agent view changed before image attachment')
     const mediaType = IMAGE_EXTENSIONS[extname(path).toLowerCase()]
-    if (mediaType === undefined) throw new Error(`Cannot attach "${path}": only PNG, JPEG, WebP, and GIF files are supported.`)
+    if (mediaType === undefined) {
+      throw new Error(tuiMessage(this.locale, 'attachment.path.unsupported', { path }))
+    }
     const cwd = agent.session.header.cwd ?? process.cwd()
     const target = await this.ctx.fs.resolve(path, { cwd })
     const info = await this.ctx.fs.stat(target)
-    if (info === undefined) throw new Error(`Cannot attach "${path}": file not found.`)
-    if (info.type !== 'file') throw new Error(`Cannot attach "${path}": the path is not a regular file.`)
+    if (info === undefined) throw new Error(tuiMessage(this.locale, 'attachment.path.notFound', { path }))
+    if (info.type !== 'file') throw new Error(tuiMessage(this.locale, 'attachment.path.notRegular', { path }))
     const byteCap = Math.min(
       this.ctx.attachments.imageLimits.maxImageBytes,
       this.ctx.attachments.imageLimits.maxMessageImageBytes,
     )
-    const data = await this.ctx.fs.readBytes(target, undefined, byteCap)
+    let data: Uint8Array
     try {
-      return await this.saveImageBytes(data, mediaType, basename(target.displayPath), `Cannot attach "${path}"`)
+      data = await this.ctx.fs.readBytes(target, undefined, byteCap)
     } catch (error: unknown) {
-      if (error instanceof AttachmentError) {
-        throw new Error(`Cannot attach "${path}": ${error.message}`, { cause: error })
-      }
-      throw error
+      throw new Error(tuiMessage(this.locale, 'attachment.path.readFailed', { path }), { cause: error })
     }
+    return await this.saveImageBytes(data, mediaType, basename(target.displayPath), path)
   }
 
   private async saveImageBytes(
     data: Uint8Array,
     mediaType: ImageMediaType,
     name: string,
-    context: string,
+    displayPath: string,
   ): Promise<ImageAttachmentRef> {
     const byteCap = Math.min(
       this.ctx.attachments.imageLimits.maxImageBytes,
       this.ctx.attachments.imageLimits.maxMessageImageBytes,
     )
-    if (data.byteLength > byteCap) throw new Error(`${context}: image exceeds the ${byteCap}-byte limit.`)
+    if (data.byteLength > byteCap) {
+      throw new Error(tuiMessage(this.locale, 'attachment.path.tooLarge', { path: displayPath, max: byteCap }))
+    }
     if (detectImageMediaType(data) !== mediaType) {
-      throw new Error(`${context}: image bytes do not match ${mediaType}.`)
+      throw new Error(tuiMessage(this.locale, 'attachment.path.bytesMismatch', { path: displayPath }))
     }
     try {
       return await this.ctx.attachments.saveImage({
@@ -645,8 +795,61 @@ class TuiController {
         name,
       })
     } catch (error: unknown) {
-      if (error instanceof AttachmentError) throw new Error(`${context}: ${error.message}`, { cause: error })
-      throw error
+      throw new Error(tuiAttachmentStoreErrorMessage(error, 'save', this.locale), { cause: error })
+    }
+  }
+
+  private async intakePathList(
+    root: Agent,
+    agent: Agent,
+    paths: readonly string[],
+    fallbackToText: boolean,
+  ): Promise<TuiClipboardInsert | undefined> {
+    if (!this.ownsView(root, agent)) throw new Error('TUI Agent view changed before path intake')
+    const cwd = agent.session.header.cwd ?? process.cwd()
+    const analyzed: Array<{
+      readonly path: string
+      readonly mediaType?: ImageMediaType
+      readonly mention?: string
+    }> = []
+    for (const path of paths) {
+      let info: Awaited<ReturnType<Context['fs']['stat']>>
+      try {
+        const target = await this.ctx.fs.resolve(path, { cwd })
+        info = await this.ctx.fs.stat(target)
+      } catch {
+        if (fallbackToText) return undefined
+        throw new Error(tuiMessage(this.locale, 'attachment.path.inspectFailed', { path }))
+      }
+      if (info === undefined) {
+        if (fallbackToText) return undefined
+        throw new Error(tuiMessage(this.locale, 'attachment.path.notFound', { path }))
+      }
+      if (info.type !== 'file' && info.type !== 'directory') {
+        if (fallbackToText) return undefined
+        throw new Error(tuiMessage(this.locale, 'attachment.path.notRegular', { path }))
+      }
+      const mediaType = info.type === 'file' ? IMAGE_EXTENSIONS[extname(path).toLowerCase()] : undefined
+      if (mediaType !== undefined) {
+        analyzed.push({ path, mediaType })
+        continue
+      }
+      const mention = formatFileMention({ path, kind: 'file' }, false)
+      if (mention === undefined) {
+        if (fallbackToText) return undefined
+        throw new Error(tuiMessage(this.locale, 'attachment.path.unsafeReference', { path }))
+      }
+      analyzed.push({ path, mention })
+    }
+    if (!this.ownsView(root, agent)) throw new Error('TUI Agent view changed before path intake')
+    const attachments: ImageAttachmentRef[] = []
+    for (const item of analyzed) {
+      if (item.mediaType !== undefined) attachments.push(await this.attachPath(root, agent, item.path))
+    }
+    const mentions = analyzed.flatMap(item => item.mention === undefined ? [] : [item.mention])
+    return {
+      text: mentions.length === 0 ? '' : `${mentions.join(' ')} `,
+      attachments: Object.freeze(attachments),
     }
   }
 
@@ -668,20 +871,21 @@ class TuiController {
         result.payload.data,
         result.payload.mediaType,
         result.payload.name,
-        'Cannot paste clipboard image',
+        result.payload.name,
       )
       return { text: '', attachments: [ref] }
     }
-    const attachments: ImageAttachmentRef[] = []
-    const paths: string[] = []
-    for (const path of result.payload.paths) {
-      if (IMAGE_EXTENSIONS[extname(path).toLowerCase()] !== undefined) {
-        attachments.push(await this.attachPath(root, agent, path))
-      } else {
-        paths.push(`@${path}`)
-      }
-    }
-    return { text: paths.join(' '), attachments: Object.freeze(attachments) }
+    const insert = await this.intakePathList(root, agent, result.payload.paths, false)
+    if (insert === undefined) throw new Error('Typed clipboard file intake unexpectedly returned no result')
+    return insert
+  }
+
+  private pasteTerminalPaths(
+    root: Agent,
+    agent: Agent,
+    paths: readonly string[],
+  ): Promise<TuiClipboardInsert | undefined> {
+    return this.intakePathList(root, agent, paths, true)
   }
 
   private async openTuiUrl(value: string): Promise<void> {
@@ -694,28 +898,39 @@ class TuiController {
     }
   }
 
+  private async openTuiPath(agent: Agent, value: string): Promise<void> {
+    const path = resolve(agent.session.header.cwd ?? process.cwd(), value)
+    if (!canOpenExternalPath()) {
+      this.externalNotice.set(tuiMessage(this.locale, 'path.open.unavailable', { path }))
+      return
+    }
+    const controller = new AbortController()
+    try {
+      await openExternalPath(path, controller.signal)
+      this.externalNotice.set(tuiMessage(this.locale, 'path.opening', { path }))
+    } catch {
+      this.externalNotice.set(tuiMessage(this.locale, 'path.open.failed', { path }))
+    }
+  }
+
   private async assertImageCapableRoute(agent: Agent, signal: AbortSignal): Promise<void> {
     const routed = agent.session.requestHeader()?.config
     const provider = routed?.provider ?? agent.options.provider
     const model = routed?.model ?? agent.options.model
     if (provider === undefined || model === undefined) {
-      throw new Error('Image attachments require an explicitly selected model.')
+      throw new Error(tuiMessage(this.locale, 'attachment.preflight.selectModel'))
     }
     const info = await this.ctx.llm.resolveModelInfo(provider, model, signal)
     if (info.inputModalities === undefined || !info.inputModalities.includes('image')) {
-      throw new Error(`Model "${model}" does not declare image input; switch to an image-capable model before attaching images.`)
+      throw new Error(tuiMessage(this.locale, 'attachment.preflight.noVisionModel', { model }))
     }
   }
 
   private assertImageAttachmentLimits(attachments: readonly TuiComposerImageAttachment[]): void {
-    const limits = this.ctx.attachments.imageLimits
-    if (attachments.length > limits.maxImagesPerMessage) {
-      throw new Error(`Too many image attachments for one message (maximum ${limits.maxImagesPerMessage}).`)
-    }
-    const totalBytes = attachments.reduce((sum, item) => sum + item.ref.bytes, 0)
-    if (totalBytes > limits.maxMessageImageBytes) {
-      throw new Error(`Image attachments exceed the ${limits.maxMessageImageBytes}-byte message limit.`)
-    }
+    const result = preflightAttachments(
+      projectAttachmentRail(attachments), this.ctx.attachments.imageLimits, true, this.locale,
+    )
+    if (!result.ok) throw new Error(result.message)
   }
 
   private async encodeImageAttachments(
@@ -724,7 +939,12 @@ class TuiController {
   ): Promise<readonly EncodedImageAttachment[]> {
     const encoded: EncodedImageAttachment[] = []
     for (const item of attachments) {
-      const stored = await this.ctx.attachments.readImage(item.ref, signal)
+      let stored: Awaited<ReturnType<Context['attachments']['readImage']>>
+      try {
+        stored = await this.ctx.attachments.readImage(item.ref, signal)
+      } catch (error: unknown) {
+        throw new Error(tuiAttachmentStoreErrorMessage(error, 'read', this.locale), { cause: error })
+      }
       encoded.push({
         mediaType: stored.ref.mediaType,
         data: Buffer.from(stored.data).toString('base64'),
@@ -897,11 +1117,21 @@ class TuiController {
   private refreshAgentDerivedState(agent: Agent): void {
     this.refreshPermission(agent)
     const projections = this.ctx.get('sessionProjections')
-    const values = projections?.snapshot(agent.session).values
+    const snapshot = projections?.snapshot(agent.session)
+    const values = snapshot?.values
     this.contextPressure.set(values?.contextPressure)
     this.tokenUsage.set(values?.tokenUsage)
     this.contextBreakdown.set(values?.contextBreakdown)
     this.sessionStats.set(values?.sessionStats)
+    const frame = createTuiGoalPlanProjectionFrame(
+      agent.session,
+      snapshot?.asOfSeq ?? agent.session.seq,
+      values?.goal,
+      values?.plan,
+    )
+    this.goalPlanProjectionFrame = frame
+    this.goalProjection.set(frame.goal)
+    this.planProjection.set(frame.plan)
   }
 
   private scheduleStartupGuidanceRefresh(selection = this.modelSelection.getSnapshot()): void {
@@ -956,15 +1186,54 @@ class TuiController {
   private installRuntimeBindings(): void {
     this.disposers.llmAdaptersUpdated = this.ctx.on('llm/adapters-updated', () => {
       this.scheduleStartupGuidanceRefresh()
+      const root = this.handle?.agent
+      if (root !== undefined && this.providerCenter.getSnapshot() !== undefined) void this.refreshProviderCenter(root)
+    })
+    this.disposers.settingsDocumentUpdated = this.ctx.on('settings/document-updated', () => {
+      const root = this.handle?.agent
+      if (root !== undefined && this.providerCenter.getSnapshot() !== undefined) void this.refreshProviderCenter(root)
+      if (this.hostPluginCenterStore.getSnapshot() !== undefined) void this.refreshHostPluginCenter()
+    })
+    this.disposers.hostPluginStatus = this.ctx.on('internal/status', () => {
+      if (this.hostPluginCenterStore.getSnapshot() !== undefined) void this.refreshHostPluginCenter()
+    })
+    this.disposers.credentialsUpdated = this.ctx.on('credentials/updated', () => {
+      const root = this.handle?.agent
+      if (root !== undefined && this.providerCenter.getSnapshot() !== undefined) void this.refreshProviderCenter(root)
+    })
+    this.disposers.workspaceChanged = this.ctx.on('domain/changed', (change) => {
+      if (change.domain !== 'workspace' || this.sessionManager.getSnapshot() === undefined) return
+      if (this.sessionManagerRefreshTimer !== undefined) clearTimeout(this.sessionManagerRefreshTimer)
+      this.sessionManagerRefreshTimer = setTimeout(() => {
+        this.sessionManagerRefreshTimer = undefined
+        const root = this.handle?.agent
+        const dialog = this.sessionManager.getSnapshot()
+        if (root !== undefined && dialog?.phase === 'ready' && this.activeAgentSwitch === undefined) {
+          void this.refreshSessionManager(root)
+        }
+      }, 25)
     })
     const projections = this.ctx.get('sessionProjections')
     if (projections !== undefined) {
-      this.disposers.projectionChanged = projections.onChanged((session, key, value) => {
+      this.disposers.projectionChanged = projections.onChanged((session, key, value, seq) => {
         if (session === this.handle?.agent.session) {
           if (key === 'contextPressure') this.contextPressure.set(value as ContextPressureProjection)
           if (key === 'tokenUsage') this.tokenUsage.set(value as TokenUsageProjection)
           if (key === 'contextBreakdown') this.contextBreakdown.set(value as ContextBreakdownProjection)
           if (key === 'sessionStats') this.sessionStats.set(value as SessionStatsProjection)
+          if (key === 'goal' || key === 'plan') {
+            const frame = this.goalPlanProjectionFrame
+            if (frame !== undefined) {
+              const next = updateTuiGoalPlanProjectionFrame(
+                frame, session, key, value as TuiGoalProjection | TuiPlanProjection | null, seq,
+              )
+              if (next !== frame) {
+                this.goalPlanProjectionFrame = next
+                if (key === 'goal') this.goalProjection.set(next.goal)
+                else this.planProjection.set(next.plan)
+              }
+            }
+          }
         }
         if (key === 'subagentTiming' && this.workCatalog.some(entry => entry.id === session.id)) {
           this.rebuildWorkSnapshot()
@@ -990,6 +1259,9 @@ class TuiController {
       if (agent !== undefined && session === agent.session) {
         this.events?.append(event)
         this.refreshPermission(agent)
+        if (event.type !== 'assistant/chunk' && this.trajectoryStore.getSnapshot() !== undefined) {
+          this.openTrajectory()
+        }
       }
       if (session === this.activeView?.agent.session) this.activeView.events.append(event)
       if (this.workCatalog.some(entry => entry.id === session.id)) this.rebuildWorkSnapshot()
@@ -1105,9 +1377,7 @@ class TuiController {
       name: 'provider',
       description: 'Inspect provider setup and authentication',
       completion: { descriptions: tuiCommandDescriptions('command.provider') },
-      handler: invocation => this.executeQuestionCommand(
-        'provider.cancelled', () => this.executeProvider(invocation),
-      ),
+      handler: invocation => this.executeProvider(invocation),
     })
     this.disposers.updateCommand = this.commandCatalog.register({
       name: 'update',
@@ -1144,12 +1414,52 @@ class TuiController {
     })
     this.disposers.workspaceCommand = this.commandCatalog.register({
       name: 'workspace',
-      description: 'Start a fresh Session in an existing workspace',
+      description: 'Manage Workspaces or start a fresh Session at a path',
       input: { hint: '[path]' },
       completion: { descriptions: tuiCommandDescriptions('command.workspace') },
       handler: invocation => this.executeQuestionCommand(
         'workspace.cancelled', () => this.executeWorkspace(invocation),
       ),
+    })
+    this.disposers.sessionsCommand = this.commandCatalog.register({
+      name: 'sessions',
+      description: 'Manage Sessions and Workspaces',
+      completion: { descriptions: tuiCommandDescriptions('command.sessions') },
+      handler: invocation => this.executeSessions(invocation),
+    })
+    this.disposers.presetsCommand = this.commandCatalog.register({
+      name: 'presets',
+      description: tuiMessage(this.locale, 'presets.command'),
+      handler: (invocation) => {
+        void this.openPresetManager(invocation.agent)
+        return { kind: 'success' }
+      },
+    })
+    this.disposers.feedbackCommand = this.commandCatalog.register({
+      name: 'message-feedback',
+      description: tuiMessage(this.locale, 'feedback.command'),
+      handler: (_invocation) => {
+        void this.refreshFeedback().then(() => {
+          this.externalNotice.set(tuiMessage(this.locale, 'feedback.command.hint'))
+        })
+        return { kind: 'success' }
+      },
+    })
+    this.disposers.trajectoryCommand = this.commandCatalog.register({
+      name: 'trajectory',
+      description: tuiMessage(this.locale, 'trajectory.command'),
+      handler: (_invocation) => {
+        this.openTrajectory()
+        return { kind: 'success' }
+      },
+    })
+    this.disposers.hostPluginsCommand = this.commandCatalog.register({
+      name: 'host-plugins',
+      description: tuiMessage(this.locale, 'hostPlugins.command'),
+      handler: (_invocation) => {
+        this.openHostPluginCenter()
+        return { kind: 'success' }
+      },
     })
     this.disposers.langCommand = this.commandCatalog.register({
       name: 'lang',
@@ -1929,90 +2239,401 @@ class TuiController {
     return { kind: 'success', text: tuiUsageTipLines(this.locale).join('\n') }
   }
 
-  private async executeProvider(invocation: CommandInvocation): Promise<CommandResult> {
+  private executeProvider(invocation: CommandInvocation): CommandResult {
     if (invocation.rawInput.trim() !== '') return { kind: 'error', text: tuiMessage(this.locale, 'provider.usage') }
     if (invocation.agent !== this.handle?.agent || this.activeView !== undefined) {
       return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
     }
-    const live = new Map(this.ctx.llm.listProviders().map(provider => [provider.id, provider]))
-    const directory = this.ctx.llm.listConfigurableProviders()
-    const rows: Array<{
-      entry: LlmConfigurableProvider
-      label: string
-      description: string
-      active: boolean
-    }> = []
-    const seen = new Set<string>()
-    for (const entry of directory) {
-      const provider = live.get(entry.provider)
-      let state = tuiMessage(this.locale, 'provider.dormant')
-      if (provider !== undefined) {
-        try {
-          const auth = await hostAuthentication(this.ctx.llm, entry.provider)
-          state = auth.configured
-            ? tuiMessage(this.locale, 'provider.configured', { source: auth.source ?? tuiMessage(this.locale, 'provider.source.unknown') })
-            : tuiMessage(this.locale, 'provider.authenticationRequired')
-        } catch {
-          state = tuiMessage(this.locale, 'provider.statusUnavailable')
-        }
-      }
-      rows.push({
-        entry,
-        label: `${entry.displayName} (${entry.provider})`,
-        description: `${state} · ${entry.settingsNs}${entry.settingsPath.length === 0 ? '' : `/${entry.settingsPath.join('/')}`}`,
-        active: provider !== undefined,
-      })
-      seen.add(entry.provider)
+    if (this.interactions.getSnapshot() !== undefined) {
+      return { kind: 'error', text: tuiMessage(this.locale, 'doctor.interaction') }
     }
-    for (const provider of live.values()) {
-      if (seen.has(provider.id)) continue
-      rows.push({
-        entry: { provider: provider.id, displayName: provider.name, settingsNs: '', settingsPath: [] },
-        label: `${provider.name} (${provider.id})`,
-        description: tuiMessage(this.locale, 'provider.active'),
-        active: true,
-      })
+    if (this.resumeDialog.getSnapshot() !== undefined || this.freshSessionDialog.getSnapshot() !== undefined
+      || this.rewindDialog.getSnapshot() !== undefined || this.sessionExportDialog.getSnapshot() !== undefined
+      || this.pluginHubDialog.getSnapshot() !== undefined || this.diagnostics.getSnapshot() !== undefined
+      || this.loadedContext.getSnapshot() !== undefined) {
+      return { kind: 'error', text: tuiMessage(this.locale, 'doctor.dialog') }
     }
-    if (rows.length === 0) return { kind: 'error', text: tuiMessage(this.locale, 'provider.none') }
-    const answer = await this.askOne(invocation.agent, invocation.signal, {
-      id: 'provider-selection', header: tuiMessage(this.locale, 'provider.header'),
-      question: tuiMessage(this.locale, 'provider.question'),
-      options: rows.map(row => ({ label: row.label, description: row.description })),
+    this.helpOpen.set(false)
+    this.providerCenter.set(Object.freeze({ phase: 'loading' }))
+    void this.refreshProviderCenter(invocation.agent)
+    return { kind: 'success', text: tuiMessage(this.locale, 'provider.opened') }
+  }
+
+  private collectProviderCenterSnapshot(signal: AbortSignal) {
+    const settings = this.ctx.get('settings')
+    const credentials = this.ctx.get('credentials')
+    return collectTuiProviderCenter({
+      llm: {
+        listProviders: () => this.ctx.llm.listProviders(),
+        listConfigurableProviders: () => this.ctx.llm.listConfigurableProviders(),
+        authentication: provider => hostAuthentication(this.ctx.llm, provider),
+        listModels: provider => this.ctx.llm.listModels(provider),
+      },
+      ...(settings === undefined ? {} : { settings }),
+      ...(credentials === undefined ? {} : { credentials }),
+      credentialRef,
+      signal,
     })
-    const selected = rows.find(row => row.label === answer.selected[0])
-    if (selected === undefined) return { kind: 'success', text: tuiMessage(this.locale, 'provider.cancelled') }
-    if (!selected.active) {
-      return { kind: 'success', text: tuiMessage(this.locale, 'provider.configure', {
-        provider: selected.entry.displayName,
-        namespace: selected.entry.settingsNs,
-        path: selected.entry.settingsPath.length === 0 ? '/' : selected.entry.settingsPath.join('/'),
-      }) }
-    }
-    const auth = await hostAuthentication(this.ctx.llm, selected.entry.provider)
-    if (!auth.configured && auth.methods.length > 0) {
-      const method = auth.methods.length === 1 ? auth.methods[0] : undefined
-      let chosen = method
-      if (chosen === undefined) {
-        const methodAnswer = await this.askOne(invocation.agent, invocation.signal, {
-          id: 'provider-auth-method', header: selected.label,
-          question: tuiMessage(this.locale, 'provider.auth.question'),
-          options: auth.methods.map(candidate => ({ label: candidate.name, description: candidate.id })),
-        })
-        chosen = auth.methods.find(candidate => candidate.name === methodAnswer.selected[0])
+  }
+
+  private async refreshProviderCenter(root: Agent): Promise<void> {
+    if (this.handle?.agent !== root || this.providerCenter.getSnapshot() === undefined) return
+    this.providerCenterRefresh?.controller.abort(new Error('Provider Center refresh superseded'))
+    const controller = new AbortController()
+    const generation = ++this.providerCenterGeneration
+    const current = this.providerCenter.getSnapshot()
+    const previous = current?.snapshot
+    const onboarding = current?.onboarding
+    this.providerCenter.set(Object.freeze({
+      phase: 'loading',
+      ...(previous === undefined ? {} : { snapshot: previous }),
+      ...(onboarding === undefined ? {} : { onboarding }),
+    }))
+    const operation: ActiveOperation = { controller, completion: Promise.resolve() }
+    operation.completion = this.collectProviderCenterSnapshot(controller.signal).then((snapshot) => {
+      if (controller.signal.aborted || generation !== this.providerCenterGeneration
+        || this.providerCenter.getSnapshot() === undefined || this.handle?.agent !== root) return
+      this.providerCenter.set(Object.freeze({
+        phase: 'ready', snapshot,
+        ...(onboarding === undefined ? {} : { onboarding }),
+      }))
+    }).catch(() => {
+      if (controller.signal.aborted || generation !== this.providerCenterGeneration
+        || this.providerCenter.getSnapshot() === undefined || this.handle?.agent !== root) return
+      this.providerCenter.set(Object.freeze({
+        phase: 'error', ...(previous === undefined ? {} : { snapshot: previous }),
+        ...(onboarding === undefined ? {} : { onboarding }),
+      }))
+    }).finally(() => {
+      if (this.providerCenterRefresh === operation) this.providerCenterRefresh = undefined
+    })
+    this.providerCenterRefresh = operation
+    await operation.completion
+  }
+
+  private providerOnboardingAcknowledgedBySettings(): {
+    readonly acknowledged: boolean
+    readonly durable: boolean
+  } {
+    const settings = this.ctx.get('settings')
+    if (settings === undefined) return { acknowledged: false, durable: false }
+    try {
+      const descriptor = settings.describe({ redactSecrets: true })
+        .find(candidate => String(candidate.ns) === String(TUI_SETTINGS_NAMESPACE))
+      const user = descriptor?.user
+      const version = typeof user === 'object' && user !== null && !Array.isArray(user)
+        ? (user as Readonly<Record<string, unknown>>)['providerOnboardingVersion']
+        : undefined
+      return {
+        acknowledged: version === TUI_PROVIDER_ONBOARDING_VERSION,
+        durable: settings.writable && descriptor !== undefined,
       }
-      if (chosen === undefined) return { kind: 'success', text: tuiMessage(this.locale, 'provider.cancelled') }
-      await this.login(invocation.agent, selected.entry.provider, chosen.id, invocation.signal)
-      return { kind: 'success', text: tuiMessage(this.locale, 'provider.auth.complete', { provider: selected.entry.displayName }) }
+    } catch {
+      return { acknowledged: false, durable: false }
     }
-    return { kind: 'success', text: auth.configured
-      ? tuiMessage(this.locale, 'provider.ready', {
-        provider: selected.entry.displayName,
-        source: auth.source ?? tuiMessage(this.locale, 'provider.source.unknown'),
+  }
+
+  private async maybeOpenProviderOnboarding(root: Agent): Promise<void> {
+    if (this.handle?.agent !== root || this.providerOnboardingAcknowledged
+      || this.providerCenter.getSnapshot() !== undefined || this.isClosing()) return
+    const acknowledgement = this.providerOnboardingAcknowledgedBySettings()
+    if (acknowledgement.acknowledged) {
+      this.providerOnboardingAcknowledged = true
+      return
+    }
+    this.providerCenterRefresh?.controller.abort(new Error('Provider onboarding refresh superseded'))
+    const controller = new AbortController()
+    const generation = ++this.providerCenterGeneration
+    const operation: ActiveOperation = { controller, completion: Promise.resolve() }
+    operation.completion = this.collectProviderCenterSnapshot(controller.signal).then((snapshot) => {
+      if (controller.signal.aborted || generation !== this.providerCenterGeneration
+        || this.handle?.agent !== root || this.providerCenter.getSnapshot() !== undefined || this.isClosing()) return
+      if (tuiProviderOnboardingReadiness(snapshot) !== 'needed') return
+      this.providerCenter.set(Object.freeze({
+        phase: 'ready', snapshot,
+        onboarding: Object.freeze({ durable: acknowledgement.durable }),
+      }))
+    }).catch(() => undefined).finally(() => {
+      if (this.providerCenterRefresh === operation) this.providerCenterRefresh = undefined
+    })
+    this.providerCenterRefresh = operation
+    await operation.completion
+  }
+
+  private async acknowledgeProviderOnboarding(): Promise<boolean> {
+    this.providerOnboardingAcknowledged = true
+    const settings = this.ctx.get('settings')
+    if (settings === undefined || !settings.writable) {
+      this.externalNotice.set(tuiMessage(this.locale, 'provider.onboarding.processOnly'))
+      return false
+    }
+    let descriptor
+    try {
+      descriptor = settings.describe({ redactSecrets: true })
+        .find(candidate => String(candidate.ns) === String(TUI_SETTINGS_NAMESPACE))
+    } catch {
+      descriptor = undefined
+    }
+    if (descriptor === undefined) {
+      this.externalNotice.set(tuiMessage(this.locale, 'provider.onboarding.processOnly'))
+      return false
+    }
+    try {
+      await settings.mutate(TUI_SETTINGS_NAMESPACE, [{
+        op: 'set', path: ['providerOnboardingVersion'], value: TUI_PROVIDER_ONBOARDING_VERSION,
+      }], descriptor.revision)
+      return true
+    } catch {
+      this.externalNotice.set(tuiMessage(this.locale, 'provider.onboarding.processOnly'))
+      return false
+    }
+  }
+
+  private openModelsAfterProviderOnboarding(root: Agent): void {
+    if (this.handle?.agent !== root || this.activeCommand !== undefined || this.isClosing()) return
+    const controller = new AbortController()
+    const completion = this.ctx.commands.execute(root, '/models', [], controller.signal).then((execution) => {
+      if (execution !== undefined && execution.result.kind !== 'success') {
+        throw new Error(execution.result.text)
+      }
+    }).catch(() => {
+      if (!controller.signal.aborted) {
+        this.externalNotice.set(tuiMessage(this.locale, 'provider.onboarding.modelsFailed'))
+      }
+    })
+    const operation: ActiveOperation = { controller, completion }
+    this.activeCommand = operation
+    void completion.finally(() => {
+      if (this.activeCommand === operation) this.activeCommand = undefined
+    })
+  }
+
+  private async finishProviderOnboarding(root: Agent, openModels: boolean): Promise<void> {
+    await this.acknowledgeProviderOnboarding()
+    this.closeProviderCenter(false)
+    if (openModels) this.openModelsAfterProviderOnboarding(root)
+  }
+
+  private closeProviderCenter(acknowledgeOnboarding = true): void {
+    const onboarding = this.providerCenter.getSnapshot()?.onboarding
+    this.providerCenterRefresh?.controller.abort(new Error('Provider Center closed'))
+    this.providerCenterOperation?.controller.abort(new Error('Provider Center closed'))
+    this.providerCenterRefresh = undefined
+    this.providerCenterOperation = undefined
+    this.providerCenter.set(undefined)
+    if (acknowledgeOnboarding && onboarding !== undefined) void this.acknowledgeProviderOnboarding()
+  }
+
+  private async authenticateProvider(root: Agent, provider: string): Promise<void> {
+    if (this.handle?.agent !== root || this.providerCenter.getSnapshot() === undefined) return
+    const onboarding = this.providerCenter.getSnapshot()?.onboarding !== undefined
+    const row = this.providerCenter.getSnapshot()?.snapshot?.providers.find(candidate => candidate.id === provider)
+    if (row === undefined || !row.active || row.authenticationMethods.length === 0) return
+    this.providerCenterOperation?.controller.abort(new Error('Provider Center authentication superseded'))
+    const controller = new AbortController()
+    const operation: ActiveOperation = { controller, completion: Promise.resolve() }
+    operation.completion = (async () => {
+      let method = row.authenticationMethods.length === 1 ? row.authenticationMethods[0] : undefined
+      if (method === undefined) {
+        let answer: { selected: string[]; custom?: string }
+        try {
+          answer = await this.askOne(root, controller.signal, {
+            id: 'provider-auth-method', header: `${row.name} (${row.id})`,
+            question: tuiMessage(this.locale, 'provider.auth.question'),
+            options: row.authenticationMethods.map(candidate => ({ label: candidate.name, description: candidate.id })),
+          })
+        } catch (error: unknown) {
+          if (isTuiQuestionCancellation(error)) return
+          throw error
+        }
+        method = row.authenticationMethods.find(candidate => candidate.name === answer.selected[0])
+      }
+      if (method === undefined) return
+      await this.login(root, provider, method.id, controller.signal)
+      if (controller.signal.aborted || this.providerCenter.getSnapshot() === undefined) return
+      this.externalNotice.set(tuiMessage(this.locale, 'provider.signInComplete'))
+      await this.refreshProviderCenter(root)
+      if (onboarding && this.providerCenter.getSnapshot() !== undefined) {
+        await this.finishProviderOnboarding(root, true)
+      }
+    })().finally(() => {
+      if (this.providerCenterOperation === operation) this.providerCenterOperation = undefined
+    })
+    this.providerCenterOperation = operation
+    await operation.completion
+  }
+
+  private async logoutProvider(root: Agent, provider: string): Promise<void> {
+    if (this.handle?.agent !== root || this.providerCenter.getSnapshot() === undefined) return
+    const row = this.providerCenter.getSnapshot()?.snapshot?.providers.find(candidate => candidate.id === provider)
+    if (row === undefined || !row.active || !row.canLogout || row.authentication !== 'configured') return
+    await hostLogout(this.ctx.llm, provider)
+    if (this.providerCenter.getSnapshot() === undefined || !this.ownsAgent(root)) return
+    this.externalNotice.set(tuiMessage(this.locale, 'provider.logout.complete'))
+    await this.refreshProviderCenter(root)
+  }
+
+  private async saveProviderApiKey(root: Agent, provider: string, key: string): Promise<void> {
+    if (this.handle?.agent !== root || this.providerCenter.getSnapshot() === undefined) return
+    const onboarding = this.providerCenter.getSnapshot()?.onboarding !== undefined
+    const row = this.providerCenter.getSnapshot()?.snapshot?.providers.find(candidate => candidate.id === provider)
+    if (row === undefined) return
+    const settings = this.ctx.get('settings')
+    const credentials = this.ctx.get('credentials')
+    try {
+      await saveTuiProviderApiKey(row, key, {
+        ...(settings === undefined ? {} : { settings }),
+        ...(credentials === undefined ? {} : { credentials }),
       })
-      : tuiMessage(this.locale, 'provider.externalCredential', {
-        provider: selected.entry.displayName,
-        namespace: selected.entry.settingsNs || tuiMessage(this.locale, 'provider.source.unknown'),
-      }) }
+    } catch (error: unknown) {
+      if (error instanceof TuiProviderApiKeyError && error.code === 'settings-conflict') {
+        await this.refreshProviderCenter(root)
+      }
+      throw error
+    }
+    if (this.providerCenter.getSnapshot() === undefined || !this.ownsAgent(root)) return
+    this.externalNotice.set(tuiMessage(this.locale, 'provider.key.complete'))
+    await this.refreshProviderCenter(root)
+    if (onboarding && this.providerCenter.getSnapshot() !== undefined) {
+      await this.finishProviderOnboarding(root, true)
+    }
+  }
+
+  private async saveProviderEndpoint(
+    root: Agent,
+    provider: string,
+    endpoint: string | undefined,
+  ): Promise<void> {
+    if (this.handle?.agent !== root || this.providerCenter.getSnapshot() === undefined) return
+    const row = this.providerCenter.getSnapshot()?.snapshot?.providers.find(candidate => candidate.id === provider)
+    if (row === undefined) return
+    try {
+      await saveTuiProviderEndpoint(row, endpoint, this.ctx.get('settings'))
+    } catch (error: unknown) {
+      if (error instanceof TuiProviderEndpointError && error.code === 'settings-conflict') {
+        await this.refreshProviderCenter(root)
+      }
+      throw error
+    }
+    if (this.providerCenter.getSnapshot() === undefined || !this.ownsAgent(root)) return
+    this.externalNotice.set(tuiMessage(this.locale, 'provider.endpoint.complete'))
+    await this.refreshProviderCenter(root)
+  }
+
+  private async saveProviderProfile(
+    root: Agent,
+    provider: string,
+    draft: TuiProviderProfileDraft,
+  ): Promise<void> {
+    if (this.handle?.agent !== root || this.providerCenter.getSnapshot() === undefined) return
+    const row = this.providerCenter.getSnapshot()?.snapshot?.providers.find(candidate => candidate.id === provider)
+    if (row === undefined) return
+    const settings = this.ctx.get('settings')
+    try {
+      await saveTuiProviderProfile(row, draft, settings)
+    } catch (error: unknown) {
+      if (error instanceof TuiProviderProfileError && error.code === 'settings-conflict') {
+        await this.refreshProviderCenter(root)
+      }
+      throw error
+    }
+    if (this.providerCenter.getSnapshot() === undefined || !this.ownsAgent(root)) return
+    this.externalNotice.set(tuiMessage(this.locale, 'provider.profile.complete'))
+    await this.refreshProviderCenter(root)
+  }
+
+  private async removeProvider(root: Agent, provider: string): Promise<void> {
+    if (this.handle?.agent !== root || this.providerCenter.getSnapshot() === undefined) return
+    const row = this.providerCenter.getSnapshot()?.snapshot?.providers.find(candidate => candidate.id === provider)
+    if (row === undefined) return
+    const settings = this.ctx.get('settings')
+    const credentials = this.ctx.get('credentials')
+    try {
+      await removeTuiProviderProfile(row, {
+        ...(settings === undefined ? {} : { settings }),
+        ...(credentials === undefined ? {} : { credentials }),
+      })
+    } catch (error: unknown) {
+      if (error instanceof TuiProviderRemoveError && (error.code === 'settings-conflict'
+        || error.code === 'credential-remove-failed')) await this.refreshProviderCenter(root)
+      throw error
+    }
+    if (this.providerCenter.getSnapshot() === undefined || !this.ownsAgent(root)) return
+    this.externalNotice.set(tuiMessage(this.locale, 'provider.remove.complete'))
+    await this.refreshProviderCenter(root)
+  }
+
+  private currentProviderCreationTarget(
+    requested: TuiProviderCreationTarget,
+  ): TuiProviderCreationTarget | undefined {
+    return this.providerCenter.getSnapshot()?.snapshot?.creationTargets.find(candidate => (
+      candidate.namespace === requested.namespace
+      && candidate.path.length === requested.path.length
+      && candidate.path.every((segment, index) => segment === requested.path[index])
+    ))
+  }
+
+  private async discoverCustomProviderModels(
+    root: Agent,
+    requested: TuiProviderCreationTarget,
+    draft: TuiCustomProviderDraft,
+  ): Promise<readonly TuiCustomProviderModelDraft[]> {
+    if (this.handle?.agent !== root || this.providerCenter.getSnapshot() === undefined) return []
+    const target = this.currentProviderCreationTarget(requested)
+    if (target === undefined) throw new TuiCustomProviderError('settings-unavailable')
+    this.providerCenterOperation?.controller.abort(new Error('Provider Center operation superseded'))
+    const controller = new AbortController()
+    const operation: ActiveOperation = { controller, completion: Promise.resolve() }
+    const discovered = discoverTuiCustomProviderModels(target, draft, {
+      discoverModels: (settingsNs, request) => this.ctx.llm.discoverModels(settingsNs, request),
+    }, controller.signal)
+    operation.completion = discovered.then(() => undefined, () => undefined).finally(() => {
+      if (this.providerCenterOperation === operation) this.providerCenterOperation = undefined
+    })
+    this.providerCenterOperation = operation
+    return discovered
+  }
+
+  private async createCustomProvider(
+    root: Agent,
+    requested: TuiProviderCreationTarget,
+    draft: TuiCustomProviderDraft,
+  ): Promise<void> {
+    if (this.handle?.agent !== root || this.providerCenter.getSnapshot() === undefined) return
+    const onboarding = this.providerCenter.getSnapshot()?.onboarding !== undefined
+    const target = this.currentProviderCreationTarget(requested)
+    if (target === undefined) throw new TuiCustomProviderError('settings-unavailable')
+    this.providerCenterOperation?.controller.abort(new Error('Provider Center operation superseded'))
+    const controller = new AbortController()
+    const operation: ActiveOperation = { controller, completion: Promise.resolve() }
+    const settings = this.ctx.get('settings')
+    const credentials = this.ctx.get('credentials')
+    const created = createTuiCustomProvider(target, draft, {
+      ...(settings === undefined ? {} : { settings }),
+      ...(credentials === undefined ? {} : { credentials }),
+    })
+    operation.completion = created.then(() => undefined, () => undefined).finally(() => {
+      if (this.providerCenterOperation === operation) this.providerCenterOperation = undefined
+    })
+    this.providerCenterOperation = operation
+    try {
+      await created
+      controller.signal.throwIfAborted()
+      if (this.providerCenter.getSnapshot() === undefined || !this.ownsAgent(root)) return
+      this.externalNotice.set(tuiMessage(this.locale, 'provider.custom.complete'))
+      await this.refreshProviderCenter(root)
+      if (onboarding && this.providerCenter.getSnapshot() !== undefined) {
+        await this.finishProviderOnboarding(root, true)
+      }
+    } catch (error: unknown) {
+      controller.signal.throwIfAborted()
+      if (error instanceof TuiCustomProviderError
+        && (error.code === 'settings-conflict' || error.code === 'credential-write-failed'
+          || error.code === 'credentials-unavailable')) {
+        await this.refreshProviderCenter(root)
+      }
+      throw error
+    }
   }
 
   private async executeUpdate(invocation: CommandInvocation): Promise<CommandResult> {
@@ -2071,29 +2692,13 @@ class TuiController {
     if (invocation.agent !== this.handle?.agent || this.activeView !== undefined) {
       return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
     }
-    if (invocation.agent.status !== 'idle') {
-      return { kind: 'error', text: tuiMessage(this.locale, 'fresh.error.agentBusy', { status: invocation.agent.status }) }
-    }
     let target = invocation.rawInput.trim()
     if (target === '') {
-      const records = await this.ctx.sessionQuery.listSessions(invocation.signal)
-      const extensionOptions = await this.ctx.tuiExtensions.listWorkspaces(invocation.signal)
-      const byPath = new Map<string, { label: string; path: string }>()
-      for (const record of records) {
-        const cwd = record.header.cwd
-        if (cwd !== undefined) byPath.set(cwd, { label: basename(cwd), path: cwd })
-      }
-      for (const option of extensionOptions) byPath.set(option.path, { label: option.label, path: option.path })
-      const options = [...byPath.values()].sort((a, b) => a.label.localeCompare(b.label) || a.path.localeCompare(b.path))
-      if (options.length === 0) return { kind: 'error', text: tuiMessage(this.locale, 'workspace.none') }
-      const answer = await this.askOne(invocation.agent, invocation.signal, {
-        id: 'workspace-selection', header: tuiMessage(this.locale, 'workspace.header'),
-        question: tuiMessage(this.locale, 'workspace.question'),
-        options: options.map(option => ({ label: `${option.label} · ${option.path}` })),
-      })
-      const selected = options.find(option => `${option.label} · ${option.path}` === answer.selected[0])
-      if (selected === undefined) return { kind: 'success', text: tuiMessage(this.locale, 'workspace.cancelled') }
-      target = selected.path
+      this.openSessionManager(invocation.agent, 'workspaces')
+      return { kind: 'success', text: tuiMessage(this.locale, 'sessions.opened') }
+    }
+    if (invocation.agent.status !== 'idle') {
+      return { kind: 'error', text: tuiMessage(this.locale, 'fresh.error.agentBusy', { status: invocation.agent.status }) }
     }
     target = resolve(invocation.agent.session.header.cwd ?? process.cwd(), target)
     try {
@@ -2110,6 +2715,18 @@ class TuiController {
       workspaceLabel: target,
     })
     return { kind: 'success', text: tuiMessage(this.locale, 'workspace.opened', { path: target }) }
+  }
+
+  private executeSessions(invocation: CommandInvocation): CommandResult {
+    if (invocation.rawInput.trim() !== '') return { kind: 'error', text: tuiMessage(this.locale, 'sessions.usage') }
+    if (invocation.agent !== this.handle?.agent || this.activeView !== undefined) {
+      return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
+    }
+    if (this.interactions.getSnapshot() !== undefined) {
+      return { kind: 'error', text: tuiMessage(this.locale, 'sessions.interaction') }
+    }
+    this.openSessionManager(invocation.agent, 'sessions')
+    return { kind: 'success', text: tuiMessage(this.locale, 'sessions.opened') }
   }
 
   private async executeBtw(invocation: CommandInvocation): Promise<CommandResult> {
@@ -2748,6 +3365,7 @@ class TuiController {
     if (invocation.agent.session.header.cwd === undefined) {
       return { kind: 'error', text: 'The current Session has no workspace to retain.' }
     }
+    this.detachedRewindSource = undefined
     this.helpOpen.set(false)
     this.externalNotice.set('')
     this.rewindDialog.set({
@@ -2773,6 +3391,7 @@ class TuiController {
       this.activeAgentSwitch.controller.abort(new Error('TUI Session rewind cancelled'))
     }
     this.rewindGeneration += 1
+    this.detachedRewindSource = undefined
     this.rewindDialog.set(undefined)
   }
 
@@ -2789,16 +3408,25 @@ class TuiController {
       this.rewindDialog.set({ ...dialog, error: tuiMessage(this.locale, 'session.error.interaction') })
       return
     }
-    const cwd = agent.session.header.cwd
-    const selectedModel = this.selection?.current ?? this.modelSelection.getSnapshot()
+    const detached = this.detachedRewindSource?.id === dialog.currentSessionId
+      ? this.detachedRewindSource : undefined
+    const sourceId = detached?.id ?? agent.session.id
+    const sourceEvents = detached?.events ?? agent.session.events
+    const cwd = detached?.cwd ?? agent.session.header.cwd
+    const selectedModel = detached?.selection ?? this.selection?.current ?? this.modelSelection.getSnapshot()
+    const preset = detached?.preset ?? resolveSessionPreset(agent.session)
     if (cwd === undefined || selectedModel === undefined) {
       this.rewindDialog.set({ ...dialog, error: cwd === undefined
         ? tuiMessage(this.locale, 'session.error.workspace')
         : tuiMessage(this.locale, 'session.error.model') })
       return
     }
+    if (preset === undefined) {
+      this.rewindDialog.set({ ...dialog, error: tuiMessage(this.locale, 'rewind.error.preset') })
+      return
+    }
     const rewindDecision = await this.ctx.tuiExtensions.decide({
-      kind: 'rewind', sessionId: agent.session.id, targetEventSeq: current.eventSeq, operation: 'rewind',
+      kind: 'rewind', sessionId: sourceId, targetEventSeq: current.eventSeq, operation: 'rewind',
     })
     if (rewindDecision.outcome === 'deny') {
       this.rewindDialog.set({
@@ -2806,7 +3434,7 @@ class TuiController {
       })
       return
     }
-    const anchor = resolveSessionForkAnchor(agent.session.events, current.eventSeq)
+    const anchor = resolveSessionForkAnchor(sourceEvents, current.eventSeq)
     if (anchor.kind === 'unavailable') {
       this.rewindDialog.set({ ...dialog, error: tuiMessage(this.locale, 'rewind.error.boundary') })
       return
@@ -2820,7 +3448,7 @@ class TuiController {
       rewindingSeq: current.eventSeq,
     })
     const completion = this.rewindAgent(
-      agent, cwd, selectedModel, anchor.seedLength, controller.signal,
+      agent, sourceId, sourceEvents, cwd, selectedModel, preset, anchor.seedLength, controller.signal,
     ).catch((error: unknown) => {
       if (controller.signal.aborted || this.isClosing()) return
       const latest = this.rewindDialog.getSnapshot()
@@ -2842,27 +3470,34 @@ class TuiController {
 
   private async rewindAgent(
     oldAgent: Agent,
+    sourceSessionId: SessionId,
+    sourceEvents: readonly SessionEvent[],
     cwd: string,
     selectedModel: ModelSelection,
+    preset: string,
     seedLength: number,
     signal: AbortSignal,
   ): Promise<void> {
     if (!this.ownsAgent(oldAgent)) throw new Error('the active TUI Session changed')
     const initialStatus = this.agentStatus(oldAgent)
     if (initialStatus !== 'idle') throw new Error(`current Agent is ${initialStatus}`)
-    const seed = oldAgent.session.events.slice(0, seedLength)
-    const preset = resolveSessionPreset(oldAgent.session)
-    if (preset === undefined) throw new Error('the source Session has no Agent preset to inherit')
+    const seed = sourceEvents.slice(0, seedLength)
     const prepared = await this.prepareAgent({
       kind: 'rewind',
-      parentSession: oldAgent.session.id,
+      parentSession: sourceSessionId,
       cwd,
       selection: selectedModel,
       seed,
       preset,
     }, signal)
+    const workspace = await hostWorkspaceRegistry(this.ctx).resolveByPath(cwd)
+    let attached = false
     let retiredHandle: AgentHandle
     try {
+      if (workspace !== undefined) {
+        await workspace.attachSession(prepared.handle.agent.session.id)
+        attached = true
+      }
       signal.throwIfAborted()
       if (this.isClosing()) throw new Error('TUI is shutting down')
       if (!this.ownsAgent(oldAgent)) throw new Error('the active TUI Session changed')
@@ -2870,6 +3505,7 @@ class TuiController {
       if (currentStatus !== 'idle') throw new Error(`current Agent became ${currentStatus}`)
       retiredHandle = this.commitAgentSwitch(oldAgent, prepared)
     } catch (error: unknown) {
+      if (attached) await workspace?.detachSession(prepared.handle.agent.session.id).catch(() => undefined)
       await prepared.handle.dispose().catch(() => undefined)
       throw error
     }
@@ -2885,6 +3521,7 @@ class TuiController {
     } catch (error: unknown) {
       retirementError ??= error
     }
+    this.detachedRewindSource = undefined
     this.externalNotice.set(retirementError === undefined
       ? tuiMessage(this.locale, 'rewind.complete')
       : tuiMessage(this.locale, 'rewind.complete.retirementFailed', { error: errorChain(retirementError) }))
@@ -3053,22 +3690,496 @@ class TuiController {
     this.resumeDialog.set(undefined)
   }
 
+  private openSessionManager(agent: Agent, initialTab: 'sessions' | 'workspaces'): void {
+    this.closeSessionManager(true)
+    const generation = ++this.sessionManagerGeneration
+    const controller = new AbortController()
+    this.sessionManager.set({
+      generation,
+      phase: 'loading',
+      initialTab,
+      currentSessionId: agent.session.id,
+      currentWorkspaceLabel: agent.session.header.cwd ?? tuiMessage(this.locale, 'resume.workspace.none'),
+    })
+    this.externalNotice.set('')
+    const completion = this.scanSessionManager(agent, generation, controller.signal).catch((error: unknown) => {
+      if (controller.signal.aborted || this.sessionManagerGeneration !== generation || this.isClosing()) return
+      const snapshot = this.sessionManager.getSnapshot()
+      if (snapshot?.generation !== generation) return
+      this.sessionManager.set({ ...snapshot, phase: 'ready', error: errorChain(error) })
+    })
+    const operation = { controller, completion }
+    this.sessionManagerScan = operation
+    void completion.finally(() => {
+      if (this.sessionManagerScan === operation) this.sessionManagerScan = undefined
+    })
+  }
+
+  private closeSessionManager(superseded = false): void {
+    if (!superseded && this.sessionManager.getSnapshot()?.phase === 'mutating'
+      && this.activeAgentSwitch?.kind === 'resume') {
+      this.activeAgentSwitch.controller.abort(new Error('TUI Session Manager resume cancelled'))
+    }
+    this.sessionManagerScan?.controller.abort(new Error('TUI Session Manager closed'))
+    this.sessionManagerScan = undefined
+    if (!superseded) this.sessionManagerGeneration += 1
+    this.sessionManager.set(undefined)
+  }
+
+  private async scanSessionManager(
+    agent: Agent,
+    generation: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const registry = hostWorkspaceRegistry(this.ctx)
+    const [candidates, workspaces] = await Promise.all([
+      this.collectSessionCandidates(agent, signal, { includePreviews: false }),
+      collectTuiWorkspaceRows(registry.list(), signal),
+    ])
+    signal.throwIfAborted()
+    if (!this.ownsAgent(agent) || this.sessionManagerGeneration !== generation) return
+    const snapshot = this.sessionManager.getSnapshot()
+    if (snapshot?.generation !== generation) return
+    const { error: _error, ...settled } = snapshot
+    this.sessionManager.set({
+      ...settled,
+      phase: 'ready',
+      candidates,
+      workspaces,
+      archivedSessionIds: Object.freeze([...registry.archivedSessionIds]),
+    })
+  }
+
+  private async refreshSessionManager(agent: Agent): Promise<void> {
+    const snapshot = this.sessionManager.getSnapshot()
+    if (snapshot === undefined || !this.ownsAgent(agent)) return
+    this.openSessionManager(agent, snapshot.initialTab)
+    await this.sessionManagerScan?.completion
+  }
+
+  private async updateSessionManagerPreferences(patch: Partial<TuiSettings['sessionManager']>): Promise<void> {
+    const settings = hostSettings(this.ctx)
+    await settings.update(TUI_SETTINGS_NAMESPACE, { sessionManager: patch })
+  }
+
+  private async openPresetManager(agent: Agent): Promise<void> {
+    if (!this.ownsAgent(agent)) return
+    const presets = this.ctx.agentPresets as unknown as TuiAgentPresets | undefined
+    if (presets === undefined) return
+    const currentPresetId = presets.composedPreset(agent.ctx)
+    try {
+      const snapshot = await collectTuiPresetManager(presets, currentPresetId, this.locale)
+      this.presetManagerStore.set(snapshot)
+    } catch {
+      this.presetManagerStore.set(undefined)
+    }
+  }
+
+  private closePresetManager(): void {
+    this.presetManagerStore.set(undefined)
+  }
+
+  private async refreshPresetManager(agent: Agent): Promise<void> {
+    if (this.presetManagerStore.getSnapshot() === undefined || !this.ownsAgent(agent)) return
+    await this.openPresetManager(agent)
+  }
+
+  private async copyPreset(_agent: Agent, sourceId: string, newId: string, displayName?: string): Promise<void> {
+    const presets = this.ctx.agentPresets as unknown as TuiAgentPresets | undefined
+    if (presets === undefined) throw new Error('Agent presets unavailable')
+    await presets.copy(sourceId, newId, displayName)
+  }
+
+  private async deletePreset(_agent: Agent, id: string): Promise<void> {
+    const presets = this.ctx.agentPresets as unknown as TuiAgentPresets | undefined
+    if (presets === undefined) throw new Error('Agent presets unavailable')
+    await presets.remove(id)
+  }
+
+  private async setDefaultPreset(_agent: Agent, id: string, expectedRevision: number | undefined): Promise<void> {
+    const presets = this.ctx.agentPresets as unknown as TuiAgentPresets | undefined
+    if (presets === undefined) throw new Error('Agent presets unavailable')
+    await setTuiDefaultPreset(presets, id, expectedRevision)
+  }
+
+  private async openPresetLocation(agent: Agent, id: string): Promise<void> {
+    const preset = await hostAgentPresets(agent.ctx).resolve(id)
+    await this.openTuiPath(agent, dirname(preset.path))
+  }
+
+  private async openPresetFile(agent: Agent, id: string): Promise<void> {
+    const preset = await hostAgentPresets(agent.ctx).resolve(id)
+    await this.openTuiPath(agent, preset.path)
+  }
+
+  private async refreshFeedback(requestedAgent?: Agent): Promise<void> {
+    const root = requestedAgent ?? this.handle?.agent
+    if (root === undefined) return
+    const sessionId = root.session.id
+    try {
+      const owner = root.ctx.get('messageFeedback')
+      if (owner === undefined) {
+        if (this.handle?.agent === root) this.messageFeedbackStore.set(undefined)
+        return
+      }
+      const result = await owner.list({ sessionId })
+      if (this.handle?.agent === root) this.messageFeedbackStore.set(projectMessageFeedback(sessionId, result))
+    } catch {
+      if (this.handle?.agent === root) this.messageFeedbackStore.set(undefined)
+    }
+  }
+
+  private async submitFeedback(
+    messageId: string, rating: 'positive' | 'negative', note?: string,
+  ): Promise<void> {
+    const root = this.handle?.agent
+    if (root === undefined) return
+    const sessionId = root.session.id
+    const targetMessageId = MessageId(messageId)
+    const generation = ++this.feedbackMutationGeneration
+    try {
+      const owner = root.ctx.get('messageFeedback')
+      if (owner === undefined) {
+        if (this.handle?.agent === root && generation === this.feedbackMutationGeneration) {
+          this.feedbackMutationStore.set({
+            status: 'error', sessionId, targetMessageId, errorCode: 'owner-unavailable',
+          })
+        }
+        return
+      }
+      this.feedbackMutationStore.set({ status: 'pending', sessionId, targetMessageId })
+      const existing = this.messageFeedbackStore.getSnapshot()
+      const item = existing?.sessionId === sessionId
+        ? existing.items.find(i => (i.messageId as string) === messageId)
+        : undefined
+      const result = await owner.put({
+        sessionId,
+        messageId: targetMessageId,
+        rating,
+        ...(note !== undefined ? { note } : {}),
+        ifVersion: item?.version ?? null,
+      })
+      if (this.handle?.agent !== root || generation !== this.feedbackMutationGeneration) return
+      this.feedbackMutationStore.set(processPutResult(result, sessionId, targetMessageId))
+      await this.refreshFeedback(root)
+    } catch {
+      if (this.handle?.agent === root && generation === this.feedbackMutationGeneration) {
+        this.feedbackMutationStore.set({ status: 'error', sessionId, targetMessageId, errorCode: 'unknown' })
+      }
+    }
+  }
+
+  private async clearFeedback(messageId: string): Promise<void> {
+    const root = this.handle?.agent
+    if (root === undefined) return
+    const sessionId = root.session.id
+    const targetMessageId = MessageId(messageId)
+    const generation = ++this.feedbackMutationGeneration
+    try {
+      const owner = root.ctx.get('messageFeedback')
+      if (owner === undefined) {
+        if (this.handle?.agent === root && generation === this.feedbackMutationGeneration) {
+          this.feedbackMutationStore.set({
+            status: 'error', sessionId, targetMessageId, errorCode: 'owner-unavailable',
+          })
+        }
+        return
+      }
+      const existing = this.messageFeedbackStore.getSnapshot()
+      const item = existing?.sessionId === sessionId
+        ? existing.items.find(i => (i.messageId as string) === messageId)
+        : undefined
+      if (item === undefined) {
+        if (this.handle?.agent === root && generation === this.feedbackMutationGeneration) {
+          this.feedbackMutationStore.set({ status: 'success', sessionId, targetMessageId })
+        }
+        return
+      }
+      this.feedbackMutationStore.set({ status: 'pending', sessionId, targetMessageId })
+      const result = await owner.delete({ sessionId, messageId: targetMessageId, ifVersion: item.version })
+      if (this.handle?.agent !== root || generation !== this.feedbackMutationGeneration) return
+      this.feedbackMutationStore.set(processDeleteResult(result, sessionId, targetMessageId))
+      await this.refreshFeedback(root)
+    } catch {
+      if (this.handle?.agent === root && generation === this.feedbackMutationGeneration) {
+        this.feedbackMutationStore.set({ status: 'error', sessionId, targetMessageId, errorCode: 'unknown' })
+      }
+    }
+  }
+
+  private openTrajectory(): void {
+    const root = this.handle?.agent
+    if (root === undefined) return
+    const events = root.session.events
+    const snapshot = this.trajectoryProjection.update(events, this.trajectoryLimit)
+    this.trajectoryStore.set(snapshot)
+  }
+
+  private closeTrajectory(): void {
+    this.trajectoryStore.set(undefined)
+    this.trajectoryLimit = 256
+    this.trajectoryProjection.reset()
+  }
+
+  private loadOlderTrajectory(): void {
+    if (this.trajectoryStore.getSnapshot()?.omitted === 0) return
+    this.trajectoryLimit = Math.min(100_000, this.trajectoryLimit + 256)
+    this.openTrajectory()
+  }
+
+  private openHostPluginCenter(): void {
+    const inventory = this.ctx.get('pluginInventory') as {
+      list(): { entries: readonly import('@deepseek-ai/dsh-host-plugin-inventory/types').PluginInventoryEntry[] }
+    } | undefined
+    const settings = this.ctx.get('settings') as {
+      readonly writable: boolean
+      describe(options?: { redactSecrets?: boolean }): import('@deepseek-ai/dsh-settings').SettingsDescriptor[]
+    } | undefined
+    const options: import('./host-plugin-center.ts').TuiHostPluginCenterCollectOptions = {
+      ...(inventory !== undefined ? { inventory } : {}),
+      ...(settings !== undefined ? { settings } : {}),
+    }
+    const snapshot = collectTuiHostPluginCenter(options, this.locale)
+    this.hostPluginCenterStore.set(snapshot)
+  }
+
+  private closeHostPluginCenter(): void {
+    this.hostPluginCenterStore.set(undefined)
+  }
+
+  private refreshHostPluginCenter(): Promise<void> {
+    if (this.hostPluginCenterStore.getSnapshot() === undefined) return Promise.resolve()
+    this.openHostPluginCenter()
+    return Promise.resolve()
+  }
+
+  private async mutateHostSettings(mutation: TuiHostSettingsMutation): Promise<void> {
+    try {
+      await hostSettings(this.ctx).mutate(mutation.ns, [...mutation.ops], mutation.expectedRevision)
+    } finally {
+      if (this.hostPluginCenterStore.getSnapshot() !== undefined) this.openHostPluginCenter()
+    }
+  }
+
+  private async createManagedWorkspace(agent: Agent, path: string): Promise<void> {
+    const registry = hostWorkspaceRegistry(this.ctx)
+    await registry.create(resolve(agent.session.header.cwd ?? process.cwd(), path))
+    await this.refreshSessionManager(agent)
+  }
+
+  private async renameManagedWorkspace(agent: Agent, row: TuiWorkspaceManagerRow, title: string): Promise<void> {
+    const workspace = hostWorkspaceRegistry(this.ctx).get(row.id)
+    if (workspace === undefined) throw new Error('Workspace was removed before it could be renamed')
+    await workspace.setTitle(title.trim())
+    await this.refreshSessionManager(agent)
+  }
+
+  private async moveManagedWorkspace(
+    agent: Agent,
+    row: TuiWorkspaceManagerRow,
+    direction: -1 | 1,
+  ): Promise<void> {
+    const registry = hostWorkspaceRegistry(this.ctx)
+    const roster = registry.list()
+    const index = roster.findIndex(workspace => workspace.id === row.id)
+    if (index < 0) throw new Error('Workspace was removed before it could be moved')
+    if (direction < 0) {
+      if (index === 0) return
+      await registry.insertBefore(row.id, roster[index - 1]?.id)
+    } else {
+      if (index === roster.length - 1) return
+      await registry.insertBefore(row.id, roster[index + 2]?.id)
+    }
+    await this.refreshSessionManager(agent)
+  }
+
+  private async deleteManagedWorkspace(agent: Agent, row: TuiWorkspaceManagerRow): Promise<void> {
+    await hostWorkspaceRegistry(this.ctx).delete(row.id)
+    await this.refreshSessionManager(agent)
+  }
+
+  private async setManagedSessionArchived(
+    agent: Agent,
+    candidate: TuiResumeCandidate,
+    archived: boolean,
+  ): Promise<void> {
+    const registry = hostWorkspaceRegistry(this.ctx)
+    if (archived) await registry.archiveSession(candidate.record.header.id)
+    else if (typeof registry.unarchiveSession === 'function') {
+      await registry.unarchiveSession(candidate.record.header.id)
+    } else {
+      throw new Error('Session restore is unavailable on this DeepSeek Harness version')
+    }
+    await this.refreshSessionManager(agent)
+  }
+
+  private async renameManagedSession(
+    agent: Agent,
+    candidate: TuiResumeCandidate,
+    title: string,
+  ): Promise<void> {
+    if (!this.ownsAgent(agent)) throw new Error('TUI Session changed before rename')
+    const titles = this.ctx.get('sessionTitle')
+    if (titles === undefined) throw new Error('Session title owner is unavailable')
+    const id = candidate.record.header.id
+    const live = this.ctx.sessions.get(id)
+    if (live !== undefined) {
+      if (live === agent.session && agent.status !== 'idle') throw new Error(`current Agent is ${agent.status}`)
+      titles.rename(live, title)
+      await this.ctx.sessions.flush(live)
+    } else {
+      const persistence = this.ctx.get('sessionPersistence')
+      if (persistence === undefined) throw new Error('Session persistence is unavailable')
+      const preparation = await persistence.prepare(id)
+      const detach = this.ctx.sessions.enter(preparation.session)
+      try {
+        this.ctx.sessions.announce(preparation.session)
+        titles.rename(preparation.session, title)
+        await this.ctx.sessions.flush(preparation.session)
+      } finally {
+        detach()
+        preparation[Symbol.dispose]()
+      }
+    }
+    await this.refreshSessionManager(agent)
+  }
+
+  private async activateManagedResume(agent: Agent, candidate: TuiResumeCandidate): Promise<void> {
+    const dialog = this.sessionManager.getSnapshot()
+    if (dialog?.phase !== 'ready' || !this.ownsAgent(agent) || this.activeAgentSwitch !== undefined) return
+    const current = dialog.candidates?.find(item => item.record.header.id === candidate.record.header.id)
+    if (current === undefined) return
+    if (current.disabledReason !== undefined) {
+      this.sessionManager.set({ ...dialog, error: current.disabledReason })
+      return
+    }
+    if (agent.status !== 'idle') {
+      this.sessionManager.set({ ...dialog, error: tuiMessage(this.locale, 'resume.error.agentBusy', { status: agent.status }) })
+      return
+    }
+    const decision = await this.ctx.tuiExtensions.decide({
+      kind: 'session-switch', sessionId: agent.session.id,
+      targetSessionId: current.record.header.id, operation: 'resume',
+    })
+    if (decision.outcome === 'deny') {
+      this.sessionManager.set({ ...dialog, error: decision.reason ?? tuiMessage(this.locale, 'resume.error.denied') })
+      return
+    }
+    const controller = new AbortController()
+    const { error: _error, ...mutating } = dialog
+    this.sessionManager.set({ ...mutating, phase: 'mutating' })
+    const completion = this.resumeCandidate(agent, current, controller.signal).catch((error: unknown) => {
+      if (controller.signal.aborted || this.isClosing()) return
+      const latest = this.sessionManager.getSnapshot()
+      if (latest?.generation !== dialog.generation) return
+      this.sessionManager.set({ ...latest, phase: 'ready', error: errorChain(error) })
+    })
+    const operation: ActiveAgentSwitch = { kind: 'resume', controller, completion }
+    this.activeAgentSwitch = operation
+    await completion.finally(() => {
+      if (this.activeAgentSwitch === operation) this.activeAgentSwitch = undefined
+    })
+  }
+
+  private async openManagedFork(agent: Agent, candidate: TuiResumeCandidate): Promise<void> {
+    const dialog = this.sessionManager.getSnapshot()
+    if (dialog?.phase !== 'ready' || !this.ownsAgent(agent) || this.activeAgentSwitch !== undefined) return
+    const current = dialog.candidates?.find(item => item.record.header.id === candidate.record.header.id)
+    if (current === undefined) return
+    if (agent.status !== 'idle') throw new Error(`current Agent is ${agent.status}`)
+    if (this.interactions.getSnapshot() !== undefined) throw new Error(tuiMessage(this.locale, 'session.error.interaction'))
+    const id = current.record.header.id
+    const live = this.ctx.sessions.get(id)
+    const source = live === undefined
+      ? await this.ctx.sessionQuery.readSession(id)
+      : { session: live.header, events: live.events }
+    if (source.session.version !== SESSION_FORMAT_VERSION) throw new Error('the source Session format is incompatible')
+    if (source.session.origin === 'subagent') throw new Error('subagent-owned Sessions cannot be forked here')
+    const cwd = source.session.cwd
+    if (cwd === undefined) throw new Error(tuiMessage(this.locale, 'session.error.workspace'))
+    const preset = resolveSessionPreset({ header: source.session, events: source.events })
+    if (preset === undefined) throw new Error(tuiMessage(this.locale, 'rewind.error.preset'))
+    const fallback = this.selection?.current ?? this.modelSelection.getSnapshot()
+    const selection = sessionForkSelection(source.events, fallback)
+    if (selection === undefined) throw new Error(tuiMessage(this.locale, 'session.error.model'))
+    if (!this.ctx.llm.listProviders().some(provider => provider.id === selection.provider)) {
+      throw new Error(`session route is unavailable (${selection.provider}/${selection.model})`)
+    }
+    const candidates = tuiRewindCandidates(source.events)
+    if (candidates.length === 0) throw new Error(tuiMessage(this.locale, 'rewind.turn.none'))
+    this.detachedRewindSource = { id, cwd, events: source.events, selection, preset }
+    this.closeSessionManager()
+    this.rewindDialog.set({
+      generation: ++this.rewindGeneration,
+      phase: 'browsing',
+      currentSessionId: id,
+      candidates,
+    })
+  }
+
+  private currentGoal(agent: Agent): NonNullable<TuiGoalProjection>['goal'] {
+    if (!this.ownsAgent(agent)) throw new Error('TUI Session changed before Goal mutation')
+    const goal = this.goalProjection.getSnapshot()?.goal
+    if (goal === undefined || goal.phase === 'complete') throw new Error(tuiMessage(this.locale, 'goalPlan.goal.none'))
+    return goal
+  }
+
+  private editGoal(agent: Agent, objective: string): Promise<void> {
+    const goal = this.currentGoal(agent)
+    hostGoals(agent).edit(agent, { id: goal.id, revision: goal.revision }, { objective })
+    return Promise.resolve()
+  }
+
+  private pauseGoal(agent: Agent): Promise<void> {
+    const goal = this.currentGoal(agent)
+    hostGoals(agent).pause(agent, { id: goal.id, revision: goal.revision })
+    return Promise.resolve()
+  }
+
+  private resumeGoal(agent: Agent): Promise<void> {
+    const goal = this.currentGoal(agent)
+    hostGoals(agent).resume(agent, { id: goal.id, revision: goal.revision })
+    return Promise.resolve()
+  }
+
+  private clearGoal(agent: Agent): Promise<void> {
+    const goal = this.currentGoal(agent)
+    hostGoals(agent).clear(agent, { id: goal.id, revision: goal.revision })
+    return Promise.resolve()
+  }
+
   private async scanResume(
     agent: Agent,
     generation: number,
     signal: AbortSignal,
   ): Promise<void> {
-    const records = await this.ctx.sessionQuery.listSessions(signal)
+    const candidates = await this.collectSessionCandidates(agent, signal)
     signal.throwIfAborted()
     if (!this.ownsAgent(agent) || this.resumeGeneration !== generation) return
+    this.resumeDialog.set({
+      generation,
+      phase: 'ready',
+      currentWorkspaceLabel: agent.session.header.cwd ?? tuiMessage(this.locale, 'resume.workspace.none'),
+      candidates,
+    })
+  }
+
+  private async collectSessionCandidates(
+    agent: Agent,
+    signal: AbortSignal,
+    options: { readonly includePreviews?: boolean } = {},
+  ): Promise<readonly TuiResumeCandidate[]> {
+    const records = await this.ctx.sessionQuery.listSessions(signal)
+    signal.throwIfAborted()
     const [titles, activity, previews, presetResolutions] = await Promise.all([
       this.resolveResumeTitles(records, signal),
       this.resolveResumeActivity(records, signal),
-      this.resolveResumePreviews(records, signal),
+      options.includePreviews === false
+        ? Promise.resolve<ResumePreviewResolution[]>(records.map(() => ({ lines: [], truncated: false })))
+        : this.resolveResumePreviews(records, signal),
       this.resolveResumePresets(records, signal),
     ])
     signal.throwIfAborted()
-    if (!this.ownsAgent(agent) || this.resumeGeneration !== generation) return
     const candidates = records.map((record, index): TuiResumeCandidate => {
       const resolution = titles[index] as { title?: string; failure?: unknown }
       const previewResolution = previews[index]
@@ -3094,12 +4205,7 @@ class TuiController {
         }),
       }
     })
-    this.resumeDialog.set({
-      generation,
-      phase: 'ready',
-      currentWorkspaceLabel: agent.session.header.cwd ?? tuiMessage(this.locale, 'resume.workspace.none'),
-      candidates: sortTuiResumeCandidates(candidates),
-    })
+    return sortTuiResumeCandidates(candidates)
   }
 
   private async resolveResumePresets(
@@ -3526,7 +4632,13 @@ class TuiController {
     const oldTokenUsage = this.tokenUsage.getSnapshot()
     const oldContextBreakdown = this.contextBreakdown.getSnapshot()
     const oldSessionStats = this.sessionStats.getSnapshot()
+    const oldGoalProjection = this.goalProjection.getSnapshot()
+    const oldPlanProjection = this.planProjection.getSnapshot()
+    const oldGoalPlanProjectionFrame = this.goalPlanProjectionFrame
+    const oldMessageFeedback = this.messageFeedbackStore.getSnapshot()
+    const oldFeedbackMutation = this.feedbackMutationStore.getSnapshot()
     const oldDialog = this.resumeDialog.getSnapshot()
+    const oldSessionManager = this.sessionManager.getSnapshot()
     const oldFreshDialog = this.freshSessionDialog.getSnapshot()
     const oldRewindDialog = this.rewindDialog.getSnapshot()
     const oldExportDialog = this.sessionExportDialog.getSnapshot()
@@ -3545,10 +4657,15 @@ class TuiController {
     this.agentMode.set(prepared.preset)
     this.helpOpen.set(false)
     this.loadedContext.set(undefined)
+    this.providerCenter.set(undefined)
+    this.feedbackMutationGeneration += 1
+    this.messageFeedbackStore.set(undefined)
+    this.feedbackMutationStore.set({ status: 'idle' })
     this.refreshAgentDerivedState(prepared.handle.agent)
     try {
       this.instance.rerender(this.appElement(prepared.handle.agent, nextEvents, nextStatus))
       this.resumeDialog.set(undefined)
+      this.sessionManager.set(undefined)
       this.freshSessionDialog.set(undefined)
       this.rewindDialog.set(undefined)
       this.sessionExportDialog.set(undefined)
@@ -3566,7 +4683,13 @@ class TuiController {
       this.tokenUsage.set(oldTokenUsage)
       this.contextBreakdown.set(oldContextBreakdown)
       this.sessionStats.set(oldSessionStats)
+      this.goalProjection.set(oldGoalProjection)
+      this.planProjection.set(oldPlanProjection)
+      this.goalPlanProjectionFrame = oldGoalPlanProjectionFrame
+      this.messageFeedbackStore.set(oldMessageFeedback)
+      this.feedbackMutationStore.set(oldFeedbackMutation.status === 'pending' ? { status: 'idle' } : oldFeedbackMutation)
       this.resumeDialog.set(oldDialog)
+      this.sessionManager.set(oldSessionManager)
       this.freshSessionDialog.set(oldFreshDialog)
       this.rewindDialog.set(oldRewindDialog)
       this.sessionExportDialog.set(oldExportDialog)
@@ -3574,6 +4697,7 @@ class TuiController {
       throw error
     }
     this.bindWorkRoot(prepared.handle.agent)
+    void this.refreshFeedback(prepared.handle.agent)
     this.scheduleStartupGuidanceRefresh(prepared.selectedModel)
     return oldHandle
   }
@@ -3839,7 +4963,7 @@ class TuiController {
       const controller = new AbortController()
       const command = this.commandForLine(agent, text)
       if (composerAttachments.length > 0 && command !== undefined && !command.acceptsImages) {
-        throw new Error(`/${command.name} does not accept image attachments`)
+        throw new Error(tuiMessage(this.locale, 'attachment.preflight.commandUnsupported', { command: command.name }))
       }
       const completion = (async () => {
         if (composerAttachments.length > 0) {
@@ -3879,9 +5003,13 @@ class TuiController {
     })
     if (inputDecision.outcome === 'deny') throw new Error(inputDecision.reason ?? 'A TUI extension denied this input.')
     let imageBlocks: readonly { type: 'image'; attachment: ImageAttachmentRef }[] = []
-    if (composerAttachments.length > 0) {
+    if (composerAttachments.length > 0 || text.includes('dsh-session:')) {
       const controller = new AbortController()
       const completion = (async () => {
+        await preflightTuiReferenceText(text, (value, signal) => (
+          hostSessionReferences(this.ctx).validateText(agent, value, signal)
+        ), controller.signal)
+        if (composerAttachments.length === 0) return []
         this.assertImageAttachmentLimits(composerAttachments)
         await this.assertImageCapableRoute(agent, controller.signal)
         return composerAttachments.map(item => ({ type: 'image' as const, attachment: item.ref }))
@@ -3932,9 +5060,13 @@ class TuiController {
     })
     if (inputDecision.outcome === 'deny') throw new Error(inputDecision.reason ?? 'A TUI extension denied this input.')
     let imageBlocks: readonly { type: 'image'; attachment: ImageAttachmentRef }[] = []
-    if (composerAttachments.length > 0) {
+    if (composerAttachments.length > 0 || text.includes('dsh-session:')) {
       const preflight = new AbortController()
       const completion = (async () => {
+        await preflightTuiReferenceText(text, (value, signal) => (
+          hostSessionReferences(this.ctx).validateText(view.agent, value, signal)
+        ), preflight.signal)
+        if (composerAttachments.length === 0) return []
         this.assertImageAttachmentLimits(composerAttachments)
         await this.assertImageCapableRoute(view.agent, preflight.signal)
         return composerAttachments.map(item => ({ type: 'image' as const, attachment: item.ref }))
@@ -4002,11 +5134,16 @@ class TuiController {
     this.diagnostics.set(undefined)
     this.loadedContext.set(undefined)
     this.startupGuidance.set(undefined)
+    this.goalProjection.set(undefined)
+    this.planProjection.set(undefined)
     const activeCommand = this.activeCommand
     const startupGuidanceRefresh = this.startupGuidanceRefresh
     const activeSessionExport = this.activeSessionExport
     const pluginHubOperation = this.pluginHubOperation
+    const providerCenterRefresh = this.providerCenterRefresh
+    const providerCenterOperation = this.providerCenterOperation
     const resumeScan = this.resumeScan
+    const sessionManagerScan = this.sessionManagerScan
     const activeAgentSwitch = this.activeAgentSwitch
     const workRefresh = this.workRefresh
     const externalEditor = this.externalEditor
@@ -4018,7 +5155,12 @@ class TuiController {
     this.exitAfterCommand = undefined
     this.activeSessionExport = undefined
     this.pluginHubOperation = undefined
+    this.providerCenterRefresh = undefined
+    this.providerCenterOperation = undefined
     this.resumeScan = undefined
+    this.sessionManagerScan = undefined
+    if (this.sessionManagerRefreshTimer !== undefined) clearTimeout(this.sessionManagerRefreshTimer)
+    this.sessionManagerRefreshTimer = undefined
     this.activeAgentSwitch = undefined
     this.workRefresh = undefined
     this.externalEditor = undefined
@@ -4028,17 +5170,23 @@ class TuiController {
     startupGuidanceRefresh?.controller.abort(new Error('TUI startup guidance refresh cancelled during shutdown'))
     activeSessionExport?.controller.abort(new Error('TUI Session export cancelled during shutdown'))
     pluginHubOperation?.controller.abort(new Error('TUI Plugin Hub request cancelled during shutdown'))
+    providerCenterRefresh?.controller.abort(new Error('TUI Provider Center refresh cancelled during shutdown'))
+    providerCenterOperation?.controller.abort(new Error('TUI Provider Center authentication cancelled during shutdown'))
     resumeScan?.controller.abort(new Error('TUI Session scan cancelled during shutdown'))
+    sessionManagerScan?.controller.abort(new Error('TUI Session Manager scan cancelled during shutdown'))
     activeAgentSwitch?.controller.abort(new Error('TUI Agent switch cancelled during shutdown'))
     workRefresh?.controller.abort(new Error('TUI work catalog refresh cancelled during shutdown'))
     externalEditor?.controller.abort(new Error('TUI external editor cancelled during shutdown'))
     updateCheck?.controller.abort(new Error('TUI update check cancelled during shutdown'))
     themeLoad?.controller.abort(new Error('TUI custom theme load cancelled during shutdown'))
     this.resumeDialog.set(undefined)
+    this.sessionManager.set(undefined)
     this.freshSessionDialog.set(undefined)
     this.rewindDialog.set(undefined)
+    this.detachedRewindSource = undefined
     this.sessionExportDialog.set(undefined)
     this.pluginHubDialog.set(undefined)
+    this.providerCenter.set(undefined)
     this.activeView = undefined
     this.disposers.approval?.()
     this.disposers.helpCommand?.()
@@ -4052,6 +5200,7 @@ class TuiController {
     this.disposers.tipsCommand?.()
     this.disposers.btwCommand?.()
     this.disposers.workspaceCommand?.()
+    this.disposers.sessionsCommand?.()
     this.disposers.langCommand?.()
     this.disposers.resumeCommand?.()
     this.disposers.clearCommand?.()
@@ -4067,6 +5216,9 @@ class TuiController {
     this.disposers.modelsCommand?.()
     this.disposers.modeCommand?.()
     this.disposers.llmAdaptersUpdated?.()
+    this.disposers.settingsDocumentUpdated?.()
+    this.disposers.credentialsUpdated?.()
+    this.disposers.workspaceChanged?.()
     this.disposeWorkRootBindings()
     this.disposers.agentDisposed?.()
     this.disposers.agentCreated?.()
@@ -4081,7 +5233,10 @@ class TuiController {
       startupGuidanceRefresh?.completion.catch(() => undefined),
       activeSessionExport?.completion.catch(() => undefined),
       pluginHubOperation?.completion.catch(() => undefined),
+      providerCenterRefresh?.completion.catch(() => undefined),
+      providerCenterOperation?.completion.catch(() => undefined),
       resumeScan?.completion.catch(() => undefined),
+      sessionManagerScan?.completion.catch(() => undefined),
       activeAgentSwitch?.completion.catch(() => undefined),
       workRefresh?.completion.catch(() => undefined),
       externalEditor?.completion.catch(() => undefined),
@@ -4110,6 +5265,23 @@ function resumeRoute(events: readonly SessionEvent[]): { provider: string; model
   return assistant?.type === 'assistant/message'
     ? { provider: assistant.data.message.source.provider, model: assistant.data.message.source.model }
     : undefined
+}
+
+function sessionForkSelection(
+  events: readonly SessionEvent[],
+  fallback: ModelSelection | undefined,
+): ModelSelection | undefined {
+  const header = events.findLast(event => event.type === 'request/header')
+  if (header?.type === 'request/header') {
+    const config = header.data.header.config
+    return {
+      provider: config.provider,
+      model: config.model,
+      ...config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort },
+    }
+  }
+  const route = resumeRoute(events)
+  return route ?? fallback
 }
 
 function isSessionDescendantOf(
@@ -4149,6 +5321,8 @@ export type {
   TranscriptTodoNode, TranscriptToolGroupNode, TranscriptToolNode,
 } from './transcript.ts'
 export { foldTranscript, TuiTranscriptProjectionCache } from './transcript.ts'
+export { TuiAppendOnlySessionWindow } from './session-window.ts'
+export type { TuiSessionWindowUpdate } from './session-window.ts'
 export type { TuiKnownSessionEventRenderer } from './transcript.ts'
 export { TuiTranscriptDetailCache, tuiTranscriptDetailText } from './detail.ts'
 export {
@@ -4178,7 +5352,7 @@ export { TuiExtensionGrantLedger } from './grant-ledger.ts'
 export type { TuiGrantIdentity, TuiGrantLedgerRecord, TuiGrantRef, TuiManagedCapability } from './grant-ledger.ts'
 export {
   DEFAULT_TUI_SETTINGS, resolveTuiTheme, TUI_ACTIVITY_PREFERENCES, TUI_SETTINGS_NAMESPACE, TUI_SETTINGS_SCHEMA,
-  TUI_MOUSE_PREFERENCES, TUI_THEME_PREFERENCES, TuiThemeProvider, useTuiTheme,
+  TUI_MOUSE_PREFERENCES, TUI_PROVIDER_ONBOARDING_VERSION, TUI_THEME_PREFERENCES, TuiThemeProvider, useTuiTheme,
 } from './theme.tsx'
 export type {
   TuiActivityPreference, TuiCustomThemeDefinition, TuiMousePreference, TuiResolvedThemePreference,
@@ -4245,6 +5419,10 @@ export type {
   TuiPathSuggestionQuery, TuiSuggestionAcceptance, TuiSuggestionItem, TuiSuggestionKind, TuiSuggestionState,
   TuiSuggestionStatus,
 } from './suggestion.ts'
+export {
+  collectTuiReferenceResolution, preflightTuiReferenceText, tuiReferenceQuery, tuiReferenceSuggestionState,
+} from './references.ts'
+export type { TuiReferenceProviders, TuiReferenceQuery, TuiReferenceResolution } from './references.ts'
 export {
   effectiveTuiInteractionDescriptors, matchTuiInteractionAction, resolveTuiInteractionContext,
   resolveTuiInteractionRegistry, TUI_INTERACTION_ACTION_IDS, TUI_INTERACTION_CONTEXT_PRIORITY,
@@ -4321,12 +5499,52 @@ export type {
 } from './selection.ts'
 export {
   TuiPointerRegionRegistry, tuiApprovalPointerRegions, tuiFooterPointerRegions, tuiModalClosePointerRegions,
-  tuiPluginHubPointerRegions, tuiQuestionPointerRegions, tuiResumePointerRegions, tuiSuggestionPointerRegions,
+  tuiGoalPlanDialogPointerRegions, tuiGoalPlanPointerRegions,
+  tuiPluginHubPointerRegions, tuiProviderPointerRegions, tuiQuestionPointerRegions, tuiQueuePointerRegions,
+  tuiResumePointerRegions, tuiSessionManagerPointerRegions, tuiSuggestionPointerRegions,
   tuiWorkPointerRegions,
 } from './pointer.ts'
+export {
+  createTuiGoalPlanProjectionFrame, effectiveTuiPlanTarget, projectTuiGoalPlan,
+  tuiGoalPlanMutationErrorMessage, updateTuiGoalPlanProjectionFrame,
+} from './goal-plan.ts'
+export type { TuiGoalPlanProjectionFrame, TuiGoalPlanSurface } from './goal-plan.ts'
+export { projectTuiDeliverables } from './deliverables.ts'
+export type { TuiDeliverableItem, TuiDeliverableOperation, TuiDeliverableSnapshot } from './deliverables.ts'
+export {
+  collectTuiPresetManager, copyTuiPreset, deleteTuiPreset,
+  readTuiPresetComposition, setTuiDefaultPreset, tuiPresetMutationErrorMessage,
+  TuiPresetIdError, validateTuiPresetId,
+} from './preset-manager.ts'
 export type {
-  TuiApprovalPointerOptions, TuiPluginHubPointerOptions, TuiPointerAction, TuiPointerHit, TuiPointerPoint,
-  TuiPointerRect, TuiPointerRegion, TuiQuestionPointerOptions, TuiResumePointerOptions,
+  TuiPresetCopyResult, TuiPresetCompositionPreview,
+  TuiPresetManagerRow, TuiPresetManagerSnapshot,
+} from './preset-manager.ts'
+export {
+  collectTuiHostPluginCenter, filterTuiHostPlugins, planTuiHostSettingsMutation,
+  tuiHostSettingsErrorMessage,
+} from './host-plugin-center.ts'
+export type {
+  TuiHostPluginRow, TuiHostSettingsField, TuiHostSettingsMutation, TuiHostSettingsRow,
+  TuiHostPluginCenterSnapshot, TuiHostPluginCenterCollectOptions,
+  TuiHostPluginFilter,
+} from './host-plugin-center.ts'
+export {
+  createTuiTrajectoryTimelineScale, formatTuiTrajectoryTimeline,
+  projectTuiTrajectory, TuiTrajectoryProjectionCache, formatTrajectoryDuration,
+  reconcileTuiTrajectorySelection, trajectoryKindLabel, trajectoryTimingFacts,
+} from './trajectory.ts'
+export type {
+  TuiTrajectoryKind, TuiTrajectoryEntry,
+  TuiTrajectorySnapshot, TuiTrajectoryTimelineScale, TuiTrajectoryTimingFacts,
+} from './trajectory.ts'
+export type {
+  TuiApprovalPointerOptions, TuiHostPluginCenterPointerOptions,
+  TuiTrajectoryPointerOptions,
+  TuiPluginHubPointerOptions, TuiPointerAction, TuiPointerHit, TuiPointerPoint,
+  TuiPointerRect, TuiPointerRegion, TuiPresetManagerPointerOptions,
+  TuiProviderPointerOptions, TuiQuestionPointerOptions, TuiQueuePointerOptions,
+  TuiResumePointerOptions, TuiSessionManagerPointerOptions,
   TuiSuggestionPointerOptions, TuiModalClosePointerOptions,
 } from './pointer.ts'
 export { TuiTerminalInputDecoder, tuiTerminalMouseReportKind } from './terminal-input.ts'
@@ -4345,3 +5563,40 @@ export { inspectTuiStartupProvider, projectTuiStartupGuidance } from './startup-
 export type {
   TuiStartupGuidanceLine, TuiStartupGuidanceSnapshot, TuiStartupProviderInspector, TuiStartupProviderState,
 } from './startup-guidance.ts'
+export {
+  canRemoveTuiProvider, collectTuiProviderCenter, createTuiCustomProvider, deriveTuiProviderCredentialRef,
+  discoverTuiCustomProviderModels, saveTuiProviderApiKey,
+  formatTuiProviderModelDrafts, parseTuiProviderModelDrafts,
+  removeTuiProviderProfile, saveTuiProviderEndpoint, saveTuiProviderProfile,
+  TuiProviderApiKeyError, TuiProviderEndpointError, TuiProviderProfileError, TuiProviderRemoveError,
+  TuiCustomProviderError, tuiProviderOnboardingReadiness,
+  validateTuiProviderApiKey, validateTuiProviderEndpoint,
+} from './provider-center.ts'
+export type {
+  TuiCustomProviderDraft, TuiCustomProviderErrorCode, TuiCustomProviderModelDraft, TuiCustomProviderWriters,
+  TuiProviderApiKeyErrorCode, TuiProviderApiKeyWriters, TuiProviderEndpointErrorCode,
+  TuiProviderAuthenticationMethod, TuiProviderAuthenticationState, TuiProviderCenterCollectOptions,
+  TuiProviderCenterCredentialInspector, TuiProviderCenterDialogSnapshot, TuiProviderCenterLlmInspector, TuiProviderCenterRow,
+  TuiProviderCenterSettingsInspector, TuiProviderCenterSnapshot, TuiProviderCreationTarget, TuiProviderCredentialSnapshot,
+  TuiProviderEditableProfileSnapshot, TuiProviderModelDiscovery,
+  TuiProviderOnboardingReadiness,
+  TuiProviderProfileDraft, TuiProviderProfileErrorCode, TuiProviderProfileWriter,
+  TuiProviderRemoveErrorCode, TuiProviderSettingsSnapshot,
+} from './provider-center.ts'
+export {
+  deleteTuiQueueItem, editTuiQueueItem, formatTuiQueueAge, projectTuiQueue, readTuiQueue,
+} from './queue.ts'
+export type {
+  TuiInboxMutationResult, TuiInboxPendingItem, TuiInboxSnapshot, TuiQueueItem, TuiQueueSnapshot,
+} from './queue.ts'
+export {
+  collectTuiWorkspaceRows, projectTuiSessionManager,
+} from './session-manager.ts'
+export type {
+  TuiSessionArchiveFilter, TuiSessionManagerDialogSnapshot, TuiSessionManagerProjection,
+  TuiSessionManagerRow, TuiWorkspaceManagerRow,
+} from './session-manager.ts'
+export { projectTuiDirectoryBrowser } from './directory-browser.ts'
+export type {
+  TuiDirectoryBrowserPage, TuiDirectoryBrowserRow,
+} from './directory-browser.ts'

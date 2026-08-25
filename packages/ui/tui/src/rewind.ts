@@ -24,7 +24,7 @@ export interface TuiRewindDialogSnapshot {
   readonly generation: number
   /** Command-audit settlement, selection, or child preparation phase. */
   readonly phase: 'opening' | 'browsing' | 'rewinding'
-  /** Parent Session that remains active until replacement commits. */
+  /** Source Session whose durable events seed the child. */
   readonly currentSessionId: SessionId
   /** Newest-first completed human boundaries, present after audit settlement. */
   readonly candidates?: readonly TuiRewindCandidate[]

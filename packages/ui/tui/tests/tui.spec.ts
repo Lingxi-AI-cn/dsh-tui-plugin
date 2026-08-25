@@ -46,7 +46,8 @@ import {
   resolveTuiTheme, TUI_ACTIVITY_PREFERENCES, TUI_MOUSE_PREFERENCES, TUI_SETTINGS_SCHEMA, TUI_THEME_PREFERENCES,
 } from '../src/index.ts'
 import {
-  inputCursorTarget, toggleTuiTranscriptFocus, tuiPluginHubDetailTextStyle, tuiStartupComposerFrame, tuiWorkingFrame,
+  inputCursorTarget, toggleTuiTranscriptFocus, tuiFooterItemsOwnPointerRow, tuiFullscreenFooterLine,
+  tuiPluginHubDetailTextStyle, tuiStartupComposerFrame, tuiWorkingFrame,
 } from '../src/app.tsx'
 import {
   resolveTuiStartupLogoVariant, TUI_STARTUP_LOGO_HEIGHT,
@@ -148,12 +149,20 @@ describe('semantic terminal themes', () => {
     expect(TUI_MOUSE_PREFERENCES).toEqual(['auto', 'off'])
     expect(TUI_SETTINGS_SCHEMA({} as never)).toEqual({
       theme: 'auto', locale: 'en', mouse: 'auto', activity: 'dots', keybindings: {},
+      sessionManager: { scope: 'workspace', archive: 'active', sort: 'updated-desc', groupByWorkspace: true },
     })
     expect(TUI_SETTINGS_SCHEMA({ theme: 'dark', mouse: 'off' } as never))
-      .toEqual({ theme: 'dark', locale: 'en', mouse: 'off', activity: 'dots', keybindings: {} })
+      .toEqual({
+        theme: 'dark', locale: 'en', mouse: 'off', activity: 'dots', keybindings: {},
+        sessionManager: { scope: 'workspace', archive: 'active', sort: 'updated-desc', groupByWorkspace: true },
+      })
     expect(TUI_SETTINGS_SCHEMA({ themeFile: 'nord.json', activity: 'pulse' } as never)).toMatchObject({
       themeFile: 'nord.json', activity: 'pulse',
     })
+    expect(TUI_SETTINGS_SCHEMA({ providerOnboardingVersion: 1 } as never)).toMatchObject({
+      providerOnboardingVersion: 1,
+    })
+    expect(() => TUI_SETTINGS_SCHEMA({ providerOnboardingVersion: 0 } as never)).toThrow()
     expect(() => TUI_SETTINGS_SCHEMA({ themeFile: '../nord.json' } as never)).toThrow()
     expect(() => TUI_SETTINGS_SCHEMA({ activity: 'spin' } as never)).toThrow()
     expect(() => TUI_SETTINGS_SCHEMA({ theme: 'solarized' } as never)).toThrow()
@@ -1644,6 +1653,37 @@ describe('TUI working indicator', () => {
   })
 })
 
+describe('TUI global footer pointer ownership', () => {
+  it('publishes footer-item hit targets only while their status row is rendered', () => {
+    const visible = {
+      workOpen: false,
+      footerDetail: false,
+      footerSelection: false,
+      notice: false,
+      externalNotice: false,
+      runningDeliveryHint: false,
+      rewindBrowsing: false,
+      helpVisible: false,
+      transcriptSearch: false,
+      historySearch: false,
+      focus: false,
+    }
+    expect(tuiFooterItemsOwnPointerRow(visible)).toBe(true)
+    for (const key of Object.keys(visible) as (keyof typeof visible)[]) {
+      expect(tuiFooterItemsOwnPointerRow({ ...visible, [key]: true }), key).toBe(false)
+    }
+  })
+
+  it('retains extension fullscreen hints while exposing exactly one Host close label', () => {
+    expect(tuiFullscreenFooterLine(undefined, 'Esc close')).toBe('Esc close')
+    expect(tuiFullscreenFooterLine('  ', 'Esc close')).toBe('Esc close')
+    expect(tuiFullscreenFooterLine('Arrows navigate', 'Esc close'))
+      .toBe('Arrows navigate · Esc close')
+    expect(tuiFullscreenFooterLine('Arrows navigate · Esc close', 'Esc close'))
+      .toBe('Arrows navigate · Esc close')
+  })
+})
+
 describe('TUI transcript pointer focus', () => {
   it('opens a clicked row directly and closes the same row on a second click', () => {
     const detail = toggleTuiTranscriptFocus(undefined, 'event:4', 3)
@@ -2357,10 +2397,13 @@ describe('TUI interaction bindings', () => {
       'ctrl+v': { input: '\u0016', key: {} },
       'ctrl+k': { input: 'k', key: { ctrl: true } },
       'ctrl+p': { input: 'p', key: { ctrl: true } },
+      'ctrl+q': { input: '\u0011', key: {} },
       'ctrl+space': { input: ' ', key: { ctrl: true } },
       'ctrl+t': { input: 't', key: { ctrl: true } },
       r: { input: 'r', key: {} },
+      l: { input: 'l', key: {} },
       'meta+p': { input: 'p', key: { meta: true } },
+      'meta+g': { input: 'g', key: { meta: true } },
       'meta+r': { input: 'r', key: { meta: true } },
       'shift+s': { input: 'S', key: { shift: true } },
       'shift+c': { input: 'C', key: { shift: true } },
@@ -2378,7 +2421,9 @@ describe('TUI interaction bindings', () => {
       n: { input: 'n', key: {} },
       x: { input: 'x', key: {} },
     }
-    const event = events[sequence]
+    const event = events[sequence] ?? (/^[a-z]$/u.test(sequence)
+      ? { input: sequence, key: {} }
+      : undefined)
     if (event === undefined) throw new Error(`No test keypress for ${sequence}`)
     return event
   }

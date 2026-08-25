@@ -2,14 +2,14 @@
 
 English | [中文](README.zh.md)
 
-The post-install native terminal bundle over the official `dsh-base` profile. Its patch removes the base process-wide Agent plane, mounts the official preset roster plus the Host-side Code Mode and Cordis runners, and keeps surface services such as the durable Session projection cache, native Session archive writer, provider-neutral Plugin Hub service, and trusted local [`@lingxi-ai-cn/dsh-plugin-hub-local`](../../interaction/plugin-hub-local/README.md) provider on the Host plane. It parses `dsh --profile tui [--resume <session-id>]` and activates [`@lingxi-ai-cn/dsh-tui-runtime`](../../ui/tui/README.md). It mounts no Web server, API Proxy, browser runtime, Workspace UI, or Agent installation tool. The package provides no global binary and does not modify the installed DSH application.
+The post-install native terminal bundle over the official `dsh-base` profile. Its patch removes the base process-wide Agent plane, mounts the official preset roster plus the Host-side Code Mode and Cordis runners, and keeps terminal-neutral owners such as Workspace, Session/file references, durable projection cache, bounded directory picker, message feedback, Host plugin inventory, native Session archive writer, provider-neutral Plugin Hub service, and trusted local [`@lingxi-ai-cn/dsh-plugin-hub-local`](../../interaction/plugin-hub-local/README.md) provider on the Host plane. It parses `dsh --profile tui [--resume <session-id>]` and activates [`@lingxi-ai-cn/dsh-tui-runtime`](../../ui/tui/README.md). It mounts no Web server, API Proxy, browser runtime, Workspace UI, or Agent installation tool. The package provides no global binary and does not modify the installed DSH application.
 
 ## Install and run
 
 Install the exact TUI release into a profile owned by an already installed matching DSH release, then launch that profile through the existing `dsh` binary:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
 dsh --profile tui
 ```
 
@@ -18,7 +18,7 @@ This install contract assumes that official DSH initializes a fresh `tui` profil
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.4-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
 ```
 
 Sessions and credentials are stored outside the profile directory and are not removed by this migration. Review and reapply any user-authored profile patch instead of copying the old profile directory back wholesale.
@@ -44,7 +44,7 @@ The TUI consumes the same dynamic `ctx.agentPresets` roster and durable Session 
 | Minimal | `minimal` | The official fixed prompt with exactly persistent `bash` and `str_replace_editor`. |
 | Creator | `cordis` | Standard capabilities plus runtime inspection, plugin experiments, and preset-authoring guidance. |
 
-`/mode` and the actionable footer list these system presets plus healthy user presets from `$DSH_HOME/.agent-presets`. A blank Session switches in place through the official recompose transaction and records `agent-preset/selected` only after the new composition commits. Once a `turn/start` exists, selecting another mode opens the existing fresh-Session confirmation; cancellation keeps the current Agent, transcript, draft, and footer unchanged, while confirmation creates a new Session under the selected preset and leaves the old Session resumable. `/new`, `/clear`, and `/rewind` inherit the current Session's effective preset. Missing or broken presets stay visible but disabled, and this bundle does not add preset copy, edit, or delete UI.
+`/mode` and the actionable footer list these system presets plus healthy user presets from `$DSH_HOME/.agent-presets`. A blank Session switches in place through the official recompose transaction and records `agent-preset/selected` only after the new composition commits. Once a `turn/start` exists, selecting another mode opens the existing fresh-Session confirmation; cancellation keeps the current Agent, transcript, draft, and footer unchanged, while confirmation creates a new Session under the selected preset and leaves the old Session resumable. `/new`, `/clear`, and `/rewind` inherit the current Session's effective preset. `/presets` adds atomic copy, inspection, Host-open, user-owned deletion, and future-default selection when the preset owner exposes its settings compare-and-set seam; missing or broken presets remain visible but disabled.
 
 ## Model Experience
 
@@ -64,7 +64,7 @@ The static section sits near the system prompt head and remains unchanged across
 
 ## Known Limitations and Deferred Work
 
-- **No preset authoring UI** — `/mode` selects installed healthy presets, but copy, edit, delete, and Creator-specific authoring controls remain on the official preset mechanisms and Web surface.
+- **Preset source editing uses the Host** — the manager handles default selection, copy, inspection, and deletion but opens composition files through the Host instead of embedding a YAML editor.
 - **TUI-only Codex login** — the public bundle adds native ChatGPT OAuth and account model discovery; the Web Models page does not run this login flow.
 - **Plugin changes use the external CLI** — official DSH `0.1.0-rc.8` has no generic pre-composition recovery hook, so the published TUI does not activate its downstream-only in-process profile swap.
 - **TTY-only application** — redirected stdin or stdout fails before activation; unattended automation uses the headless profile.

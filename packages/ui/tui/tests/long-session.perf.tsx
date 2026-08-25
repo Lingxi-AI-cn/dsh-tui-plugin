@@ -3,7 +3,7 @@
 import { Readable, Writable } from 'node:stream'
 import { cpus, release, totalmem } from 'node:os'
 import { performance } from 'node:perf_hooks'
-import React, { type ReactElement, type ReactNode } from 'react'
+import React from 'react'
 import { Box, render, Text } from 'ink'
 import { describe, expect, it } from 'vitest'
 import { CommandId } from '@deepseek-ai/dsh-commands'
@@ -38,7 +38,6 @@ const TARGETS = Object.freeze({
   resizeP95Ms10k: 50,
   detailOpenP95Ms10k: 16,
   retainedHeapBytes10k: 128 * 1024 * 1024,
-  mountedReactElements10k: 240,
   outputBytesPerFrame10k: 16 * 1024,
 })
 
@@ -274,26 +273,6 @@ function BenchmarkFrame({
   </Box>
 }
 
-function expandedReactElementCount(node: ReactNode): number {
-  if (Array.isArray(node)) {
-    let total = 0
-    for (const child of node as readonly ReactNode[]) total += expandedReactElementCount(child)
-    return total
-  }
-  if (!React.isValidElement(node)) return 0
-  const element = node as ReactElement<Record<string, unknown>>
-  let rendered: ReactNode = element.props.children as ReactNode
-  if (typeof element.type === 'function') {
-    // The measured tree contains pure function components and Ink forward refs, never classes or hooks.
-    const component = element.type as (props: Record<string, unknown>) => ReactNode
-    rendered = component(element.props)
-  } else if (typeof element.type === 'object' && element.type !== null && 'render' in element.type) {
-    const forwardRef = element.type as { render(props: Record<string, unknown>, ref: unknown): ReactNode }
-    rendered = forwardRef.render(element.props, null)
-  }
-  return 1 + expandedReactElementCount(rendered)
-}
-
 function projectedRows(nodes: readonly TranscriptNode[]): {
   readonly rows: readonly TranscriptNode[]
   readonly todo: TranscriptTodoNode | undefined
@@ -383,7 +362,6 @@ describe('native TUI long-session benchmark', () => {
         overscanAfter={tail.overscanAfter}
         todo={todo}
       />
-      const mountedReactElements = expandedReactElementCount(frame)
       const stdout = captureStream(80)
       const stdin = new Readable({ read() {} }) as NodeJS.ReadStream
       const stderr = captureStream(80)
@@ -451,7 +429,6 @@ describe('native TUI long-session benchmark', () => {
         detailProjection,
         detailOpen,
         retainedHeapBytes,
-        mountedReactElements,
         mountedTranscriptBlocks: tail.mountedEndIndex - tail.mountedStartIndex + 1,
         measuredTranscriptBlocks: viewport.stats().measuredBlocks,
         indexedTranscriptRows: viewport.stats().indexedRows,

@@ -8,7 +8,9 @@ import {
   hostAuthentication,
   hostCompletePaths,
   hostLogin,
+  hostLogout,
   hostReadSessionPreview,
+  hostSessionReferences,
   resolveSessionForkAnchor,
   TuiHostCommandCatalog,
 } from '../src/host.ts'
@@ -22,6 +24,7 @@ describe('optional Host compatibility', () => {
       prompt: () => Promise.resolve('unused'),
       notify: () => {},
     })).rejects.toThrow('does not expose interactive provider authentication')
+    await expect(hostLogout(llm, 'legacy')).rejects.toThrow('does not expose provider logout')
   })
 
   it('delegates authentication only when the Host advertises the newer seam', async () => {
@@ -30,12 +33,28 @@ describe('optional Host compatibility', () => {
       methods: [{ id: 'oauth', name: 'Sign in' }],
     }))
     const login = vi.fn(() => Promise.resolve())
-    const llm = { authentication, login } as unknown as LlmRuntime
+    const logout = vi.fn(() => Promise.resolve())
+    const llm = { authentication, login, logout } as unknown as LlmRuntime
     await expect(hostAuthentication(llm, 'codex')).resolves.toMatchObject({ configured: false })
     const interaction = { prompt: () => Promise.resolve('code'), notify: () => {} }
     await expect(hostLogin(llm, 'codex', 'oauth', interaction)).resolves.toBeUndefined()
     expect(authentication).toHaveBeenCalledWith('codex')
     expect(login).toHaveBeenCalledWith('codex', 'oauth', interaction)
+    await expect(hostLogout(llm, 'codex')).resolves.toBeUndefined()
+    expect(logout).toHaveBeenCalledWith('codex')
+  })
+
+  it('normalizes official rc.8 Session reference timestamps and treats preflight as optional', async () => {
+    const listCandidates = vi.fn(async () => [{
+      sessionId: 'session-one', label: 'Earlier', cwd: '/workspace', createdAt: 42,
+    }])
+    const references = hostSessionReferences({
+      get: (name: string) => name === 'sessionReferenceResolver' ? { listCandidates } : undefined,
+    } as never)
+    await expect(references.listCandidates({} as never)).resolves.toEqual([{
+      sessionId: 'session-one', label: 'Earlier', cwd: '/workspace', createdAt: 42, updatedAt: 42,
+    }])
+    await expect(references.validateText({} as never, 'plain')).resolves.toEqual([])
   })
 
   it('uses bounded legacy filesystem primitives when Host completion is absent', async () => {

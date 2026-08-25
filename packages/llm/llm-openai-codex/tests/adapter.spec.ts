@@ -54,6 +54,7 @@ describe('OpenAICodexAdapter', () => {
       configured: true,
       source: 'OAuth',
       methods: [{ id: 'oauth', name: 'Sign in with ChatGPT' }],
+      canLogout: true,
     })
     expect(await adapter.listModels('openai-codex')).toEqual([{
       provider: 'openai-codex', id: 'gpt-account', name: 'GPT Account',
@@ -109,24 +110,28 @@ describe('OpenAICodexAdapter', () => {
     const legacyHost: {
       authentication?: (provider: string) => Promise<unknown>
       login?: (provider: string, method: string, interaction: never) => Promise<void>
+      logout?: (provider: string) => Promise<void>
     } = {}
     const dispose = installOpenAICodexRc8AuthenticationBridge(legacyHost, adapter)
 
     await expect(legacyHost.authentication?.('openai-codex')).resolves.toMatchObject({
       configured: false,
       methods: [{ id: 'oauth', name: 'Sign in with ChatGPT' }],
+      canLogout: true,
     })
     await expect(legacyHost.authentication?.('deepseek-official')).resolves.toEqual({ configured: true, methods: [] })
     await expect(legacyHost.login?.('deepseek-official', 'oauth', undefined as never)).rejects.toMatchObject({
       code: 'AUTH_UNSUPPORTED',
     })
+    await expect(legacyHost.logout?.('deepseek-official')).rejects.toMatchObject({ code: 'AUTH_UNSUPPORTED' })
     dispose?.()
     expect(legacyHost).toEqual({})
 
     const authentication = vi.fn(() => Promise.resolve({ configured: true, methods: [] }))
     const login = vi.fn(() => Promise.resolve())
-    const newerHost = { authentication, login }
+    const logout = vi.fn(() => Promise.resolve())
+    const newerHost = { authentication, login, logout }
     expect(installOpenAICodexRc8AuthenticationBridge(newerHost, adapter)).toBeUndefined()
-    expect(newerHost).toEqual({ authentication, login })
+    expect(newerHost).toEqual({ authentication, login, logout })
   })
 })

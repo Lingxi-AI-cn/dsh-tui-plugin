@@ -118,6 +118,7 @@ function head(text: string, rows: number, width: number): string {
 
 function nodeRows(node: TranscriptNode, width: number, projectedText?: string): number {
   if (node.kind === 'tool') return 1
+  if (node.kind === 'deliverables') return 1
   if (node.kind === 'compaction') {
     return 1 + (node.summary === undefined ? 0 : 1) + (node.error === undefined ? 0 : 1)
   }
@@ -242,6 +243,15 @@ export function selectTranscriptWindow(
       if (required <= remaining) {
         selected.push({ node })
         remaining -= required
+        continue
+      }
+      break
+    }
+
+    if (node.kind === 'deliverables') {
+      if (remaining >= 1) {
+        selected.push({ node })
+        remaining -= 1
         continue
       }
       break

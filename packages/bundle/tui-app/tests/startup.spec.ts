@@ -72,6 +72,14 @@ describe('TUI bundle plugin', () => {
   it('ships the verified read-only Plugin Hub registry and trust root', () => {
     const patches = loadOverlayPatches('tui-app test', fileURLToPath(new URL('../cordis.patch.yml', import.meta.url)))
     const rows = patches.flatMap(patch => patch.insert ?? [])
+    expect(rows.find(row => row.id === 'message-feedback')).toMatchObject({
+      name: '@deepseek-ai/dsh-message-feedback', config: { maxNoteBytes: 4096 },
+    })
+    expect(rows.find(row => row.id === 'directory-picker')).toMatchObject({
+      name: '@deepseek-ai/dsh-host-directory-picker-browse', config: { maxEntries: 1000 },
+    })
+    expect(rows.find(row => row.id === 'host-plugin-inventory')?.name)
+      .toBe('@deepseek-ai/dsh-host-plugin-inventory')
     expect(rows.find(row => row.id === 'plugin-hub')?.name).toBe('@lingxi-ai-cn/dsh-plugin-hub')
     const local = rows.find(row => row.id === 'plugin-hub-local')
     expect(local?.name).toBe('@lingxi-ai-cn/dsh-plugin-hub-local')

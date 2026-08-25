@@ -36,6 +36,8 @@ export type TuiInteractionActionId =
   | 'composer.clipboardPaste'
   | 'composer.openModels'
   | 'composer.openResume'
+  | 'composer.openQueue'
+  | 'composer.openGoalPlan'
   | 'composer.openFooter'
   | 'composer.cancel'
   | 'composer.transcriptPreviousPage'
@@ -62,6 +64,14 @@ export type TuiInteractionActionId =
   | 'detail.previousPage'
   | 'detail.nextPage'
   | 'detail.copy'
+  | 'detail.feedbackPositive'
+  | 'detail.feedbackNegative'
+  | 'detail.feedbackNote'
+  | 'detail.feedbackClear'
+  | 'detail.previousItem'
+  | 'detail.nextItem'
+  | 'detail.copyPath'
+  | 'detail.openPath'
   | 'detail.close'
   | 'pluginHub.close'
   | 'pluginHub.previous'
@@ -259,6 +269,8 @@ export const TUI_INTERACTION_REGISTRY: readonly TuiInteractionDescriptor[] = Obj
   descriptor('composer.openResume', 'Composer', 'Open Session picker', [
     key('meta+r', 'Alt+R'), command('/resume'),
   ], 'resumePicker'),
+  descriptor('composer.openQueue', 'Composer', 'Open pending input queue', [key('ctrl+q', 'Ctrl+Q')]),
+  descriptor('composer.openGoalPlan', 'Composer', 'Open Goal and Plan controls', [key('meta+g', 'Alt+G')]),
   descriptor('composer.openFooter', 'Composer', 'Focus status footer', [key('tab', 'Tab')]),
   descriptor('composer.transcriptPreviousPage', 'Composer', 'Previous transcript page', [key('pageup', 'PageUp')]),
   descriptor('composer.transcriptNextPage', 'Composer', 'Next transcript page', [key('pagedown', 'PageDown')]),
@@ -299,6 +311,14 @@ export const TUI_INTERACTION_REGISTRY: readonly TuiInteractionDescriptor[] = Obj
   descriptor('detail.previousPage', 'Detail', 'Previous detail page', [key('pageup', 'PageUp')]),
   descriptor('detail.nextPage', 'Detail', 'Next detail page', [key('pagedown', 'PageDown')]),
   descriptor('detail.copy', 'Detail', 'Copy complete detail', [key('y', 'Y')]),
+  descriptor('detail.feedbackPositive', 'Detail', 'Like assistant message', [key('l', 'L')]),
+  descriptor('detail.feedbackNegative', 'Detail', 'Dislike assistant message', [key('d', 'D')]),
+  descriptor('detail.feedbackNote', 'Detail', 'Edit feedback note', [key('n', 'N')]),
+  descriptor('detail.feedbackClear', 'Detail', 'Clear message feedback', [key('x', 'X')]),
+  descriptor('detail.previousItem', 'Detail', 'Select previous detail item', [key('up', 'Up')]),
+  descriptor('detail.nextItem', 'Detail', 'Select next detail item', [key('down', 'Down')]),
+  descriptor('detail.copyPath', 'Detail', 'Copy selected path', [key('c', 'C')]),
+  descriptor('detail.openPath', 'Detail', 'Open selected path on the Host', [key('o', 'O')]),
   descriptor('detail.close', 'Detail', 'Close detail', [key('enter', 'Enter'), key('escape', 'Escape')]),
 
   descriptor('pluginHub.close', 'PluginHub', 'Close Plugin Hub', [key('escape', 'Escape')]),
@@ -365,6 +385,8 @@ const TUI_INTERACTION_DESCRIPTIONS_ZH: Readonly<Record<TuiInteractionActionId, s
   'composer.clipboardPaste': '从系统剪贴板粘贴',
   'composer.openModels': '打开模型选择器',
   'composer.openResume': '打开 Session 选择器',
+  'composer.openQueue': '打开待处理输入队列',
+  'composer.openGoalPlan': '打开 Goal 与 Plan 控制',
   'composer.openFooter': '聚焦状态栏',
   'composer.transcriptPreviousPage': '上一页 Transcript',
   'composer.transcriptNextPage': '下一页 Transcript',
@@ -390,6 +412,14 @@ const TUI_INTERACTION_DESCRIPTIONS_ZH: Readonly<Record<TuiInteractionActionId, s
   'detail.previousPage': '详情上一页',
   'detail.nextPage': '详情下一页',
   'detail.copy': '复制完整详情',
+  'detail.feedbackPositive': '赞当前助手消息',
+  'detail.feedbackNegative': '踩当前助手消息',
+  'detail.feedbackNote': '编辑反馈备注',
+  'detail.feedbackClear': '清除消息反馈',
+  'detail.previousItem': '选择上一条详情项',
+  'detail.nextItem': '选择下一条详情项',
+  'detail.copyPath': '复制所选路径',
+  'detail.openPath': '在 Host 打开所选路径',
   'detail.close': '关闭详情',
   'pluginHub.close': '关闭 Plugin Hub',
   'pluginHub.previous': '上一个插件',
@@ -531,6 +561,7 @@ const controlSequences: Readonly<Record<string, string>> = Object.freeze({
   '\u0007': 'ctrl+g',
   '\n': 'ctrl+j',
   '\u0012': 'ctrl+r',
+  '\u0011': 'ctrl+q',
   '\u0013': 'ctrl+s',
   '\u0019': 'ctrl+y',
   '\u0018': 'ctrl+x',

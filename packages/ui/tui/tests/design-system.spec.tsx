@@ -5,7 +5,7 @@ import { render } from 'ink'
 import stringWidth from 'string-width'
 import { describe, expect, it } from 'vitest'
 import {
-  TuiEmptyState, TuiHintLine, TuiListRow, TuiLoadingState, TuiPane, TuiScrollablePanel,
+  TuiActionFooter, TuiEmptyState, TuiHintLine, TuiListRow, TuiLoadingState, TuiPane, TuiScrollablePanel,
   TuiSection, tuiDesignToneColor, tuiListRowTextStyle, tuiProgressBarText, tuiScrollableWindow,
 } from '../src/design-system.tsx'
 import { resolveTuiTheme, TuiThemeProvider } from '../src/theme.tsx'
@@ -103,6 +103,39 @@ describe('native TUI internal design system', () => {
     expect(output).toContain('50%')
     expect(output).toContain('! No matches')
     expect(output).toContain('Change the filter')
+  })
+
+  it('pins pointer-owned actions to the second physical footer row with or without status', () => {
+    const renderFooter = (status: React.ReactNode | undefined): readonly string[] => {
+      const stdout = captureStream(40, 2)
+      const stderr = captureStream(40, 2)
+      const instance = render(<TuiThemeProvider theme={resolveTuiTheme('no-color', 'none')}>
+        <TuiActionFooter
+          status={status}
+          actions={<TuiHintLine>回车打开 · Esc 关闭</TuiHintLine>}
+        />
+      </TuiThemeProvider>, {
+        stdout: stdout.stream as never,
+        stderr: stderr.stream as never,
+        debug: true,
+        exitOnCtrlC: false,
+        patchConsole: false,
+      })
+      instance.unmount()
+      instance.cleanup()
+      const lines = stdout.chunks.join('').replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, '').split('\n')
+      if (lines.at(-1) === '') lines.pop()
+      return lines
+    }
+
+    const withStatus = renderFooter(<TuiHintLine>显示 1–6 / 20</TuiHintLine>)
+    expect(withStatus[0]).toContain('显示 1–6 / 20')
+    expect(withStatus[0]).not.toContain('回车打开')
+    expect(withStatus[1]).toContain('回车打开 · Esc 关闭')
+
+    const withoutStatus = renderFooter(undefined)
+    expect(withoutStatus[0]?.trim()).toBe('')
+    expect(withoutStatus[1]).toContain('回车打开 · Esc 关闭')
   })
 
   it('resolves the selected list-row title to the semantic color and emphasis', () => {
