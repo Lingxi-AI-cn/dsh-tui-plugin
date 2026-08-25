@@ -4,6 +4,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
+import { payloadDigest } from './release-payload.mjs'
+
 const root = resolve(import.meta.dirname, '..')
 const artifacts = join(root, 'artifacts')
 const publish = process.argv.includes('--publish')
@@ -22,31 +24,6 @@ const trustedPublishing = publish && provenance
 if (publish && !trustedPublishing) {
   const who = execFileSync('npm', ['whoami', '--registry=https://registry.npmjs.org/'], { encoding: 'utf8' }).trim()
   if (who !== 'lingxi-ai-cn') throw new Error(`npm is authenticated as ${who}, expected lingxi-ai-cn`)
-}
-
-function stableJson(value) {
-  if (Array.isArray(value)) return value.map(stableJson)
-  if (value === null || typeof value !== 'object') return value
-  return Object.fromEntries(Object.keys(value).sort().map(key => [key, stableJson(value[key])]))
-}
-
-function payloadDigest(tarball) {
-  const files = execFileSync('tar', ['-tzf', tarball], { encoding: 'utf8' })
-    .split('\n')
-    .filter(entry => entry !== '' && !entry.endsWith('/'))
-    .sort()
-  const hash = createHash('sha512')
-  for (const file of files) {
-    let bytes = execFileSync('tar', ['-xOzf', tarball, file])
-    if (file === 'package/package.json') {
-      const manifest = JSON.parse(bytes.toString('utf8'))
-      delete manifest.gitHead
-      bytes = Buffer.from(`${JSON.stringify(stableJson(manifest))}\n`)
-    }
-    hash.update(`${file}\0${bytes.byteLength}\0`)
-    hash.update(bytes)
-  }
-  return hash.digest('hex')
 }
 
 async function publishedPayloadDigest(url, temporary, filename) {

@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
+import { payloadDigest } from './release-payload.mjs'
+
 const root = resolve(import.meta.dirname, '..')
 const artifacts = join(root, 'artifacts')
 const packageDirectories = [
@@ -14,31 +16,6 @@ const packageDirectories = [
   'packages/ui/tui',
   'packages/bundle/tui-app',
 ]
-
-function stableJson(value) {
-  if (Array.isArray(value)) return value.map(stableJson)
-  if (value === null || typeof value !== 'object') return value
-  return Object.fromEntries(Object.keys(value).sort().map(key => [key, stableJson(value[key])]))
-}
-
-function payloadDigest(tarball) {
-  const files = execFileSync('tar', ['-tzf', tarball], { encoding: 'utf8' })
-    .split('\n')
-    .filter(entry => entry !== '' && !entry.endsWith('/'))
-    .sort()
-  const hash = createHash('sha512')
-  for (const file of files) {
-    let bytes = execFileSync('tar', ['-xOzf', tarball, file])
-    if (file === 'package/package.json') {
-      const manifest = JSON.parse(bytes.toString('utf8'))
-      delete manifest.gitHead
-      bytes = Buffer.from(`${JSON.stringify(stableJson(manifest))}\n`)
-    }
-    hash.update(`${file}\0${bytes.byteLength}\0`)
-    hash.update(bytes)
-  }
-  return hash.digest('hex')
-}
 
 rmSync(artifacts, { recursive: true, force: true })
 mkdirSync(artifacts, { recursive: true })

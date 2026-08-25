@@ -14,12 +14,13 @@
     "test:perf": "vitest run packages/ui/tui/tests/long-session.perf.tsx",
     "verify:source": "node scripts/verify-public-source.mjs",
     "verify:source-manifest": "node scripts/generate-source-manifest.mjs --check",
+    "verify:release-payload": "node --test scripts/release-payload.spec.mjs",
     "generate:source-manifest": "node scripts/generate-source-manifest.mjs --write",
     "verify:pack": "tsx scripts/verify-tui-plugin-pack.ts",
     "verify:clean-room": "tsx scripts/verify-tui-plugin-clean-room.ts",
     "pack:release": "node scripts/pack-release.mjs",
     "audit:release": "node scripts/publish-release.mjs --audit",
-    "verify": "pnpm run verify:source && pnpm run verify:source-manifest && pnpm run test && pnpm run build && pnpm run verify:pack"
+    "verify": "pnpm run verify:source && pnpm run verify:source-manifest && pnpm run verify:release-payload && pnpm run test && pnpm run build && pnpm run verify:pack"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-base": "0.1.0-rc.8",
