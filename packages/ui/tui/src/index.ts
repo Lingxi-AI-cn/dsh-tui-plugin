@@ -116,6 +116,9 @@ import {
   type TuiSessionExportFormat,
 } from './session-export.ts'
 import {
+  writeTuiOutputMarkdown, type TuiOutputExportKind, type TuiOutputExportResult,
+} from './output-export.ts'
+import {
   tuiRewindCandidates, type TuiRewindCandidate, type TuiRewindDialogSnapshot,
 } from './rewind.ts'
 import {
@@ -696,6 +699,7 @@ class TuiController {
         root, directory, includeDescendants, format,
       ),
       onCloseSessionExport: () => { this.closeSessionExport() },
+      onExportOutput: (markdown, kind) => this.exportTuiOutput(agent, markdown, kind),
       onClosePluginHub: () => { this.closePluginHub() },
       onPluginHubToggleView: targetView => this.togglePluginHubView(root, targetView),
       onPluginHubSearch: query => this.searchPluginHubInput(root, query),
@@ -3657,6 +3661,19 @@ class TuiController {
     }
   }
 
+  private async exportTuiOutput(
+    agent: Agent,
+    markdown: string,
+    kind: TuiOutputExportKind,
+  ): Promise<TuiOutputExportResult> {
+    const workspace = agent.session.header.cwd
+    if (workspace === undefined) {
+      return { ok: false, message: tuiMessage(this.locale, 'output.export.noWorkspace') }
+    }
+    if (this.isClosing()) return { ok: false, message: tuiMessage(this.locale, 'output.export.failed') }
+    return writeTuiOutputMarkdown(this.ctx.fs, workspace, markdown, Date.now(), kind)
+  }
+
   private openResume(agent: Agent): void {
     this.closeResume(true)
     const generation = ++this.resumeGeneration
@@ -5318,12 +5335,19 @@ export function apply(ctx: Context, config: Config): void {
 
 export type {
   TranscriptCompactionNode, TranscriptNode, TranscriptTextNode,
-  TranscriptTodoNode, TranscriptToolGroupNode, TranscriptToolNode,
+  TranscriptTodoNode, TranscriptToolActivityNode, TranscriptToolGroupNode, TranscriptToolNode,
 } from './transcript.ts'
 export { foldTranscript, TuiTranscriptProjectionCache } from './transcript.ts'
+export {
+  toolActivityActiveText, toolActivityHeadingText,
+  tuiToolActivityCategory, tuiToolActivityRows, tuiToolActivitySummary,
+} from './tool-activity.tsx'
+export type { TuiToolActivityCategory, TuiToolActivitySummary } from './tool-activity.tsx'
 export { TuiAppendOnlySessionWindow } from './session-window.ts'
 export type { TuiSessionWindowUpdate } from './session-window.ts'
 export type { TuiKnownSessionEventRenderer } from './transcript.ts'
+export { tuiAssistantResponseParts, tuiAssistantResponseText } from './assistant-response.ts'
+export type { TuiAssistantResponsePart } from './assistant-response.ts'
 export { TuiTranscriptDetailCache, tuiTranscriptDetailText } from './detail.ts'
 export {
   addComposerImageAttachment, removeComposerImageAttachment, removeLastComposerImageAttachment,
@@ -5407,6 +5431,8 @@ export type {
 } from './resume.ts'
 export { resolveTuiSessionExportDirectory } from './session-export.ts'
 export type { TuiSessionExportDialogSnapshot, TuiSessionExportFormat, TuiSessionExportPhase } from './session-export.ts'
+export { resolveTuiOutputExportPath, tuiOutputMarkdown, writeTuiOutputMarkdown } from './output-export.ts'
+export type { TuiOutputExportKind, TuiOutputExportResult } from './output-export.ts'
 export { tuiRewindCandidates } from './rewind.ts'
 export type { TuiRewindCandidate, TuiRewindDialogSnapshot } from './rewind.ts'
 export { consumeTuiDoubleEscape, TUI_DOUBLE_ESCAPE_WINDOW_MS } from './double-escape.ts'
@@ -5476,7 +5502,8 @@ export type {
 export { formatTuiWorkElapsed, formatTuiWorkOwner } from './work-panel.tsx'
 export {
   previousTranscriptPageAnchor, selectTranscriptPage, selectTranscriptWindow,
-  terminalWrappedLines, tuiTranscriptWindowEntryRows, TuiTranscriptScrollController, TuiTranscriptViewportIndex,
+  terminalWrappedLines, tuiTranscriptWindowEntryRows, TuiTranscriptScrollController,
+  TuiTranscriptViewportIndex, TuiTranscriptWheelBoundaryGuard,
 } from './viewport.ts'
 export type {
   TuiTranscriptViewportAnchor, TuiTranscriptViewportStats, TuiTranscriptVirtualWindow,
@@ -5499,6 +5526,7 @@ export type {
 } from './selection.ts'
 export {
   TuiPointerRegionRegistry, tuiApprovalPointerRegions, tuiFooterPointerRegions, tuiModalClosePointerRegions,
+  tuiAssistantOutputPointerRegions,
   tuiGoalPlanDialogPointerRegions, tuiGoalPlanPointerRegions,
   tuiPluginHubPointerRegions, tuiProviderPointerRegions, tuiQuestionPointerRegions, tuiQueuePointerRegions,
   tuiResumePointerRegions, tuiSessionManagerPointerRegions, tuiSuggestionPointerRegions,
@@ -5539,7 +5567,7 @@ export type {
   TuiTrajectorySnapshot, TuiTrajectoryTimelineScale, TuiTrajectoryTimingFacts,
 } from './trajectory.ts'
 export type {
-  TuiApprovalPointerOptions, TuiHostPluginCenterPointerOptions,
+  TuiApprovalPointerOptions, TuiAssistantOutputPointerOptions, TuiHostPluginCenterPointerOptions,
   TuiTrajectoryPointerOptions,
   TuiPluginHubPointerOptions, TuiPointerAction, TuiPointerHit, TuiPointerPoint,
   TuiPointerRect, TuiPointerRegion, TuiPresetManagerPointerOptions,

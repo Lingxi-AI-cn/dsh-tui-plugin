@@ -41,6 +41,8 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-user-questions'
 
 export type { Context } from '@deepseek-ai/cordis'
+export { FsError } from '@deepseek-ai/dsh-fs'
+export type { FileSystem } from '@deepseek-ai/dsh-fs'
 export { AttachmentError } from '@deepseek-ai/dsh-attachment'
 export type {
   EncodedImageAttachment, ImageAttachmentLimits, ImageAttachmentRef, ImageMediaType,

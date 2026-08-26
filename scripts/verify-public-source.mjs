@@ -3,7 +3,7 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const tuiVersion = '0.1.5-rc.8'
+const tuiVersion = '0.1.6-rc.8'
 const dshVersion = '0.1.0-rc.8'
 const repository = 'git+https://github.com/Lingxi-AI-cn/dsh-tui-plugin.git'
 const packages = [

@@ -41,6 +41,8 @@ export interface TranscriptTextNode {
   step?: number | undefined
   /** Whether this is the final assistant message observed before its Turn ended. */
   closing?: true | undefined
+  /** Whether an earlier finalized assistant message exists in the same Turn. */
+  continuation?: true | undefined
   /** Elapsed reasoning stream time for a completed Thinking block. */
   durationMs?: number | undefined
   /** Internal first reasoning event timestamp used while folding a stream. */
@@ -166,12 +168,27 @@ export interface TranscriptToolGroupNode {
   closed: boolean
 }
 
+/** One consecutive Turn-owned run of tool activity collapsed for the main transcript. */
+export interface TranscriptToolActivityNode {
+  /** Node discriminant. */
+  kind: 'tool-activity'
+  /** Stable identity derived from the Turn and first call in this activity run. */
+  key: string
+  /** Scheduler turn shared by the retained calls, when recorded by the Host. */
+  turn?: number | undefined
+  /** Complete tool lifecycles retained in chronological order for drill-down. */
+  tools: readonly TranscriptToolNode[]
+  /** Whether every retained tool and authoritative scheduler group has settled. */
+  closed: boolean
+}
+
 /** Semantic terminal transcript node. */
 export type TranscriptNode =
   | TranscriptTextNode
   | TranscriptToolNode
   | TranscriptTodoNode
   | TranscriptToolGroupNode
+  | TranscriptToolActivityNode
   | TranscriptCompactionNode
   | TranscriptDeliverablesNode
 
@@ -342,6 +359,72 @@ function groupExploration(
   return grouped
 }
 
+function activityTools(node: TranscriptToolNode | TranscriptToolGroupNode): readonly TranscriptToolNode[] {
+  return node.kind === 'tool' ? [node] : node.tools
+}
+
+function activityTurn(node: TranscriptToolNode | TranscriptToolGroupNode): number | undefined {
+  return activityTools(node).find(tool => tool.turn !== undefined)?.turn
+}
+
+function groupToolActivity(
+  nodes: readonly TranscriptNode[],
+  reusable = new Map<string, TranscriptToolActivityNode>(),
+  retained = new Map<string, TranscriptToolActivityNode>(),
+): TranscriptNode[] {
+  const grouped: TranscriptNode[] = []
+  for (let index = 0; index < nodes.length;) {
+    const first = nodes[index]
+    if (first === undefined || (first.kind !== 'tool' && first.kind !== 'tool-group')) {
+      if (first !== undefined) grouped.push(first)
+      index += 1
+      continue
+    }
+    const sources: (TranscriptToolNode | TranscriptToolGroupNode)[] = [first]
+    const turn = activityTurn(first)
+    let next = index + 1
+    while (next < nodes.length) {
+      const candidate = nodes[next]
+      if (candidate === undefined || (candidate.kind !== 'tool' && candidate.kind !== 'tool-group')) break
+      const candidateTurn = activityTurn(candidate)
+      if (candidateTurn !== turn) break
+      sources.push(candidate)
+      next += 1
+    }
+    const seen = new Set<string>()
+    const tools = sources.flatMap(activityTools).filter((tool) => {
+      if (seen.has(tool.callId)) return false
+      seen.add(tool.callId)
+      return true
+    })
+    const firstCall = tools[0]
+    if (firstCall === undefined) {
+      index = next
+      continue
+    }
+    const closed = sources.every(source => source.kind === 'tool'
+      ? source.state !== 'queued' && source.state !== 'running'
+      : source.closed && source.tools.every(tool => tool.state !== 'queued' && tool.state !== 'running'))
+    const key = `tool-activity:${turn ?? 'unknown'}:${firstCall.callId}`
+    const previous = reusable.get(key)
+    const activity = previous !== undefined && previous.turn === turn && previous.closed === closed
+      && previous.tools.length === tools.length
+      && previous.tools.every((tool, toolIndex) => tool === tools[toolIndex])
+      ? previous
+      : {
+        kind: 'tool-activity' as const,
+        key,
+        ...turn === undefined ? {} : { turn },
+        tools,
+        closed,
+      }
+    retained.set(key, activity)
+    grouped.push(activity)
+    index = next
+  }
+  return grouped
+}
+
 function suppressCompletedTodoCalls(
   nodes: readonly TranscriptNode[],
   callsWithSnapshots: ReadonlySet<string>,
@@ -399,6 +482,7 @@ class TranscriptFoldState {
   private readonly compactionByCommand = new Map<string, TranscriptCompactionNode>()
   private readonly compactionBySummarySeq = new Map<number, TranscriptCompactionNode>()
   private explorationGroups = new Map<string, TranscriptToolGroupNode>()
+  private toolActivities = new Map<string, TranscriptToolActivityNode>()
   private projected: readonly TranscriptNode[] = Object.freeze([])
   private dirty = false
 
@@ -609,14 +693,17 @@ class TranscriptFoldState {
       const rendered = this.renderKnownEvent?.(knownSessionEvent(event) ?? {
         type: 'assistant/message', seq: event.seq, text: '',
       })
+      const continuation = this.lastAssistantByTurn.has(event.data.turn)
       const assistantNode: TranscriptTextNode = rendered === undefined
         ? {
           kind: 'text', key: `event:${event.seq}:assistant`, tone: 'assistant', label: 'Assistant', text: contentText(visible),
           messageId: String(event.data.message.id), turn: event.data.turn, step: event.data.step,
+          ...continuation ? { continuation: true as const } : {},
         }
         : {
           kind: 'text', key: `event:${event.seq}:assistant`, ...rendered,
           messageId: String(event.data.message.id), turn: event.data.turn, step: event.data.step,
+          ...continuation ? { continuation: true as const } : {},
         }
       const streamedAssistant = this.streamNodes.get(assistantKey)
       const streamedAssistantIndex = streamedAssistant === undefined
@@ -784,12 +871,15 @@ class TranscriptFoldState {
     if (!this.dirty) return this.projected
     const nonEmpty = this.nodes.filter(node => node.kind !== 'text' || node.text !== '')
     const retained = new Map<string, TranscriptToolGroupNode>()
-    this.projected = Object.freeze(groupExploration(
+    const exploration = groupExploration(
       suppressCompletedTodoCalls(nonEmpty, this.todoCallsWithSnapshots),
       this.explorationGroups,
       retained,
-    ))
+    )
+    const retainedActivities = new Map<string, TranscriptToolActivityNode>()
+    this.projected = Object.freeze(groupToolActivity(exploration, this.toolActivities, retainedActivities))
     this.explorationGroups = retained
+    this.toolActivities = retainedActivities
     this.dirty = false
     return this.projected
   }

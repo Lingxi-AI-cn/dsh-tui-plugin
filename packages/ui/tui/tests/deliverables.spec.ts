@@ -123,7 +123,7 @@ describe('TUI deliverables projection', () => {
         card: 'generic', title: 'Write', kind: 'edit', locations: [{ path: 'src/output.ts' }],
       }),
     } as never))
-    expect(nodes.map(node => node.kind)).toEqual(['tool', 'text', 'deliverables'])
+    expect(nodes.map(node => node.kind)).toEqual(['tool-activity', 'text', 'deliverables'])
     expect(nodes.at(-1)).toMatchObject({
       kind: 'deliverables', turn: 1,
       items: [{ path: 'src/output.ts', operation: 'edit', callId: 'write-1' }],

@@ -32,6 +32,12 @@ export type TuiPointerAction =
     readonly id: 'transcript.openFocused' | 'transcript.closeBrowse'
   }
   | {
+    readonly id: 'transcript.output'
+    readonly key: string
+    readonly index: number
+    readonly operation: 'open' | 'copy' | 'export'
+  }
+  | {
     readonly id: 'footer.activate'
     readonly itemId: TuiFooterItemId
   }
@@ -249,6 +255,19 @@ export type TuiPointerAction =
     readonly id: 'detail.close'
   }
   | {
+    readonly id: 'detail.copy'
+  }
+  | {
+    readonly id: 'detail.exportMarkdown'
+  }
+  | {
+    readonly id: 'detail.toggleScope'
+  }
+  | {
+    readonly id: 'activity.open'
+    readonly index: number
+  }
+  | {
     readonly id: 'suggestion.accept'
     readonly index: number
   }
@@ -281,7 +300,7 @@ function appendFooterPointerRegions(
   actions: readonly TuiPointerFooterAction[],
   columns: number,
   row: number,
-  context: Extract<TuiInteractionContext, 'Dialog' | 'Detail' | 'PluginHub' | 'Work' | 'Transcript'>,
+  context: Extract<TuiInteractionContext, 'Composer' | 'Dialog' | 'Detail' | 'PluginHub' | 'Work' | 'Transcript'>,
   renderedLine?: string,
   lineLeft = 3,
 ): void {
@@ -346,6 +365,57 @@ export function tuiDialogFooterPointerRegions(
     options.context ?? 'Dialog',
     options.line,
     Math.max(1, Math.floor(options.lineLeft ?? 3)),
+  )
+  return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
+/** Inputs for the three inline actions rendered below one completed assistant output. */
+export interface TuiAssistantOutputPointerOptions {
+  readonly columns: number
+  readonly row: number
+  readonly lineLeft: number
+  readonly line: string
+  readonly labels: {
+    readonly open: string
+    readonly copy: string
+    readonly exportMarkdown: string
+  }
+  readonly key: string
+  readonly index: number
+  readonly context: Extract<TuiInteractionContext, 'Composer' | 'Transcript'>
+}
+
+/**
+ * Map each assistant output action label to its own exact terminal cells.
+ * @param options - rendered action line, target identity, and committed geometry.
+ * @returns independently clickable view, copy, and export regions.
+ */
+export function tuiAssistantOutputPointerRegions(
+  options: TuiAssistantOutputPointerOptions,
+): readonly TuiPointerRegion[] {
+  const regions: TuiPointerRegion[] = []
+  appendFooterPointerRegions(
+    regions,
+    `transcript:output:${options.key}`,
+    [
+      {
+        action: { id: 'transcript.output', key: options.key, index: options.index, operation: 'open' },
+        label: options.labels.open,
+      },
+      {
+        action: { id: 'transcript.output', key: options.key, index: options.index, operation: 'copy' },
+        label: options.labels.copy,
+      },
+      {
+        action: { id: 'transcript.output', key: options.key, index: options.index, operation: 'export' },
+        label: options.labels.exportMarkdown,
+      },
+    ],
+    Math.max(1, Math.floor(options.columns)),
+    Math.max(1, Math.floor(options.row)),
+    options.context,
+    options.line,
+    Math.max(1, Math.floor(options.lineLeft)),
   )
   return Object.freeze(regions.map(region => Object.freeze(region)))
 }
@@ -1723,6 +1793,31 @@ export interface TuiDeliverablesPointerOptions {
   readonly visibleCount: number
   readonly total: number
   readonly context: Extract<TuiInteractionContext, 'Detail'>
+}
+
+/** Build one drill-down hit target for each visible tool-activity list row. */
+export function tuiActivityPointerRegions(options: {
+  readonly columns: number
+  readonly startRow: number
+  readonly visibleStart: number
+  readonly visibleCount: number
+  readonly total: number
+  readonly context: Extract<TuiInteractionContext, 'Detail'>
+}): readonly TuiPointerRegion[] {
+  const right = Math.max(3, Math.floor(options.columns) - 2)
+  const count = Math.max(0, Math.min(options.visibleCount, options.total - options.visibleStart))
+  return Object.freeze(Array.from({ length: count }, (_, offset) => Object.freeze({
+    id: `activity:open:${options.visibleStart + offset}`,
+    rect: {
+      left: 3,
+      top: options.startRow + offset,
+      right,
+      bottom: options.startRow + offset,
+    },
+    context: options.context,
+    priority: 25,
+    action: { id: 'activity.open' as const, index: options.visibleStart + offset },
+  })))
 }
 
 /** Build one Host-open hit target for each visible delivered path. */

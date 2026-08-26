@@ -140,7 +140,7 @@ export function tuiDeliverableInlineReferences(
 function toolNodes(nodes: readonly TranscriptNode[]): readonly TranscriptToolNode[] {
   return nodes.flatMap(node => node.kind === 'tool'
     ? [node]
-    : node.kind === 'tool-group' ? node.tools : [])
+    : node.kind === 'tool-group' || node.kind === 'tool-activity' ? node.tools : [])
 }
 
 function operationFor(node: TranscriptToolNode): TuiDeliverableOperation | undefined {

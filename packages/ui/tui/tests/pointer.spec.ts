@@ -5,7 +5,8 @@ import {
   TuiPointerRegionRegistry, tuiApprovalPointerRegions, tuiFooterPointerRegions, tuiModalClosePointerRegions,
   tuiPluginHubPointerRegions, tuiProviderPointerRegions, tuiQuestionPointerRegions, tuiQueuePointerRegions,
   tuiResumePointerRegions, tuiSessionManagerPointerRegions, tuiSuggestionPointerRegions,
-  tuiAttachmentRailPointerRegions, tuiDeliverableActionPointerRegions, tuiDeliverableInlinePointerRegions,
+  tuiActivityPointerRegions, tuiAttachmentRailPointerRegions, tuiDeliverableActionPointerRegions, tuiDeliverableInlinePointerRegions,
+  tuiAssistantOutputPointerRegions,
   tuiDeliverablesPointerRegions,
   tuiFeedbackPointerRegions,
   tuiDialogFooterPointerRegions,
@@ -33,6 +34,45 @@ function region(overrides: Partial<TuiPointerRegion> = {}): TuiPointerRegion {
 }
 
 describe('TUI pointer region registry', () => {
+  it('maps assistant view, copy, and export labels to independent cells', () => {
+    const line = '点击查看 · 点击复制 · 点击导出'
+    const regions = tuiAssistantOutputPointerRegions({
+      columns: 80,
+      row: 18,
+      lineLeft: 4,
+      line,
+      labels: { open: '点击查看', copy: '点击复制', exportMarkdown: '点击导出' },
+      key: 'assistant:1',
+      index: 3,
+      context: 'Composer',
+    })
+    expect(regions.map(region => region.action)).toEqual([
+      { id: 'transcript.output', key: 'assistant:1', index: 3, operation: 'open' },
+      { id: 'transcript.output', key: 'assistant:1', index: 3, operation: 'copy' },
+      { id: 'transcript.output', key: 'assistant:1', index: 3, operation: 'export' },
+    ])
+    const registry = new TuiPointerRegionRegistry()
+    registry.replace(regions)
+    expect(registry.hitTest({ column: 15, row: 18 }, 'Composer')?.region.action)
+      .toEqual({ id: 'transcript.output', key: 'assistant:1', index: 3, operation: 'copy' })
+  })
+
+  it('maps visible activity rows directly to tool drill-down', () => {
+    const regions = tuiActivityPointerRegions({
+      columns: 80, startRow: 9, visibleStart: 2, visibleCount: 3, total: 8, context: 'Detail',
+    })
+    expect(regions.map(region => region.action)).toEqual([
+      { id: 'activity.open', index: 2 },
+      { id: 'activity.open', index: 3 },
+      { id: 'activity.open', index: 4 },
+    ])
+    expect(regions.map(region => region.rect.top)).toEqual([9, 10, 11])
+    const registry = new TuiPointerRegionRegistry()
+    registry.replace(regions)
+    expect(registry.hitTest({ column: 12, row: 10 }, 'Detail')?.region.action)
+      .toEqual({ id: 'activity.open', index: 3 })
+  })
+
   it('maps feedback detail actions to the exact assistant message identity', () => {
     const regions = tuiFeedbackPointerRegions({
       columns: 80,
@@ -358,6 +398,20 @@ describe('TUI pointer region registry', () => {
     }, 'Detail')?.region.action).toEqual({ id: 'detail.close' })
     expect(detailRegistry.hitTest({ column: 30, row: 24 }, 'Dialog')).toBeUndefined()
     expect(detailRegistry.hitTest({ column: 30, row: 23 }, 'Detail')).toBeUndefined()
+
+    const outputLine = 'Y Copy output · M Export Markdown · PgUp/PgDn · Enter/Esc close'
+    const output = tuiDialogFooterPointerRegions({
+      id: 'output', columns: 80, row: 24, lineLeft: 2, line: outputLine,
+      actions: [
+        { action: { id: 'detail.copy' }, label: 'Y Copy output' },
+        { action: { id: 'detail.exportMarkdown' }, label: 'M Export Markdown' },
+        { action: { id: 'detail.close' }, label: 'Enter/Esc close' },
+      ],
+      context: 'Detail',
+    })
+    expect(output.map(region => region.action)).toEqual([
+      { id: 'detail.copy' }, { id: 'detail.exportMarkdown' }, { id: 'detail.close' },
+    ])
   })
 
   it('does not invent a pointer region when an exact footer label is absent', () => {

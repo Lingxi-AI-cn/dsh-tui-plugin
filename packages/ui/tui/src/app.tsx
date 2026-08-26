@@ -15,9 +15,15 @@ import {
 } from './store.ts'
 import { STRUCTURED_CHILD_LIMIT, TuiTranscriptProjectionCache } from './transcript.ts'
 import { TodoPanel, todoPanelRows, todoPanelScreenMapLines } from './todo-panel.tsx'
-import { TuiTranscriptSearchText, TuiTranscriptView, tuiTranscriptScreenMapLines } from './transcript-view.tsx'
+import {
+  TuiTranscriptSearchText, TuiTranscriptView,
+  tuiTranscriptAssistantReaderActions, tuiTranscriptAssistantReaderHint, tuiTranscriptScreenMapLines,
+} from './transcript-view.tsx'
 import { TuiTranscriptDetailCache, tuiTranscriptDetailText } from './detail.ts'
-import { toolSummary } from './tool-card.tsx'
+import { toolStateMark, toolSummary } from './tool-card.tsx'
+import { toolActivityActiveText, toolActivityHeadingText } from './tool-activity.tsx'
+import { tuiAssistantResponseParts, tuiAssistantResponseText } from './assistant-response.ts'
+import { terminalMarkdownText } from './markdown.ts'
 import { terminalSafe } from './sanitize.ts'
 import { tuiOsc8Text, tuiSafeHyperlinkUrl } from './hyperlink.ts'
 import { tuiBidiVisualText } from './bidi.ts'
@@ -30,7 +36,8 @@ import {
 import { projectTuiScreenMap, type TuiScreenMap } from './screen-map.ts'
 import {
   TuiTranscriptScrollController, TuiTranscriptViewportIndex, terminalWrappedLines,
-  tuiTranscriptWindowEntryRows, type TranscriptWindowEntry, type TuiTranscriptViewportAnchor,
+  TuiTranscriptWheelBoundaryGuard, tuiTranscriptWindowEntryRows,
+  type TranscriptWindowEntry, type TuiTranscriptViewportAnchor,
 } from './viewport.ts'
 import type { TranscriptNode, TranscriptToolNode } from './transcript.ts'
 import {
@@ -105,6 +112,7 @@ import {
 import { formatRailEntry, parseTuiTerminalPathPaste, projectAttachmentRail } from './attachment-intake.ts'
 import type { TuiFreshSessionDialogSnapshot } from './session-lifecycle.ts'
 import type { TuiSessionExportDialogSnapshot, TuiSessionExportFormat } from './session-export.ts'
+import type { TuiOutputExportKind, TuiOutputExportResult } from './output-export.ts'
 import type { TuiRewindCandidate, TuiRewindDialogSnapshot } from './rewind.ts'
 import type { TuiWorkItemView, TuiWorkSnapshot } from './work.ts'
 import { TuiWorkPanel } from './work-panel.tsx'
@@ -129,6 +137,8 @@ import {
   tuiPresetManagerPointerRegions,
   tuiTrajectoryPointerRegions,
   tuiFeedbackPointerRegions,
+  tuiActivityPointerRegions,
+  tuiAssistantOutputPointerRegions,
   tuiDeliverableActionPointerRegions, tuiDeliverableInlinePointerRegions, tuiDeliverablesPointerRegions,
   tuiDialogFooterPointerRegions,
   tuiRewindCandidatePointerRegions,
@@ -328,6 +338,8 @@ export interface TuiAppProps {
   onCloseRewind(): void
   onExportSession(directory: string, includeDescendants: boolean, format: TuiSessionExportFormat): Promise<void>
   onCloseSessionExport(): void
+  /** Export one complete assistant output without broadening `/export` Session scope. */
+  onExportOutput(markdown: string, kind: TuiOutputExportKind): Promise<TuiOutputExportResult>
   onClosePluginHub(): void
   onPluginHubToggleView(targetView?: 'discover' | 'discovery' | 'installed'): Promise<void>
   onPluginHubSearch(query: string): Promise<void>
@@ -609,8 +621,9 @@ function detailLineView(
   if (map !== undefined && mapRow !== undefined && selection !== undefined) {
     const segments = tuiScreenTextSegments(map, mapRow, selection)
     if (segments.length > 0) {
-      const color = line.startsWith('+ ') ? theme.tokens.diffAdd
-        : line.startsWith('- ') ? theme.tokens.diffDelete : theme.tokens.text
+      const color = line.startsWith('› ') ? theme.tokens.selection
+        : line.startsWith('+ ') ? theme.tokens.diffAdd
+          : line.startsWith('- ') ? theme.tokens.diffDelete : theme.tokens.text
       return <Text wrap="truncate-end">{segments.map((segment, index) => <Text
         key={`${mapRow}:${index}:${segment.text}`}
         {...tuiTextStyle(segment.selected ? theme.tokens.selection : color)}
@@ -631,9 +644,12 @@ function detailLineView(
       <Text {...tuiTextStyle(rightColor)}>{right}</Text>
     </Text>
   }
-  const color = line.startsWith('+ ') ? theme.tokens.diffAdd
-    : line.startsWith('- ') ? theme.tokens.diffDelete : theme.tokens.text
-  return <Text {...tuiTextStyle(color)} wrap="truncate-end">{tuiOsc8Text(tuiBidiVisualText(line))}</Text>
+  const color = line.startsWith('› ') ? theme.tokens.selection
+    : line.startsWith('+ ') ? theme.tokens.diffAdd
+      : line.startsWith('- ') ? theme.tokens.diffDelete : theme.tokens.text
+  return <Text bold={line.startsWith('› ')} {...tuiTextStyle(color)} wrap="truncate-end">
+    {tuiOsc8Text(tuiBidiVisualText(line))}
+  </Text>
 }
 
 /**
@@ -754,7 +770,11 @@ function pointerEntryWidth(
 ): number {
   const bounded = Math.max(1, width)
   if (entry.node.kind === 'text') {
-    return Math.min(bounded, 2 + Math.max(pointerTextWidth(entry.node.label), pointerTextWidth(entry.text ?? '')))
+    return Math.min(bounded, 2 + Math.max(
+      pointerTextWidth(entry.node.label),
+      pointerTextWidth(entry.text ?? ''),
+      pointerTextWidth(tuiTranscriptAssistantReaderHint(entry, locale) ?? ''),
+    ))
   }
   if (entry.node.kind === 'tool') {
     return Math.min(bounded, 2 + Math.max(
@@ -772,6 +792,12 @@ function pointerEntryWidth(
       ...entry.node.tools.slice(-STRUCTURED_CHILD_LIMIT).map(tool => pointerTextWidth(
         `${focusTitle(tool)} ${toolSummary(tool, workspace)}`,
       )),
+    ))
+  }
+  if (entry.node.kind === 'tool-activity') {
+    return Math.min(bounded, 2 + Math.max(
+      pointerTextWidth(toolActivityHeadingText(entry.node, locale)),
+      pointerTextWidth(toolActivityActiveText(entry.node, locale, workspace) ?? ''),
     ))
   }
   if (entry.node.kind === 'compaction') {
@@ -813,6 +839,20 @@ function transcriptPointerRegions(
         priority: 10,
         action: { id: 'transcript.focus', key: parent.target.key, index: parent.index },
       })
+      const assistantActions = tuiTranscriptAssistantReaderHint(entry, locale) === undefined
+        ? undefined : tuiTranscriptAssistantReaderActions(locale)
+      if (assistantActions !== undefined && context !== 'Dialog') {
+        regions.push(...tuiAssistantOutputPointerRegions({
+          columns,
+          row: row + height - 1,
+          lineLeft: 4,
+          line: assistantActions.line,
+          labels: assistantActions,
+          key: parent.target.key,
+          index: parent.index,
+          context,
+        }))
+      }
       if (entry.node.kind === 'tool-group') {
         const visible = entry.node.tools.slice(-STRUCTURED_CHILD_LIMIT)
         const omitted = entry.node.tools.length - visible.length
@@ -896,8 +936,22 @@ export function inputCursorTarget(
       ? Math.max(1, (stdout.rows || 24) - trailingRows - (layout.lines.length - 1 - layout.cursorRow))
       : Math.max(1, placement.firstInputRow + layout.cursorRow),
     column: (placement?.leftColumn ?? 0)
-      + 3 + (layout.cursorRow === 0 ? stringWidth(prefix) : 0) + layout.cursorColumn,
+      + 3 + stringWidth(prefix) + layout.cursorColumn,
   }
+}
+
+/**
+ * Reserve a readable majority-height panel for transcript message and tool details.
+ * @param terminalRows - active terminal height.
+ * @param reservedRows - additional pinned rows, such as the durable Tasks surface.
+ * @returns bounded detail-panel rows while retaining surrounding context and controls.
+ */
+export function tuiTranscriptDetailHeight(terminalRows: number, reservedRows = 0): number {
+  const rows = Math.max(1, Math.floor(Number.isFinite(terminalRows) ? terminalRows : 1))
+  const reserved = Math.max(0, Math.floor(Number.isFinite(reservedRows) ? reservedRows : 0))
+  const available = rows - 5 - reserved
+  const target = Math.floor(rows * 0.78)
+  return Math.min(rows, Math.max(7, Math.min(available, target)))
 }
 
 /**
@@ -1100,11 +1154,21 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const [busy, setBusy] = useState(false)
   const [externalEditorActive, setExternalEditorActive] = useState(false)
   const [notice, setNotice] = useState('')
+  const [confirmationNotice, setConfirmationNotice] = useState<{
+    readonly text: string
+    readonly generation: number
+  } | undefined>()
   const [questionIndex, setQuestionIndex] = useState(0)
   const [questionAnswers, setQuestionAnswers] = useState<AskUserQuestionAnswerItem[]>([])
   const [questionCursor, setQuestionCursor] = useState(0)
   const [approvalOffset, setApprovalOffset] = useState(0)
   const [focus, setFocus] = useState<TuiTranscriptFocusState | undefined>()
+  const [outputReaderScope, setOutputReaderScope] = useState<'segment' | 'response'>('segment')
+  const [activityInspector, setActivityInspector] = useState<{
+    readonly key: string
+    readonly selection: number
+    readonly callId?: string | undefined
+  } | undefined>()
   const [feedbackNoteDraft, setFeedbackNoteDraft] = useState<{
     readonly messageId: string
     readonly rating: 'positive' | 'negative'
@@ -1221,6 +1285,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const selectionPending = useRef<TuiSelectionPending | undefined>()
   const lastScreenClick = useRef<TuiScreenClick | undefined>()
   const lastEscapeAt = useRef<number | undefined>()
+  const transcriptWheelBoundaryGuard = useRef(new TuiTranscriptWheelBoundaryGuard())
   const directoryBrowserAbort = useRef<AbortController | undefined>()
   const currentAgentViewId = useRef(props.view.id)
   const currentAgentViewState = useRef<TuiAgentViewLocalState>({
@@ -1231,8 +1296,14 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   }
   useEffect(() => { props.onMounted() }, [props.onMounted])
   useEffect(() => {
+    if (confirmationNotice === undefined) return
+    const timeout = setTimeout(() => { setConfirmationNotice(undefined) }, 2_500)
+    return () => { clearTimeout(timeout) }
+  }, [confirmationNotice])
+  useEffect(() => {
     submittedPendingIds.current = []
     lastEscapeAt.current = undefined
+    transcriptWheelBoundaryGuard.current.reset()
     selectionPending.current = undefined
     lastScreenClick.current = undefined
     setScreenSelection(undefined)
@@ -1422,6 +1493,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     setWorkOpen(false)
     setWorkSelection(0)
     setNotice('')
+    setConfirmationNotice(undefined)
   }, [props.view.id])
 
   useEffect(() => {
@@ -1453,7 +1525,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           label: node.kind === 'todo' ? tuiMessage(locale, 'transcript.tasks.title')
             : node.kind === 'text' ? node.label
               : node.kind === 'compaction' ? tuiMessage(locale, 'transcript.compaction.title')
-                : node.kind === 'deliverables' ? tuiMessage(locale, 'deliverables.title') : node.name,
+                : node.kind === 'deliverables' ? tuiMessage(locale, 'deliverables.title')
+                  : node.kind === 'tool-activity' ? toolActivityHeadingText(node, locale) : node.name,
           node,
         }]
       }
@@ -1471,8 +1544,35 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     ? -1
     : exactFocusedIndex >= 0 ? exactFocusedIndex : Math.min(focus.focusedIndex, focusTargets.length - 1)
   const focusedTarget = focusTargets[focusedIndex]
+  const focusedActivity = focus?.mode === 'detail' && focusedTarget?.node.kind === 'tool-activity'
+    ? focusedTarget.node
+    : undefined
+  const activitySelection = focusedActivity === undefined ? 0 : Math.min(
+    activityInspector?.key === focusedActivity.key ? activityInspector.selection : 0,
+    Math.max(0, focusedActivity.tools.length - 1),
+  )
+  const inspectedActivityTool = focusedActivity === undefined || activityInspector?.key !== focusedActivity.key
+    ? undefined
+    : focusedActivity.tools.find(tool => tool.callId === activityInspector.callId)
   const focusedTargetKey = focus?.mode === 'browse' ? focusedTarget?.key : undefined
   const focusedTargetNodeKind = focus?.mode === 'browse' ? focusedTarget?.node.kind : undefined
+  const focusedAssistantOutput = focus?.mode === 'detail' && focusedTarget?.child === undefined
+    && focusedTarget?.node.kind === 'text' && focusedTarget.node.tone === 'assistant'
+    ? focusedTarget.node
+    : undefined
+  const focusedAssistantParts = focusedAssistantOutput === undefined
+    ? Object.freeze([])
+    : tuiAssistantResponseParts(rows, focusedAssistantOutput)
+  const focusedAssistantResponseText = tuiAssistantResponseText(focusedAssistantParts)
+  const focusedAssistantPartIndex = focusedAssistantOutput === undefined
+    ? -1 : focusedAssistantParts.findIndex(part => part.key === focusedAssistantOutput.key)
+  const focusedAssistantReaderText = focusedAssistantOutput === undefined
+    ? ''
+    : outputReaderScope === 'response' ? focusedAssistantResponseText : focusedAssistantOutput.text
+  useEffect(() => {
+    setActivityInspector(undefined)
+    setOutputReaderScope('segment')
+  }, [focus?.mode, focusedTarget?.key])
   const focusedFeedbackMessageId = props.view.kind === 'root' && focus?.mode === 'detail'
     && focusedTarget?.node.kind === 'text' && focusedTarget.node.tone === 'assistant'
     && focusedTarget.node.closing === true
@@ -1518,19 +1618,30 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const deliverableActionsVisible = focusedDeliverables !== undefined
   const deliverableActionLine = tuiMessage(locale, props.pathOpenerAvailable
     ? 'deliverables.actions' : 'deliverables.actions.copyOnly')
-  const detailHeight = (focus?.mode === 'detail' && focusedTarget !== undefined) || footerDetail !== undefined
-    ? Math.min(12, Math.max(7, Math.floor(terminalRows / 3)))
-    : 0
+  const detailHeight = focus?.mode === 'detail' && focusedTarget !== undefined
+    ? tuiTranscriptDetailHeight(terminalRows, todoPanelRows(currentTodo))
+    : footerDetail !== undefined
+      ? Math.min(12, Math.max(7, Math.floor(terminalRows / 3)))
+      : 0
   const detailRows = Math.max(1, detailHeight - (feedbackActionsVisible || deliverableActionsVisible ? 5 : 4))
   const detailColumns = Math.max(1, (stdout.columns || 80) - 4)
   const transcriptDetailRawLines = focusedTarget === undefined
     ? []
+    : focusedAssistantOutput !== undefined
+      ? terminalMarkdownText(focusedAssistantReaderText).split('\n')
+        .flatMap(line => terminalWrappedLines(line, detailColumns))
+      : focusedActivity !== undefined
+        ? inspectedActivityTool === undefined
+          ? focusedActivity.tools.map(tool => `${toolStateMark(tool)} ${focusTitle(tool)}`)
+          : transcriptDetailCache.lines(focusedActivity, detailColumns, inspectedActivityTool)
+        : focusedDeliverables === undefined
+          ? transcriptDetailCache.lines(focusedTarget.node, detailColumns, focusedTarget.child)
+          : formatTuiDeliverableDetailLines(focusedDeliverables, Math.max(1, detailColumns - 2), locale)
+  const transcriptDetailBaseLines = focusedActivity !== undefined && inspectedActivityTool === undefined
+    ? transcriptDetailRawLines.map((line, index) => index === activitySelection ? `› ${line}` : `  ${line}`)
     : focusedDeliverables === undefined
-      ? transcriptDetailCache.lines(focusedTarget.node, detailColumns, focusedTarget.child)
-      : formatTuiDeliverableDetailLines(focusedDeliverables, Math.max(1, detailColumns - 2), locale)
-  const transcriptDetailBaseLines = focusedDeliverables === undefined
-    ? transcriptDetailRawLines
-    : transcriptDetailRawLines.map((line, index) => index === deliverableSelection ? `› ${line}` : `  ${line}`)
+      ? transcriptDetailRawLines
+      : transcriptDetailRawLines.map((line, index) => index === deliverableSelection ? `› ${line}` : `  ${line}`)
   const feedbackDetailLines = focusedFeedbackMessageId === undefined ? [] : [
     `${tuiMessage(locale, 'feedback.command')}: ${feedbackRatingLabel(focusedFeedback?.rating, locale)}`,
     ...(feedbackNoteDraft === undefined
@@ -1937,13 +2048,26 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     })]
     : projectTuiStartupGuidance(startupGuidance, modelMetadata, startupWidth, locale)
   const composerWidth = Math.max(1, (startupSurface ? startupWidth : (stdout.columns || 80)) - 4)
+  const composerPrefix = sessionExportDialog?.phase === 'selecting'
+    ? `${tuiMessage(locale, 'composer.path')} › `
+    : interaction?.kind === 'question'
+      ? '> '
+      : transcriptSearch !== undefined
+        ? `${tuiMessage(locale, 'composer.find')} › `
+        : historySearch !== undefined
+          ? `${tuiMessage(locale, 'composer.search')} › `
+          : `${tuiMessage(locale, props.view.kind === 'child'
+            ? 'composer.followup'
+            : agentStatus === 'running' ? 'composer.steer' : 'composer.prompt')} › `
+  const composerGutterWidth = stringWidth(composerPrefix)
+  const composerContinuation = ' '.repeat(composerGutterWidth)
   const historyMatch = historySearch === undefined ? undefined : tuiHistorySearchResult(historySearch, history)
   const editorComposer = sessionExportDialog?.phase === 'selecting'
     ? exportDirectory
     : transcriptSearch !== undefined
       ? createComposerState(transcriptSearch.query)
       : historySearch === undefined ? composer : createComposerState(historySearch.query)
-  const composerLayout = layoutComposer(editorComposer, composerWidth)
+  const composerLayout = layoutComposer(editorComposer, composerWidth, 5, composerGutterWidth)
   const attachmentRail = projectAttachmentRail(sessionExportDialog?.phase === 'selecting'
     ? undefined : composer.attachments)
   const attachmentRailView = attachmentRail.entries.map((entry, index) => <Box
@@ -2295,8 +2419,20 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const pluginHubDetailPageSize = pluginHubBodyRows
   const scrollingDialogFooterLine = `${tuiMessage(locale, 'common.updown')} · ${tuiMessage(locale, 'common.page')} · ${tuiMessage(locale, 'common.esc.close')}`
   const helpFooterLine = tuiMessage(locale, 'footer.help')
-  const transcriptDetailFooterLine = tuiMessage(locale,
-    footerDetail !== undefined ? 'footer.detail' : 'footer.detail.close')
+  const transcriptDetailFooterLine = focusedAssistantOutput !== undefined && focusedAssistantParts.length > 1
+    ? [
+      tuiMessage(locale, 'detail.action.copyOutput'),
+      tuiMessage(locale, 'detail.action.exportMarkdown'),
+      tuiMessage(locale, outputReaderScope === 'segment'
+        ? 'detail.action.completeResponse' : 'detail.action.currentSegment'),
+      tuiMessage(locale, 'common.page'),
+      tuiMessage(locale, 'common.esc.close'),
+    ].join(' · ')
+    : tuiMessage(locale, footerDetail !== undefined
+      ? 'footer.detail'
+      : focusedActivity !== undefined
+        ? inspectedActivityTool === undefined ? 'footer.detail.activity' : 'footer.detail.activityTool'
+        : focusedAssistantOutput === undefined ? 'footer.detail.close' : 'footer.detail.output')
   const workFooterLine = [
     tuiMessage(locale, 'footer.work.title', {
       position: work.items.length === 0 ? '0/0' : `${effectiveWorkSelection + 1}/${work.items.length}`,
@@ -2912,12 +3048,29 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       })
     }
     if (footerDetail !== undefined || focus?.mode === 'detail') {
+      const detailFooterActions = focusedAssistantOutput === undefined
+        ? []
+        : [
+          { action: { id: 'detail.copy' as const }, label: tuiMessage(locale, 'detail.action.copyOutput') },
+          {
+            action: { id: 'detail.exportMarkdown' as const },
+            label: tuiMessage(locale, 'detail.action.exportMarkdown'),
+          },
+          ...focusedAssistantParts.length > 1 ? [{
+            action: { id: 'detail.toggleScope' as const },
+            label: tuiMessage(locale, outputReaderScope === 'segment'
+              ? 'detail.action.completeResponse' : 'detail.action.currentSegment'),
+          }] : [],
+        ]
       const close = tuiDialogFooterPointerRegions({
         id: 'detail', columns, row: terminalRows, lineLeft: 2, line: transcriptDetailFooterLine,
-        actions: [{
-          action: { id: 'detail.close' },
-          label: transcriptDetailFooterLine.split(' · ').at(-1) ?? '',
-        }],
+        actions: [
+          ...detailFooterActions,
+          {
+            action: { id: 'detail.close' },
+            label: transcriptDetailFooterLine.split(' · ').at(-1) ?? '',
+          },
+        ],
         context: 'Detail',
       })
       const visibleStart = Math.min(
@@ -2936,6 +3089,16 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             context: 'Detail',
           })
           : []),
+        ...(focusedActivity === undefined || inspectedActivityTool !== undefined
+          ? []
+          : tuiActivityPointerRegions({
+            columns,
+            startRow: transcriptRows + 3,
+            visibleStart,
+            visibleCount,
+            total: focusedActivity.tools.length,
+            context: 'Detail',
+          })),
         ...(focusedDeliverables === undefined || !props.pathOpenerAvailable
           ? []
           : tuiDeliverablesPointerRegions({
@@ -4241,6 +4404,28 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     }
   }
 
+  const selectActivityTool = (index: number): void => {
+    if (focusedActivity === undefined || focusedActivity.tools.length === 0) return
+    const next = Math.max(0, Math.min(focusedActivity.tools.length - 1, index))
+    setActivityInspector({ key: focusedActivity.key, selection: next })
+    setFocus((previous) => {
+      if (previous?.mode !== 'detail') return previous
+      const offset = next < previous.detailOffset
+        ? next
+        : next >= previous.detailOffset + detailRows
+          ? Math.max(0, next - detailRows + 1)
+          : previous.detailOffset
+      return { ...previous, detailOffset: offset }
+    })
+  }
+
+  const inspectActivityTool = (index = activitySelection): void => {
+    const tool = focusedActivity?.tools[index]
+    if (focusedActivity === undefined || tool === undefined) return
+    setActivityInspector({ key: focusedActivity.key, selection: index, callId: tool.callId })
+    setFocus(previous => previous?.mode !== 'detail' ? previous : { ...previous, detailOffset: 0 })
+  }
+
   const detailSelectionPosition = (column: number, row: number): TuiScreenPosition | undefined => {
     if (detailScreenMap === undefined || inputContext !== 'Detail') return undefined
     const position = { row: row - detailScreenTopRow, column: column - 1 }
@@ -4294,9 +4479,74 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     setScreenSelection({ surface, map, range })
     const text = tuiScreenSelectionText(map, range)
     const result = props.onCopy(text)
-    setNotice(result.ok
-      ? tuiMessage(locale, 'clipboard.selection.copied')
-      : result.message ?? tuiMessage(locale, 'clipboard.selection.retained'))
+    if (result.ok) {
+      setNotice('')
+      setConfirmationNotice(previous => ({
+        text: tuiMessage(locale, 'clipboard.selection.copied'),
+        generation: (previous?.generation ?? 0) + 1,
+      }))
+    } else {
+      setConfirmationNotice(undefined)
+      setNotice(result.message ?? tuiMessage(locale, 'clipboard.selection.retained'))
+    }
+  }
+
+  const copyFocusedDetail = (): void => {
+    const copyText = screenSelection?.surface === 'detail'
+      ? tuiScreenSelectionText(screenSelection.map, screenSelection.range)
+      : focusedAssistantOutput !== undefined
+        ? focusedAssistantReaderText
+        : (footerDetailItem === undefined && focusedTarget !== undefined
+          ? tuiTranscriptDetailText(focusedTarget.node, inspectedActivityTool ?? focusedTarget.child)
+          : footerDetailItem?.detailLines.join('\n') ?? '')
+    const result = props.onCopy(copyText)
+    if (result.ok) {
+      setNotice('')
+      setConfirmationNotice(previous => ({
+        text: tuiMessage(locale, 'clipboard.detail.copied'),
+        generation: (previous?.generation ?? 0) + 1,
+      }))
+    } else {
+      setConfirmationNotice(undefined)
+      setNotice(result.message ?? tuiMessage(locale, 'clipboard.copy.failed'))
+    }
+  }
+
+  const copyAssistantOutput = (text: string): void => {
+    const result = props.onCopy(text)
+    if (result.ok) {
+      setNotice('')
+      setConfirmationNotice(previous => ({
+        text: tuiMessage(locale, 'clipboard.output.copied'),
+        generation: (previous?.generation ?? 0) + 1,
+      }))
+    } else {
+      setConfirmationNotice(undefined)
+      setNotice(result.message ?? tuiMessage(locale, 'clipboard.copy.failed'))
+    }
+  }
+
+  const exportAssistantOutput = (text: string, kind: TuiOutputExportKind): void => {
+    void props.onExportOutput(text, kind).then((result) => {
+      if (result.ok) {
+        setNotice('')
+        setConfirmationNotice(previous => ({
+          text: tuiMessage(locale, 'output.export.complete', { path: result.path }),
+          generation: (previous?.generation ?? 0) + 1,
+        }))
+      } else {
+        setConfirmationNotice(undefined)
+        setNotice(result.message ?? tuiMessage(locale, 'output.export.failed'))
+      }
+    })
+  }
+
+  const exportFocusedOutput = (): void => {
+    if (focusedAssistantOutput === undefined) return
+    exportAssistantOutput(
+      focusedAssistantReaderText,
+      outputReaderScope === 'response' ? 'response' : 'output',
+    )
   }
 
   const cancelInteraction = (): void => {
@@ -4499,6 +4749,14 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     if (action.id === 'transcript.focus') {
       const target = focusTargets[action.index]
       if (target?.key === action.key) toggleTranscriptTargetDetail(target, action.index)
+    } else if (action.id === 'transcript.output') {
+      const target = focusTargets[action.index]
+      if (target?.key === action.key && target.child === undefined
+        && target.node.kind === 'text' && target.node.tone === 'assistant') {
+        if (action.operation === 'open') toggleTranscriptTargetDetail(target, action.index)
+        else if (action.operation === 'copy') copyAssistantOutput(target.node.text)
+        else exportAssistantOutput(target.node.text, 'output')
+      }
     } else if (action.id === 'transcript.openFocused') {
       if (focus?.mode === 'browse' && focusedTarget !== undefined) {
         toggleTranscriptTargetDetail(focusedTarget, focus.focusedIndex)
@@ -5004,8 +5262,23 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       if (interaction?.kind === 'approval') props.interactions.answerApproval('allowed-once')
     } else if (action.id === 'approval.reject') {
       if (interaction?.kind === 'approval') props.interactions.answerApproval('rejected')
+    } else if (action.id === 'activity.open') {
+      inspectActivityTool(action.index)
+    } else if (action.id === 'detail.copy') {
+      copyFocusedDetail()
+    } else if (action.id === 'detail.exportMarkdown') {
+      exportFocusedOutput()
+    } else if (action.id === 'detail.toggleScope') {
+      if (focusedAssistantParts.length > 1) {
+        setOutputReaderScope(previous => previous === 'segment' ? 'response' : 'segment')
+        setFocus(previous => previous?.mode !== 'detail' ? previous : { ...previous, detailOffset: 0 })
+      }
     } else if (action.id === 'detail.close') {
       if (footerDetail !== undefined) setFooterDetail(undefined)
+      else if (focusedActivity !== undefined && inspectedActivityTool !== undefined) {
+        setActivityInspector({ key: focusedActivity.key, selection: activitySelection })
+        setFocus(previous => previous?.mode !== 'detail' ? previous : { ...previous, detailOffset: 0 })
+      }
       else setFocus(previous => previous?.mode !== 'detail' ? previous : {
         mode: 'browse', focusedKey: previous.focusedKey, focusedIndex: previous.focusedIndex,
       })
@@ -5282,6 +5555,10 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         if (sessionExportDialog !== undefined || freshSessionDialog !== undefined
           || rewindDialog !== undefined || resumeDialog !== undefined) return
         if (footerDetail !== undefined || focus?.mode === 'detail') {
+          if (footerDetail === undefined && focusedActivity !== undefined && inspectedActivityTool === undefined) {
+            selectActivityTool(activitySelection + wheelDirection)
+            return
+          }
           setFooterDetail(previous => previous === undefined ? previous : {
             ...previous,
             offset: Math.max(0, Math.min(Math.max(0, detailLines.length - detailRows), previous.offset + wheelDirection)),
@@ -5320,9 +5597,18 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           }
           return
         }
-        setTranscriptAnchor(wheelDirection < 0
-          ? transcriptScroll.previous(transcriptPage, transcriptRows)
-          : transcriptScroll.next(transcriptPage, transcriptRows))
+        const wheelAt = Date.now()
+        if (transcriptWheelBoundaryGuard.current.consume(wheelDirection, wheelAt)) return
+        const nextAnchor = transcriptScroll.byRows(transcriptPage, wheelDirection * 3, transcriptRows)
+        const nextNode = nextAnchor === undefined ? undefined : rows[nextAnchor.index]
+        if (wheelDirection > 0 && nextAnchor !== undefined
+          && nextAnchor.index > transcriptPage.startIndex
+          && nextAnchor.rowOffset === undefined
+          && nextNode?.kind === 'text'
+          && nextNode.tone === 'assistant') {
+          transcriptWheelBoundaryGuard.current.start(wheelDirection, wheelAt)
+        }
+        setTranscriptAnchor(nextAnchor)
         return
       }
       const primaryPress = mouseKind === 'press' && primaryButton
@@ -6508,6 +6794,11 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         return
       }
       const action = matchAction('Detail', input, key)
+      if (focusedActivity !== undefined && inspectedActivityTool === undefined
+        && (action === 'detail.previousItem' || action === 'detail.nextItem')) {
+        selectActivityTool(activitySelection + (action === 'detail.previousItem' ? -1 : 1))
+        return
+      }
       if (focusedDeliverables !== undefined
         && (action === 'detail.previousItem' || action === 'detail.nextItem')) {
         const offset = action === 'detail.previousItem' ? -1 : 1
@@ -6550,15 +6841,16 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         return
       }
       if (action === 'detail.copy') {
-        const copyText = screenSelection?.surface === 'detail'
-          ? tuiScreenSelectionText(screenSelection.map, screenSelection.range)
-          : footerDetailItem === undefined && focusedTarget !== undefined
-            ? tuiTranscriptDetailText(focusedTarget.node, focusedTarget.child)
-            : footerDetailItem?.detailLines.join('\n') ?? ''
-        const result = props.onCopy(copyText)
-        setNotice(result.ok
-          ? tuiMessage(locale, 'clipboard.detail.copied')
-          : result.message ?? tuiMessage(locale, 'clipboard.copy.failed'))
+        copyFocusedDetail()
+        return
+      }
+      if (action === 'detail.exportMarkdown') {
+        exportFocusedOutput()
+        return
+      }
+      if (action === 'detail.toggleScope' && focusedAssistantParts.length > 1) {
+        setOutputReaderScope(previous => previous === 'segment' ? 'response' : 'segment')
+        setFocus(previous => previous?.mode !== 'detail' ? previous : { ...previous, detailOffset: 0 })
         return
       }
       if (action === 'detail.previousPage') {
@@ -6587,6 +6879,15 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         return
       }
       if (action === 'detail.close') {
+        if (focusedActivity !== undefined && inspectedActivityTool === undefined && key.return) {
+          inspectActivityTool()
+          return
+        }
+        if (focusedActivity !== undefined && inspectedActivityTool !== undefined) {
+          setActivityInspector({ key: focusedActivity.key, selection: activitySelection })
+          setFocus(previous => previous?.mode !== 'detail' ? previous : { ...previous, detailOffset: 0 })
+          return
+        }
         setFeedbackNoteDraft(undefined)
         if (screenSelection?.surface === 'detail') setScreenSelection(undefined)
         else if (footerDetail !== undefined) setFooterDetail(undefined)
@@ -6646,9 +6947,16 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             ? ''
             : tuiTranscriptDetailText(focusedTarget.node, focusedTarget.child)
         const result = props.onCopy(copyText)
-        setNotice(result.ok
-          ? tuiMessage(locale, 'clipboard.transcript.copied')
-          : result.message ?? tuiMessage(locale, 'clipboard.copy.failed'))
+        if (result.ok) {
+          setNotice('')
+          setConfirmationNotice(previous => ({
+            text: tuiMessage(locale, 'clipboard.transcript.copied'),
+            generation: (previous?.generation ?? 0) + 1,
+          }))
+        } else {
+          setConfirmationNotice(undefined)
+          setNotice(result.message ?? tuiMessage(locale, 'clipboard.copy.failed'))
+        }
         return
       }
       if (action === 'transcript.previous' || action === 'transcript.next') {
@@ -6952,7 +7260,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     </Box>
     : undefined
   const cursorPrefix = sessionExportDialog?.phase === 'selecting'
-    ? `${tuiMessage(locale, 'composer.path')} › `
+    ? composerPrefix
     : resumeDialog !== undefined || sessionManager !== undefined || freshSessionDialog !== undefined
       || rewindDialog !== undefined || sessionExportDialog !== undefined
       || (pluginHubDialog !== undefined && interaction === undefined)
@@ -6960,15 +7268,13 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       || footerSelection !== undefined || footerDetail !== undefined || workOpen
       ? undefined
       : question !== undefined
-        ? '> '
+        ? composerPrefix
         : transcriptSearch !== undefined && interaction === undefined
-          ? `${tuiMessage(locale, 'composer.find')} › `
+          ? composerPrefix
           : historySearch !== undefined
-            ? `${tuiMessage(locale, 'composer.search')} › `
+            ? composerPrefix
             : interaction === undefined && focus === undefined && props.view.acceptsInput
-              ? `${tuiMessage(locale, props.view.kind === 'child'
-                ? 'composer.followup'
-                : agentStatus === 'running' ? 'composer.steer' : 'composer.prompt')} › `
+              ? composerPrefix
               : undefined
   props.onInputCursor(fullscreenScene !== undefined || doctorVisible || loadedContextVisible
     || providerCenterVisible || queueOpen || goalPlanOpen || sessionManager !== undefined
@@ -7425,8 +7731,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         >
           <Box flexDirection="column">
             {composerLayout.lines.map((line, index) => <Text key={`${index}:${line}`}>
-              {index === 0 && <Text {...tuiTextStyle(theme.tokens.success)}>{tuiMessage(locale, 'composer.prompt')} › </Text>}
-              {index === 0 ? '' : '  '}{line === '' && composer.text === '' && index === 0
+              {index === 0 && <Text {...tuiTextStyle(theme.tokens.success)}>{composerPrefix}</Text>}
+              {index === 0 ? '' : composerContinuation}{line === '' && composer.text === '' && index === 0
                 ? <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}>{tuiMessage(locale, 'startup.placeholder')}</Text>
                 : line}
             </Text>)}
@@ -7445,9 +7751,11 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       <Box paddingX={1} flexShrink={0} overflow="hidden">
         {notice !== ''
           ? <Text {...tuiTextStyle(theme.tokens.error)}>{notice}</Text>
-          : externalNotice !== ''
-            ? <Text {...tuiTextStyle(theme.tokens.warning)}>{terminalSafe(externalNotice)}</Text>
-            : <Text wrap="truncate-end">{footerStatus}</Text>}
+          : confirmationNotice !== undefined
+            ? <Text {...tuiTextStyle(theme.tokens.success)}>{confirmationNotice.text}</Text>
+            : externalNotice !== ''
+              ? <Text {...tuiTextStyle(theme.tokens.warning)}>{terminalSafe(externalNotice)}</Text>
+              : <Text wrap="truncate-end">{footerStatus}</Text>}
       </Box>
     </Box>
   }
@@ -7604,7 +7912,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       </TuiSection>
       {sessionExportDialog.phase === 'selecting' && <TuiSection framed paddingX={1}>
         {composerLayout.lines.map((line, index) => <Text key={`${index}:${line}`}>
-          {index === 0 && <Text {...tuiTextStyle(theme.tokens.selection)}>{tuiMessage(locale, 'composer.path')} › </Text>}{index === 0 ? '' : '  '}{line}
+          {index === 0 && <Text {...tuiTextStyle(theme.tokens.selection)}>{composerPrefix}</Text>}
+          {index === 0 ? '' : composerContinuation}{line}
         </Text>)}
       </TuiSection>}
       <TuiSection paddingX={1}>
@@ -8486,7 +8795,17 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       paddingX={1}
     >
       <TuiSection framed title={terminalSafe(footerDetailItem === undefined
-        ? focusedTarget?.label ?? tuiMessage(locale, 'common.detail')
+        ? focusedAssistantOutput !== undefined && focusedAssistantParts.length > 1
+          ? outputReaderScope === 'response'
+            ? tuiMessage(locale, 'transcript.assistant.completeResponse', { count: focusedAssistantParts.length })
+            : tuiMessage(locale, 'transcript.assistant.segment', {
+              position: focusedAssistantPartIndex + 1, count: focusedAssistantParts.length,
+            })
+          : inspectedActivityTool !== undefined
+            ? focusTitle(inspectedActivityTool)
+            : focusedActivity !== undefined
+              ? tuiMessage(locale, 'transcript.activity.title')
+              : focusedTarget?.label ?? tuiMessage(locale, 'common.detail')
         : `${tuiMessage(locale, 'common.status')} · ${footerDetailItem.label}`)}>
         {detailVisibleLines
           .map((line, index) => <React.Fragment key={`${detailOffset + index}:${line}`}>
@@ -8561,7 +8880,12 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             total: approvalLines.length,
           })}
       </TuiHintLine>
-      <TuiHintLine subtle>{tuiMessage(locale, 'approval.actions')}</TuiHintLine>
+      <TuiHintLine tone="default">
+        <Text {...tuiTextStyle(theme.tokens.muted)}>{tuiMessage(locale, 'approval.navigation')}</Text>
+        <Text bold {...tuiTextStyle(theme.tokens.success)}>{tuiMessage(locale, 'approval.allow')}</Text>
+        <Text {...tuiTextStyle(theme.tokens.muted)}> · </Text>
+        <Text bold {...tuiTextStyle(theme.tokens.error)}>{tuiMessage(locale, 'approval.reject')}</Text>
+      </TuiHintLine>
     </TuiSection>}
     {question !== undefined && <TuiSection
       framed
@@ -8587,7 +8911,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         })}
       </TuiHintLine>}
       {composerLayout.lines.map((line, index) => <Text key={`${index}:${line}`}>
-        {index === 0 ? '> ' : '  '}{line}
+        {index === 0 ? composerPrefix : composerContinuation}{line}
       </Text>)}
       {attachmentRailView}
     </TuiSection>}
@@ -8661,11 +8985,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           <Box flexDirection="column">
             {composerLayout.lines.map((line, index) => <Text key={`${index}:${line}`}>
               {index === 0 && <Text {...tuiTextStyle(transcriptSearch !== undefined || historySearch !== undefined ? theme.tokens.selection : agentStatus === 'running' ? theme.tokens.warning : theme.tokens.success)}>
-                {tuiMessage(locale, transcriptSearch !== undefined ? 'composer.find'
-                  : historySearch !== undefined ? 'composer.search'
-                    : props.view.kind === 'child' ? 'composer.followup'
-                      : agentStatus === 'running' ? 'composer.steer' : 'composer.prompt')} › </Text>}
-              {index === 0 ? '' : '  '}{line}
+                {composerPrefix}</Text>}
+              {index === 0 ? '' : composerContinuation}{line}
             </Text>)}
             {attachmentRailView}
           </Box>
@@ -8689,41 +9010,43 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             ? <Text {...tuiTextStyle(theme.tokens.selection)} bold wrap="truncate-end">{selectedFooterStatus}</Text>
             : notice !== ''
               ? <Text {...tuiTextStyle(theme.tokens.error)}>{notice}</Text>
-              : externalNotice !== ''
-                ? <Text {...tuiTextStyle(theme.tokens.warning)}>{terminalSafe(externalNotice)}</Text>
-                : runningDeliveryHint !== undefined
-                  ? <Text {...tuiTextStyle(theme.tokens.warning)} wrap="truncate-end">{runningDeliveryHint}</Text>
-                  : rewindDialog?.phase === 'browsing'
-                    ? <Text {...tuiTextStyle(theme.tokens.selection)} bold wrap="truncate-end">
-                      {tuiMessage(locale, 'footer.rewind.title', {
-                        position: rewindSelectedCandidate === undefined
-                          ? '0/0' : `${effectiveRewindSelection + 1}/${rewindCandidates.length}`,
-                      })}
-                      {' · '}{rewindSelectedCandidate === undefined
-                        ? tuiMessage(locale, 'footer.rewind.empty')
-                        : tuiMessage(locale, 'footer.rewind.actions')}
-                    </Text>
-                    : <Text wrap="truncate-end">{helpVisible
-                      ? helpFooterLine
-                      : transcriptSearch !== undefined
-                        ? tuiMessage(locale, 'footer.transcript.query', {
-                          query: JSON.stringify(transcriptSearch.query),
-                          match: transcriptSearchHit === undefined
-                            ? tuiMessage(locale, 'footer.match.none')
-                            : `${transcriptSearchSelectedIndex + 1}/${transcriptSearchHits.length}`,
-                        })
-                        : historySearch !== undefined
-                          ? tuiMessage(locale, 'footer.history.query', {
-                            query: JSON.stringify(historySearch.query),
-                            match: historyMatch?.match === undefined
+              : confirmationNotice !== undefined
+                ? <Text {...tuiTextStyle(theme.tokens.success)}>{confirmationNotice.text}</Text>
+                : externalNotice !== ''
+                  ? <Text {...tuiTextStyle(theme.tokens.warning)}>{terminalSafe(externalNotice)}</Text>
+                  : runningDeliveryHint !== undefined
+                    ? <Text {...tuiTextStyle(theme.tokens.warning)} wrap="truncate-end">{runningDeliveryHint}</Text>
+                    : rewindDialog?.phase === 'browsing'
+                      ? <Text {...tuiTextStyle(theme.tokens.selection)} bold wrap="truncate-end">
+                        {tuiMessage(locale, 'footer.rewind.title', {
+                          position: rewindSelectedCandidate === undefined
+                            ? '0/0' : `${effectiveRewindSelection + 1}/${rewindCandidates.length}`,
+                        })}
+                        {' · '}{rewindSelectedCandidate === undefined
+                          ? tuiMessage(locale, 'footer.rewind.empty')
+                          : tuiMessage(locale, 'footer.rewind.actions')}
+                      </Text>
+                      : <Text wrap="truncate-end">{helpVisible
+                        ? helpFooterLine
+                        : transcriptSearch !== undefined
+                          ? tuiMessage(locale, 'footer.transcript.query', {
+                            query: JSON.stringify(transcriptSearch.query),
+                            match: transcriptSearchHit === undefined
                               ? tuiMessage(locale, 'footer.match.none')
-                              : `${historyMatch.position}/${historyMatch.count}`,
+                              : `${transcriptSearchSelectedIndex + 1}/${transcriptSearchHits.length}`,
                           })
-                          : focus?.mode === 'browse'
-                            ? tuiMessage(locale, 'footer.browse')
-                            : focus?.mode === 'detail'
-                              ? transcriptDetailFooterLine
-                              : footerStatus}</Text>}
+                          : historySearch !== undefined
+                            ? tuiMessage(locale, 'footer.history.query', {
+                              query: JSON.stringify(historySearch.query),
+                              match: historyMatch?.match === undefined
+                                ? tuiMessage(locale, 'footer.match.none')
+                                : `${historyMatch.position}/${historyMatch.count}`,
+                            })
+                            : focus?.mode === 'browse'
+                              ? tuiMessage(locale, 'footer.browse')
+                              : focus?.mode === 'detail'
+                                ? transcriptDetailFooterLine
+                                : footerStatus}</Text>}
     </TuiSection>
   </Box>
 }

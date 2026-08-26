@@ -301,10 +301,11 @@ describe('native TUI long-session benchmark', () => {
       const retainedHeapBytes = Math.max(0, process.memoryUsage().heapUsed - heapBefore)
 
       expect(projection).toHaveLength(nodeCount)
-      expect(projection.some(node => node.kind === 'tool-group')).toBe(true)
+      expect(projection.some(node => node.kind === 'tool-activity')).toBe(true)
       expect(projection.some(node => node.kind === 'todo')).toBe(true)
-      expect(projection.some(node => node.kind === 'tool' && node.output?.includes('large deterministic output'))).toBe(true)
-      expect(projection.some(node => node.kind === 'tool-group'
+      expect(projection.some(node => node.kind === 'tool-activity'
+        && node.tools.some(tool => tool.output?.includes('large deterministic output')))).toBe(true)
+      expect(projection.some(node => node.kind === 'tool-activity'
         && node.tools.some(tool => tool.delegation?.stopReason === 'completed'))).toBe(true)
 
       let folded: readonly TranscriptNode[] = projection
@@ -346,13 +347,17 @@ describe('native TUI long-session benchmark', () => {
       )]))
       viewport.update(rows, 80)
 
-      const detailNode = projection.find((node): node is Extract<TranscriptNode, { kind: 'tool' }> =>
-        node.kind === 'tool' && node.output?.includes('large deterministic output') === true)
-      if (detailNode === undefined) throw new Error('large-output detail fixture did not project')
+      const detailActivity = projection.find((node): node is Extract<TranscriptNode, { kind: 'tool-activity' }> =>
+        node.kind === 'tool-activity'
+        && node.tools.some(tool => tool.output?.includes('large deterministic output') === true))
+      const detailNode = detailActivity?.tools.find(tool => tool.output?.includes('large deterministic output') === true)
+      if (detailActivity === undefined || detailNode === undefined) {
+        throw new Error('large-output detail fixture did not project')
+      }
       const detailCache = new TuiTranscriptDetailCache()
       let detailLines: readonly string[] = []
       const detailProjection = samplesWithSetup(() => { detailCache.reset() }, () => {
-        detailLines = detailCache.lines(detailNode, 76)
+        detailLines = detailCache.lines(detailActivity, 76, detailNode)
       })
       expect(detailLines.length).toBeGreaterThan(160)
 
@@ -400,7 +405,7 @@ describe('native TUI long-session benchmark', () => {
         instance.rerender(frame)
         stdout.reset()
       }, () => {
-        detailLines = detailCache.lines(detailNode, 76)
+        detailLines = detailCache.lines(detailActivity, 76, detailNode)
         instance.rerender(<BenchmarkFrame
           entries={tail.entries}
           overscanBefore={tail.overscanBefore}

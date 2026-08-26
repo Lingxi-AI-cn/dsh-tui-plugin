@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-session-export",
   "description": "Host-owned streaming Session ZIP producer and atomic path writer",
-  "version": "0.1.5-rc.8",
+  "version": "0.1.6-rc.8",
   "publishConfig": {
     "access": "public"
   },

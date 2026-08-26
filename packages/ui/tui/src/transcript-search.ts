@@ -159,6 +159,12 @@ function transcriptNodeSearchText(node: TranscriptNode): string {
   if (node.kind === 'deliverables') {
     return compactSearchText(['Files', ...node.items.map(item => `${item.operation} ${item.path}`)])
   }
+  if (node.kind === 'tool-activity') {
+    return compactSearchText([
+      'Tool activity',
+      ...node.tools.map(toolSearchText),
+    ])
+  }
   return compactSearchText([
     node.activity,
     ...node.tools.map(toolSearchText),

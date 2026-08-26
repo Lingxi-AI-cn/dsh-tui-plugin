@@ -6,6 +6,7 @@ import { STRUCTURED_CHILD_LIMIT, type TranscriptNode, type TranscriptTextNode } 
 import { terminalWrappedLines, tuiTranscriptWindowEntryRows, type TranscriptWindowEntry } from './viewport.ts'
 import { toolCardHeadingText, ToolCard } from './tool-card.tsx'
 import { ToolGroup, toolGroupHeadingText } from './tool-group.tsx'
+import { ToolActivity, toolActivityActiveText, toolActivityHeadingText } from './tool-activity.tsx'
 import { TodoPanel } from './todo-panel.tsx'
 import { tuiTranscriptSearchSegments } from './transcript-search.ts'
 import { tuiTextStyle, useTuiTheme, type TuiTheme } from './theme.tsx'
@@ -14,7 +15,7 @@ import { tuiScreenTextSegments, type TuiScreenSelection } from './selection.ts'
 import { tuiOsc8Text } from './hyperlink.ts'
 import { tuiBidiVisualText } from './bidi.ts'
 import { formatTuiDeliverablesRow } from './deliverables.ts'
-import { useTuiLocale } from './locale.ts'
+import { tuiMessage, useTuiLocale, type TuiLocale } from './locale.ts'
 
 function toneColor(theme: TuiTheme, tone: TranscriptTextNode['tone']): string | undefined {
   if (tone === 'user') return theme.tokens.accent
@@ -39,9 +40,44 @@ interface TuiTranscriptViewProps {
   columns?: number | undefined
 }
 
-function transcriptTextLabel(node: TranscriptTextNode): string {
-  return `${node.label}${node.tone === 'reasoning' && node.key.startsWith('event:') && node.durationMs !== undefined
+function transcriptTextLabel(node: TranscriptTextNode, locale: TuiLocale): string {
+  const label = node.tone === 'assistant' && node.continuation === true && node.label === 'Assistant'
+    ? tuiMessage(locale, 'transcript.assistant.continuation')
+    : node.label
+  return `${label}${node.tone === 'reasoning' && node.key.startsWith('event:') && node.durationMs !== undefined
     ? ` · ${(node.durationMs / 1000).toFixed(1)}s` : ''}`
+}
+
+/**
+ * Build the localized action labels shown below a completed assistant segment.
+ * @param locale - active TUI locale.
+ * @returns exact rendered line and its three independently clickable labels.
+ */
+export function tuiTranscriptAssistantReaderActions(locale: TuiLocale): {
+  readonly line: string
+  readonly open: string
+  readonly copy: string
+  readonly exportMarkdown: string
+} {
+  const open = tuiMessage(locale, 'transcript.assistant.readerOpen')
+  const copy = tuiMessage(locale, 'transcript.assistant.readerCopy')
+  const exportMarkdown = tuiMessage(locale, 'transcript.assistant.readerExport')
+  return { line: [open, copy, exportMarkdown].join(' · '), open, copy, exportMarkdown }
+}
+
+/**
+ * Describe the Output Reader actions on the final visible page of a completed assistant segment.
+ * @param entry - one visible transcript entry.
+ * @param locale - active TUI locale.
+ * @returns localized hint text, or undefined before the segment's final page.
+ */
+export function tuiTranscriptAssistantReaderHint(
+  entry: TranscriptWindowEntry,
+  locale: TuiLocale,
+): string | undefined {
+  if (entry.node.kind !== 'text' || entry.node.tone !== 'assistant' || entry.node.closing !== true) return undefined
+  if (entry.textRange !== undefined && entry.textRange.end < entry.textRange.total) return undefined
+  return tuiTranscriptAssistantReaderActions(locale).line
 }
 
 function compactionStateMark(state: 'running' | 'success' | 'failure'): string {
@@ -73,10 +109,15 @@ export function tuiTranscriptScreenMapLines(
   for (const entry of entries) {
     const key = entry.node.key
     if (entry.node.kind === 'text') {
-      lines.push({ semanticBlockKey: key, gutter: ' '.repeat(3), text: transcriptTextLabel(entry.node), selectable: false })
+      lines.push({ semanticBlockKey: key, gutter: ' '.repeat(3), text: transcriptTextLabel(entry.node, locale), selectable: false })
       lines.push({ semanticBlockKey: key, gutter: ' '.repeat(3), text: entry.text ?? '', selectable: true })
       if (entry.node.tone === 'reasoning' && entry.node.key.startsWith('event:')) continue
-      lines.push({ semanticBlockKey: key, gutter: ' '.repeat(3), text: '', selectable: false })
+      lines.push({
+        semanticBlockKey: key,
+        gutter: ' '.repeat(3),
+        text: tuiTranscriptAssistantReaderHint(entry, locale) ?? '',
+        selectable: false,
+      })
       continue
     }
     if (entry.node.kind === 'tool') {
@@ -99,6 +140,22 @@ export function tuiTranscriptScreenMapLines(
         text: toolCardHeadingText(tool, workspace),
         selectable: true,
       }))
+      continue
+    }
+    if (entry.node.kind === 'tool-activity') {
+      lines.push({
+        semanticBlockKey: key,
+        gutter: ' '.repeat(3),
+        text: toolActivityHeadingText(entry.node, locale),
+        selectable: true,
+      })
+      const active = toolActivityActiveText(entry.node, locale, workspace)
+      if (active !== undefined) lines.push({
+        semanticBlockKey: key,
+        gutter: ' '.repeat(3),
+        text: `  └─ ${active}`,
+        selectable: false,
+      })
       continue
     }
     if (entry.node.kind === 'compaction') {
@@ -270,6 +327,7 @@ export function TuiTranscriptView({
   columns = 80,
 }: TuiTranscriptViewProps): React.ReactElement {
   const theme = useTuiTheme()
+  const locale = useTuiLocale()
   if (entries.length === 0) {
     return <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}>
       Start a conversation. Type / for commands.
@@ -279,46 +337,52 @@ export function TuiTranscriptView({
     {overscanBefore.length > 0 && <Box height={0} overflow="hidden" flexDirection="column">
       <TuiTranscriptView entries={overscanBefore} workspace={workspace} columns={columns} />
     </Box>}
-    {entries.map((entry, index) => <Box
-      key={entry.node.key}
-      flexDirection="row"
-      marginBottom={entry.node.kind === 'tool' || entry.node.kind === 'deliverables'
-        || entries[index + 1]?.node.kind === 'deliverables' ? 0 : 1}
-      flexShrink={0}
-    >
-      <Text {...tuiTextStyle(theme.tokens.selection)}>{
-        focusedNode === entry.node
-          || rewindSelectedKey === entry.node.key
-          || searchSelectedKey === entry.node.key
-          ? '› ' : '  '
-      }</Text>
-      <Box flexDirection="column" flexGrow={1}>
-        {entry.node.kind === 'tool'
-          ? <ToolCard
-            node={entry.node}
-            expanded={false}
-            workspace={workspace}
-            selectionMap={selectionMap}
-            selection={selection}
-          />
-          : entry.node.kind === 'tool-group'
-            ? <ToolGroup node={entry.node} workspace={workspace} {...focusedNode === entry.node
-              && focusedCallId !== undefined ? { focusedCallId } : {}} selectionMap={selectionMap} selection={selection} />
-            : entry.node.kind === 'compaction'
-              ? <CompactionCard node={entry.node} selectionMap={selectionMap} selection={selection} />
-              : entry.node.kind === 'deliverables'
-                ? <DeliverablesCard node={entry.node} columns={columns} />
-                : entry.node.kind === 'todo'
-                  ? <TodoPanel node={entry.node} />
-                  : <>
-                    <Text bold {...tuiTextStyle(toneColor(theme, entry.node.tone))}>{entry.node.label}{entry.node.tone === 'reasoning' && entry.node.key.startsWith('event:') && entry.node.durationMs !== undefined
-                      ? ` · ${(entry.node.durationMs / 1000).toFixed(1)}s` : ''}</Text>
-                    {entry.text !== '' && <Text wrap="wrap">{transcriptBodyView(
-                      theme, entry, selectionMap, selection, searchSelectedKey, searchQuery,
-                    )}</Text>}
-                  </>}
+    {entries.map((entry, index) => {
+      const readerHint = tuiTranscriptAssistantReaderHint(entry, locale)
+      return <Box
+        key={entry.node.key}
+        flexDirection="row"
+        marginBottom={readerHint !== undefined || entry.node.kind === 'tool' || entry.node.kind === 'deliverables'
+          || entry.node.kind === 'tool-activity'
+          || entries[index + 1]?.node.kind === 'deliverables' ? 0 : 1}
+        flexShrink={0}
+      >
+        <Text {...tuiTextStyle(theme.tokens.selection)}>{
+          focusedNode === entry.node
+            || rewindSelectedKey === entry.node.key
+            || searchSelectedKey === entry.node.key
+            ? '› ' : '  '
+        }</Text>
+        <Box flexDirection="column" flexGrow={1}>
+          {entry.node.kind === 'tool'
+            ? <ToolCard
+              node={entry.node}
+              expanded={false}
+              workspace={workspace}
+              selectionMap={selectionMap}
+              selection={selection}
+            />
+            : entry.node.kind === 'tool-group'
+              ? <ToolGroup node={entry.node} workspace={workspace} {...focusedNode === entry.node
+                && focusedCallId !== undefined ? { focusedCallId } : {}} selectionMap={selectionMap} selection={selection} />
+              : entry.node.kind === 'tool-activity'
+                ? <ToolActivity node={entry.node} workspace={workspace} selectionMap={selectionMap} selection={selection} />
+                : entry.node.kind === 'compaction'
+                  ? <CompactionCard node={entry.node} selectionMap={selectionMap} selection={selection} />
+                  : entry.node.kind === 'deliverables'
+                    ? <DeliverablesCard node={entry.node} columns={columns} />
+                    : entry.node.kind === 'todo'
+                      ? <TodoPanel node={entry.node} />
+                      : <>
+                        <Text bold {...tuiTextStyle(toneColor(theme, entry.node.tone))}>{transcriptTextLabel(entry.node, locale)}</Text>
+                        {entry.text !== '' && <Text wrap="wrap">{transcriptBodyView(
+                          theme, entry, selectionMap, selection, searchSelectedKey, searchQuery,
+                        )}</Text>}
+                        {readerHint !== undefined && <Text {...tuiTextStyle(theme.tokens.selection)}>{readerHint}</Text>}
+                      </>}
+        </Box>
       </Box>
-    </Box>)}
+    })}
     {overscanAfter.length > 0 && <Box height={0} overflow="hidden" flexDirection="column">
       <TuiTranscriptView entries={overscanAfter} workspace={workspace} columns={columns} />
     </Box>}

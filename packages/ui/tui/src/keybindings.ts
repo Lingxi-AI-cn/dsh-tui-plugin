@@ -64,6 +64,8 @@ export type TuiInteractionActionId =
   | 'detail.previousPage'
   | 'detail.nextPage'
   | 'detail.copy'
+  | 'detail.exportMarkdown'
+  | 'detail.toggleScope'
   | 'detail.feedbackPositive'
   | 'detail.feedbackNegative'
   | 'detail.feedbackNote'
@@ -310,7 +312,9 @@ export const TUI_INTERACTION_REGISTRY: readonly TuiInteractionDescriptor[] = Obj
 
   descriptor('detail.previousPage', 'Detail', 'Previous detail page', [key('pageup', 'PageUp')]),
   descriptor('detail.nextPage', 'Detail', 'Next detail page', [key('pagedown', 'PageDown')]),
-  descriptor('detail.copy', 'Detail', 'Copy complete detail', [key('y', 'Y')]),
+  descriptor('detail.copy', 'Detail', 'Copy complete output or detail', [key('y', 'Y')]),
+  descriptor('detail.exportMarkdown', 'Detail', 'Export assistant output to Markdown', [key('m', 'M')]),
+  descriptor('detail.toggleScope', 'Detail', 'Toggle current segment or complete response', [key('tab', 'Tab')]),
   descriptor('detail.feedbackPositive', 'Detail', 'Like assistant message', [key('l', 'L')]),
   descriptor('detail.feedbackNegative', 'Detail', 'Dislike assistant message', [key('d', 'D')]),
   descriptor('detail.feedbackNote', 'Detail', 'Edit feedback note', [key('n', 'N')]),
@@ -411,7 +415,9 @@ const TUI_INTERACTION_DESCRIPTIONS_ZH: Readonly<Record<TuiInteractionActionId, s
   'transcript.close': '返回输入框',
   'detail.previousPage': '详情上一页',
   'detail.nextPage': '详情下一页',
-  'detail.copy': '复制完整详情',
+  'detail.copy': '复制完整输出或详情',
+  'detail.exportMarkdown': '将助手输出导出为 Markdown',
+  'detail.toggleScope': '切换当前片段或完整回答',
   'detail.feedbackPositive': '赞当前助手消息',
   'detail.feedbackNegative': '踩当前助手消息',
   'detail.feedbackNote': '编辑反馈备注',

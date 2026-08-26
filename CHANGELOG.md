@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.6-rc.8
+
+- Reorganizes consecutive same-turn tool calls into compact activity summaries with a two-level Activity Inspector for category and exact-call details.
+- Adds a majority-height assistant result reader with physical-row mouse scrolling, continuation-aware segment navigation, and complete-response switching.
+- Adds direct copy and Markdown export actions for either one assistant segment or the complete same-turn response, with clickable transcript and detail controls.
+- Keeps result-reader actions visible beside pinned Tasks, prevents wheel-boundary jumps, and makes success notices transient so they do not cover the footer.
+
 ## 0.1.5-rc.8
 
 - Adds native Provider, Session/Workspace, Preset, and Host Plugin management surfaces, including capability-gated mutations, redacted settings, safe preset authoring, Session archive plus Host-gated restore, and provider logout.

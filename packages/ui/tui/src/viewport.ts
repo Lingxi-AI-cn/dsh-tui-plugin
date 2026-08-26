@@ -3,6 +3,7 @@
 import stringWidth from 'string-width'
 import { STRUCTURED_CHILD_LIMIT, type TranscriptNode, type TranscriptTextNode } from './transcript.ts'
 import { terminalMarkdownText } from './markdown.ts'
+import { tuiToolActivityRows } from './tool-activity.tsx'
 
 /** One transcript node plus the exact text selected for this terminal frame. */
 export interface TranscriptWindowEntry {
@@ -10,6 +11,18 @@ export interface TranscriptWindowEntry {
   node: TranscriptNode
   /** Terminal projection for text nodes; absent for tool nodes. */
   text?: string | undefined
+  /** Source physical-row range retained when an oversized text node is paged. */
+  textRange?: TuiTranscriptTextWindowRange | undefined
+}
+
+/** Physical source rows represented by one paged transcript text entry. */
+export interface TuiTranscriptTextWindowRange {
+  /** Inclusive source physical row. */
+  start: number
+  /** Exclusive source physical row. */
+  end: number
+  /** Total source physical rows at the active terminal width. */
+  total: number
 }
 
 /** One navigable transcript frame and its position in the complete projection. */
@@ -32,6 +45,8 @@ export interface TuiTranscriptViewportAnchor {
   key: string
   /** Previous semantic index used only when replacement removes the key. */
   index: number
+  /** Optional physical text row inside an oversized semantic block. */
+  rowOffset?: number | undefined
 }
 
 /** A visible transcript frame plus bounded blocks mounted as render overscan. */
@@ -102,23 +117,46 @@ export function terminalWrappedLines(text: string, width: number): string[] {
   return result
 }
 
-function tail(text: string, rows: number, width: number): string {
+function pagedText(
+  text: string,
+  rows: number,
+  width: number,
+  mode: 'head' | 'tail' | 'offset',
+  offset = 0,
+): { readonly text: string; readonly range: TuiTranscriptTextWindowRange } {
   const lines = terminalWrappedLines(text, width)
-  if (lines.length <= rows) return text
-  if (rows <= 1) return '…'
-  return ['… earlier content', ...lines.slice(-(rows - 1))].join('\n')
-}
+  const total = Math.max(1, lines.length)
+  const budget = Math.max(1, rows)
+  if (mode === 'tail') {
+    const markerRows = total > budget && budget > 1 ? 1 : 0
+    const contentRows = Math.max(1, budget - markerRows)
+    const start = Math.max(0, total - contentRows)
+    return {
+      text: [...(start > 0 ? ['… earlier content'] : []), ...lines.slice(start)].join('\n'),
+      range: { start, end: total, total },
+    }
+  }
 
-function head(text: string, rows: number, width: number): string {
-  const lines = terminalWrappedLines(text, width)
-  if (lines.length <= rows) return text
-  if (rows <= 1) return '…'
-  return [...lines.slice(0, rows - 1), '… later content'].join('\n')
+  const start = Math.min(Math.max(0, mode === 'head' ? 0 : offset), total - 1)
+  const hasEarlier = start > 0
+  const availableAfterEarlier = Math.max(1, budget - (hasEarlier ? 1 : 0))
+  const canMarkLater = availableAfterEarlier > 1 && start + availableAfterEarlier < total
+  const contentRows = Math.max(1, availableAfterEarlier - (canMarkLater ? 1 : 0))
+  const end = Math.min(total, start + contentRows)
+  return {
+    text: [
+      ...(hasEarlier ? ['… earlier content'] : []),
+      ...lines.slice(start, end),
+      ...(end < total && canMarkLater ? ['… later content'] : []),
+    ].join('\n'),
+    range: { start, end, total },
+  }
 }
 
 function nodeRows(node: TranscriptNode, width: number, projectedText?: string): number {
   if (node.kind === 'tool') return 1
   if (node.kind === 'deliverables') return 1
+  if (node.kind === 'tool-activity') return tuiToolActivityRows(node)
   if (node.kind === 'compaction') {
     return 1 + (node.summary === undefined ? 0 : 1) + (node.error === undefined ? 0 : 1)
   }
@@ -155,8 +193,12 @@ function estimatedNodeRows(node: TranscriptNode, width: number): number {
   return 2 + bodyRows
 }
 
-function entry(node: TranscriptNode, text?: string): TranscriptWindowEntry {
-  return text === undefined ? { node } : { node, text }
+function entry(
+  node: TranscriptNode,
+  text?: string,
+  textRange?: TuiTranscriptTextWindowRange,
+): TranscriptWindowEntry {
+  return text === undefined ? { node } : { node, text, ...(textRange === undefined ? {} : { textRange }) }
 }
 
 function selectFromStart(
@@ -179,14 +221,17 @@ function selectFromStart(
       continue
     }
     if (selected.length === 0 && node.kind === 'text' && remaining >= 2) {
-      selected.push(entry(node, head(displayText(node, width), remaining - 1, width)))
+      const page = pagedText(displayText(node, width), Math.max(1, remaining - 2), width, 'head')
+      selected.push(entry(node, page.text, page.range))
       endIndex = index
     }
     break
   }
   return {
     entries: Object.freeze(selected), startIndex, endIndex,
-    hasOlder: startIndex > 0, hasNewer: endIndex >= 0 && endIndex < nodes.length - 1,
+    hasOlder: startIndex > 0 || (selected[0]?.textRange?.start ?? 0) > 0,
+    hasNewer: (selected.at(-1)?.textRange?.end ?? 0) < (selected.at(-1)?.textRange?.total ?? 0)
+      || (endIndex >= 0 && endIndex < nodes.length - 1),
   }
 }
 
@@ -215,6 +260,14 @@ export function selectTranscriptWindow(
       if (remaining < 1) break
       selected.push({ node })
       remaining -= 1
+      continue
+    }
+
+    if (node.kind === 'tool-activity') {
+      const required = tuiToolActivityRows(node)
+      if (required > remaining) break
+      selected.push({ node })
+      remaining -= required
       continue
     }
 
@@ -266,7 +319,8 @@ export function selectTranscriptWindow(
       continue
     }
     if (selected.length === 0 && remaining >= 2) {
-      selected.push({ node, text: tail(text, remaining - 1, width) })
+      const page = pagedText(text, Math.max(1, remaining - 2), width, 'tail')
+      selected.push(entry(node, page.text, page.range))
     }
     break
   }
@@ -304,7 +358,13 @@ export function selectTranscriptPage(
   const lastKey = entries.at(-1)?.node.key
   const startIndex = firstKey === undefined ? -1 : nodes.findIndex(node => node.key === firstKey)
   const endIndex = lastKey === undefined ? -1 : nodes.findIndex(node => node.key === lastKey)
-  return { entries, startIndex, endIndex, hasOlder: startIndex > 0, hasNewer: false }
+  return {
+    entries,
+    startIndex,
+    endIndex,
+    hasOlder: startIndex > 0 || (entries[0]?.textRange?.start ?? 0) > 0,
+    hasNewer: false,
+  }
 }
 
 /**
@@ -451,7 +511,7 @@ export class TuiTranscriptViewportIndex {
     })
     if (anchor !== undefined) {
       const start = this.resolveIndex(anchor.key, anchor.index)
-      return this.virtualize(this.selectFromStart(start, maxRows))
+      return this.virtualize(this.selectFromStart(start, maxRows, anchor.rowOffset ?? 0))
     }
     return this.virtualize(this.selectTail(maxRows))
   }
@@ -460,13 +520,18 @@ export class TuiTranscriptViewportIndex {
    * Resolve a stable key, falling back to the nearest surviving semantic index.
    * @param key - preferred semantic node key.
    * @param indexHint - previous index used when replacement removes the key.
+   * @param rowOffset - optional physical row inside an oversized text block.
    * @returns replacement-safe anchor, or undefined for an empty projection.
    */
-  anchor(key: string, indexHint: number): TuiTranscriptViewportAnchor | undefined {
+  anchor(key: string, indexHint: number, rowOffset = 0): TuiTranscriptViewportAnchor | undefined {
     if (this.nodes.length === 0) return undefined
     const index = this.resolveIndex(key, indexHint)
     const node = this.nodes[index]
-    return node === undefined ? undefined : { key: node.key, index }
+    return node === undefined ? undefined : {
+      key: node.key,
+      index,
+      ...(rowOffset > 0 ? { rowOffset } : {}),
+    }
   }
 
   /**
@@ -506,6 +571,36 @@ export class TuiTranscriptViewportIndex {
    */
   indexAtPhysicalRow(row: number): number {
     return this.rows.indexAt(row)
+  }
+
+  /**
+   * Read the current exact-or-estimated indexed physical-row total.
+   * @returns physical rows represented by the current immutable-node index.
+   */
+  totalPhysicalRows(): number {
+    return this.rows.total()
+  }
+
+  /**
+   * Resolve a small-scroll target from one indexed physical row. Text blocks
+   * retain an inner body-row offset; structured blocks snap to their boundary.
+   * @param row - zero-based physical row in the complete semantic projection.
+   * @returns replacement-safe semantic/inner-row anchor.
+   */
+  anchorAtPhysicalRow(row: number): TuiTranscriptViewportAnchor | undefined {
+    if (this.nodes.length === 0) return undefined
+    let index = this.indexAtPhysicalRow(row)
+    if (index < 0) return undefined
+    this.measure(index)
+    index = this.indexAtPhysicalRow(row)
+    const node = this.nodes[index]
+    if (node === undefined) return undefined
+    const measured = this.measure(index)
+    const offset = Math.max(0, row - this.physicalRowAt(index))
+    if (node.kind !== 'text') return this.anchorAt(index)
+    if (offset >= measured.rows - 1 && index < this.nodes.length - 1) return this.anchorAt(index + 1)
+    const bodyOffset = Math.max(0, offset - 1)
+    return this.anchor(node.key, index, bodyOffset)
   }
 
   /**
@@ -588,7 +683,7 @@ export class TuiTranscriptViewportIndex {
     return entry(node, cached?.text ?? '')
   }
 
-  private selectFromStart(startIndex: number, maxRows: number): TranscriptWindow {
+  private selectFromStart(startIndex: number, maxRows: number, rowOffset = 0): TranscriptWindow {
     let remaining = Math.max(1, maxRows)
     const selected: TranscriptWindowEntry[] = []
     let endIndex = startIndex - 1
@@ -596,16 +691,24 @@ export class TuiTranscriptViewportIndex {
       const node = this.nodes[index]
       if (node === undefined) continue
       const measured = this.measure(index)
+      if (selected.length === 0 && node.kind === 'text' && (rowOffset > 0 || measured.rows > remaining)) {
+        const page = pagedText(
+          measured.text ?? '', Math.max(1, remaining - 2), this.width, rowOffset > 0 ? 'offset' : 'head', rowOffset,
+        )
+        selected.push(entry(node, page.text, page.range))
+        endIndex = index
+        return {
+          entries: Object.freeze(selected), startIndex, endIndex,
+          hasOlder: startIndex > 0 || page.range.start > 0,
+          hasNewer: page.range.end < page.range.total || endIndex < this.nodes.length - 1,
+        }
+      }
       if (measured.rows <= remaining) {
         const item = this.measuredEntry(index)
         if (item !== undefined) selected.push(item)
         remaining -= measured.rows
         endIndex = index
         continue
-      }
-      if (selected.length === 0 && node.kind === 'text' && remaining >= 2) {
-        selected.push(entry(node, head(measured.text ?? '', remaining - 1, this.width)))
-        endIndex = index
       }
       break
     }
@@ -631,7 +734,8 @@ export class TuiTranscriptViewportIndex {
         continue
       }
       if (selected.length === 0 && node.kind === 'text' && remaining >= 2) {
-        selected.push(entry(node, tail(measured.text ?? '', remaining - 1, this.width)))
+        const page = pagedText(measured.text ?? '', Math.max(1, remaining - 2), this.width, 'tail')
+        selected.push(entry(node, page.text, page.range))
         startIndex = index
       }
       break
@@ -641,7 +745,7 @@ export class TuiTranscriptViewportIndex {
       entries,
       startIndex: entries.length === 0 ? -1 : startIndex,
       endIndex: entries.length === 0 ? -1 : this.nodes.length - 1,
-      hasOlder: entries.length > 0 && startIndex > 0,
+      hasOlder: entries.length > 0 && (startIndex > 0 || (entries[0]?.textRange?.start ?? 0) > 0),
       hasNewer: false,
     }
   }
@@ -709,6 +813,16 @@ export class TuiTranscriptScrollController {
    * @returns preceding anchor, or undefined for an empty projection.
    */
   previous(page: TranscriptWindow, maxRows: number): TuiTranscriptViewportAnchor | undefined {
+    const first = page.entries[0]
+    if (first?.textRange !== undefined && first.textRange.start > 0) {
+      const bodyRows = Math.max(1, maxRows - 2)
+      const middleContentRows = Math.max(1, bodyRows - 2)
+      return this.viewport.anchor(
+        first.node.key,
+        page.startIndex,
+        Math.max(0, first.textRange.start - middleContentRows),
+      )
+    }
     return this.viewport.previousAnchor(page.startIndex, maxRows)
   }
 
@@ -719,11 +833,48 @@ export class TuiTranscriptScrollController {
    * @returns next historical anchor, or undefined for tail-follow mode.
    */
   next(page: TranscriptWindow, maxRows: number): TuiTranscriptViewportAnchor | undefined {
+    const last = page.entries.at(-1)
+    if (last?.textRange !== undefined && last.textRange.end < last.textRange.total) {
+      return this.viewport.anchor(last.node.key, page.endIndex, last.textRange.end)
+    }
     const nextIndex = page.endIndex + 1
     if (nextIndex <= 0) return this.latest()
     const next = this.viewport.anchor('', nextIndex)
     if (next === undefined) return this.latest()
     return this.viewport.page(maxRows, next).hasNewer ? next : this.latest()
+  }
+
+  /**
+   * Move the viewport top by a small physical-row delta. Oversized text keeps
+   * an inner row offset; entering a new text block or compact structured
+   * activity snaps at its semantic edge. Reaching the final frame restores
+   * tail-follow mode.
+   * @param page - current visible frame.
+   * @param deltaRows - signed physical-row delta.
+   * @param maxRows - physical-row budget for one frame.
+   * @returns historical anchor, or undefined for live tail-follow.
+   */
+  byRows(
+    page: TranscriptWindow,
+    deltaRows: number,
+    maxRows: number,
+  ): TuiTranscriptViewportAnchor | undefined {
+    const first = page.entries[0]
+    if (first === undefined || page.startIndex < 0 || deltaRows === 0) return this.latest()
+    const innerRow = first.textRange === undefined ? 0 : 1 + first.textRange.start
+    const currentRow = this.viewport.physicalRowAt(page.startIndex) + innerRow
+    const targetRow = Math.min(
+      Math.max(0, currentRow + Math.trunc(deltaRows)),
+      Math.max(0, this.viewport.totalPhysicalRows() - 1),
+    )
+    const next = this.viewport.anchorAtPhysicalRow(targetRow)
+    if (next === undefined) return this.latest()
+    const nextPage = this.viewport.page(maxRows, next)
+    if (deltaRows > 0 && next.index > page.startIndex && nextPage.entries[0]?.node.kind === 'text') {
+      const entered = this.viewport.anchor(next.key, next.index)
+      if (entered !== undefined) return entered
+    }
+    return nextPage.hasNewer ? next : this.latest()
   }
 
   /**
@@ -743,5 +894,39 @@ export class TuiTranscriptScrollController {
     const resolved = this.viewport.indexOfKey(key)
     const index = resolved < 0 ? indexHint : resolved
     return index >= page.startIndex && index <= page.endIndex ? current : this.reveal(key, indexHint)
+  }
+}
+
+/** Suppress same-direction wheel inertia after entering a new long text block. */
+export class TuiTranscriptWheelBoundaryGuard {
+  private hold: { direction: -1 | 1; lastEventAt: number } | undefined
+
+  /**
+   * Start holding subsequent reports from the current wheel gesture.
+   * @param direction - normalized wheel direction that crossed the boundary.
+   * @param now - current monotonic-enough UI timestamp in milliseconds.
+   */
+  start(direction: -1 | 1, now: number): void {
+    this.hold = { direction, lastEventAt: now }
+  }
+
+  /**
+   * Consume one inertial report, extending the hold until the gesture becomes quiet.
+   * @param direction - normalized direction for the new report.
+   * @param now - current monotonic-enough UI timestamp in milliseconds.
+   * @returns true when the report belongs to the held gesture and must not scroll.
+   */
+  consume(direction: -1 | 1, now: number): boolean {
+    if (this.hold === undefined || this.hold.direction !== direction || now - this.hold.lastEventAt >= 180) {
+      this.hold = undefined
+      return false
+    }
+    this.hold = { direction, lastEventAt: now }
+    return true
+  }
+
+  /** Clear any held gesture after an unrelated navigation transition. */
+  reset(): void {
+    this.hold = undefined
   }
 }

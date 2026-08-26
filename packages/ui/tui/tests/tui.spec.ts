@@ -10,6 +10,7 @@ import { compactCheckpointSource, CompactionId } from '@deepseek-ai/dsh-compacti
 import { CommandId } from '@deepseek-ai/dsh-commands'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { JobId, type JobSnapshot } from '@deepseek-ai/dsh-jobs'
+import { FsError } from '@deepseek-ai/dsh-fs'
 import {
   CallId, createAssistantMessage, createToolResultMessage, createUserMessage, ReasoningEffortId,
 } from '@deepseek-ai/dsh-llm'
@@ -32,12 +33,15 @@ import {
   TUI_INTERACTION_CONTEXT_PRIORITY, TUI_INTERACTION_REGISTRY,
   normalizeTuiTranscriptSearchText, resolveTuiTranscriptSearchHit, TuiTranscriptSearchIndex,
   TuiTranscriptDetailCache, tuiTranscriptDetailText, TuiTranscriptProjectionCache, TuiTranscriptScrollController,
-  TuiTranscriptViewportIndex, tuiTranscriptSearchSegments,
+  TuiTranscriptViewportIndex, TuiTranscriptWheelBoundaryGuard, tuiTranscriptSearchSegments,
+  toolActivityActiveText, toolActivityHeadingText, tuiToolActivityCategory, tuiToolActivityRows,
+  tuiAssistantResponseParts, tuiAssistantResponseText,
   tuiContextSegmentBar, tuiFooterItems, tuiFooterStatusLine, tuiInteractionHelpLines, tuiSelectedFooterLine,
   tuiAgentModeName, tuiAgentModeOptions,
   moveTuiFooterSelection, visibleTuiFooterItems, type TuiKeypress,
   filterTuiResumeCandidates, formatTuiRelativeTime,
   resolveTuiSessionExportDirectory,
+  resolveTuiOutputExportPath, tuiOutputMarkdown, writeTuiOutputMarkdown,
   sortTuiResumeCandidates, summarizeTuiResumeCandidate,
   tuiRewindCandidates,
   consumeTuiDoubleEscape, TUI_DOUBLE_ESCAPE_WINDOW_MS,
@@ -47,7 +51,7 @@ import {
 } from '../src/index.ts'
 import {
   inputCursorTarget, toggleTuiTranscriptFocus, tuiFooterItemsOwnPointerRow, tuiFullscreenFooterLine,
-  tuiPluginHubDetailTextStyle, tuiStartupComposerFrame, tuiWorkingFrame,
+  tuiPluginHubDetailTextStyle, tuiStartupComposerFrame, tuiTranscriptDetailHeight, tuiWorkingFrame,
 } from '../src/app.tsx'
 import {
   resolveTuiStartupLogoVariant, TUI_STARTUP_LOGO_HEIGHT,
@@ -57,7 +61,9 @@ import {
 import { InteractionStore, isTuiQuestionCancellation } from '../src/store.ts'
 import { toolDetailLines, toolStateMark, toolSummary } from '../src/tool-card.tsx'
 import { todoPanelRows } from '../src/todo-panel.tsx'
-import type { TranscriptNode, TranscriptTextNode, TranscriptTodoNode, TranscriptToolNode } from '../src/transcript.ts'
+import type {
+  TranscriptNode, TranscriptTextNode, TranscriptTodoNode, TranscriptToolActivityNode, TranscriptToolNode,
+} from '../src/transcript.ts'
 import { TerminalSession, terminalInternals, type TuiStreams } from '../src/terminal-session.ts'
 import {
   externalEditorInternals, parseTuiEditorCommand, resolveTuiEditorArgv, runTuiExternalEditor,
@@ -248,6 +254,30 @@ describe('terminalMarkdownText', () => {
 })
 
 describe('foldTranscript', () => {
+  it('marks same-turn assistant continuations and exposes one complete response', () => {
+    const first = createAssistantMessage({
+      content: [{ type: 'text', text: 'Initial finding.' }], source: { provider: 'p', model: 'm' },
+    })
+    const second = createAssistantMessage({
+      content: [{ type: 'text', text: 'Supplemental conclusion.' }], source: { provider: 'p', model: 'm' },
+    })
+    const nodes = foldTranscript([
+      event(0, 'assistant/message', { turn: 1, step: 1, message: first }),
+      event(1, 'assistant/message', { turn: 1, step: 2, message: second }),
+      event(2, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+    ])
+    expect(nodes).toMatchObject([
+      { kind: 'text', tone: 'assistant' },
+      { kind: 'text', tone: 'assistant', continuation: true, closing: true },
+    ])
+    expect(nodes[0]).not.toHaveProperty('continuation')
+    const target = nodes[1]
+    if (target?.kind !== 'text') throw new Error('expected assistant continuation')
+    const parts = tuiAssistantResponseParts(nodes, target)
+    expect(parts).toHaveLength(2)
+    expect(tuiAssistantResponseText(parts)).toBe('Initial finding.\n\n---\n\nSupplemental conclusion.')
+  })
+
   it('reconciles streamed assistant text and projects user, tool, and failure facts', () => {
     const callId = CallId('call-1')
     const user = createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'user' } })
@@ -276,10 +306,12 @@ describe('foldTranscript', () => {
       expect.objectContaining({ label: 'You', text: 'hello' }),
       expect.objectContaining({ label: 'Assistant', text: 'complete answer' }),
       expect.objectContaining({
-        kind: 'tool', callId: 'call-1', name: 'bash', args: { cmd: 'pwd' }, state: 'success',
-        callView: { card: 'terminal', title: 'pwd', cwd: '/workspace' },
-        resultView: { card: 'terminal', output: 'result', exitCode: 0 },
-        output: '�[31mresult',
+        kind: 'tool-activity', closed: true, tools: [expect.objectContaining({
+          callId: 'call-1', name: 'bash', args: { cmd: 'pwd' }, state: 'success',
+          callView: { card: 'terminal', title: 'pwd', cwd: '/workspace' },
+          resultView: { card: 'terminal', output: 'result', exitCode: 0 },
+          output: '�[31mresult',
+        })],
       }),
       expect.objectContaining({ label: 'Error', text: 'SERVER: down' }),
     ])
@@ -421,8 +453,10 @@ describe('foldTranscript', () => {
       event(1, 'tool/result', { turn: 1, step: 1, message: result, error: { name: 'Error', code: 'FAILED' } }),
     ], () => throwing)).toEqual([
       expect.objectContaining({
-        kind: 'tool', args: '{bad', state: 'error', output: 'fallback output', errorCode: 'FAILED',
-        callView: { card: 'generic', title: 'legacy', rawInput: '{bad' },
+        kind: 'tool-activity', tools: [expect.objectContaining({
+          args: '{bad', state: 'error', output: 'fallback output', errorCode: 'FAILED',
+          callView: { card: 'generic', title: 'legacy', rawInput: '{bad' },
+        })],
       }),
     ])
   })
@@ -463,7 +497,9 @@ describe('foldTranscript', () => {
     expect(nodes[0]).toEqual({
       kind: 'todo', key: 'todo:latest', todos: [{ content: 'Valid task', status: 'in_progress' }],
     })
-    expect(nodes[1]).toMatchObject({ kind: 'tool', name: 'todo_write', state: 'error' })
+    expect(nodes[1]).toMatchObject({
+      kind: 'tool-activity', tools: [{ name: 'todo_write', state: 'error' }],
+    })
     expect(foldTranscript([...events, event(5, 'turn/start', { turn: 2 })])).toHaveLength(1)
   })
 
@@ -482,11 +518,21 @@ describe('foldTranscript', () => {
       event(2, 'tool/call', { turn: 1, step: 1, callId: CallId('bash-1'), name: 'bash', arguments: '{}' }),
     ]
     const nodes = foldTranscript(events, name => name === 'read' ? read : name === 'glob' ? search : undefined)
-    expect(nodes).toHaveLength(2)
+    expect(nodes).toHaveLength(1)
     expect(nodes[0]).toMatchObject({
-      kind: 'tool-group', activity: 'explore', tools: [{ name: 'read' }, { name: 'glob' }],
+      kind: 'tool-activity', tools: [{ name: 'read' }, { name: 'glob' }, { name: 'bash' }],
     })
-    expect(nodes[1]).toMatchObject({ kind: 'tool', name: 'bash' })
+  })
+
+  it('keeps consecutive tool activity from different scheduler turns separate', () => {
+    const nodes = foldTranscript([
+      event(0, 'tool/call', { turn: 1, step: 1, callId: CallId('turn-1'), name: 'read', arguments: '{}' }),
+      event(1, 'tool/call', { turn: 2, step: 1, callId: CallId('turn-2'), name: 'read', arguments: '{}' }),
+    ])
+    expect(nodes).toMatchObject([
+      { kind: 'tool-activity', turn: 1, tools: [{ callId: 'turn-1' }] },
+      { kind: 'tool-activity', turn: 2, tools: [{ callId: 'turn-2' }] },
+    ])
   })
 
   it('folds authoritative scheduler groups with stable model order and exclusive boundaries', () => {
@@ -504,16 +550,14 @@ describe('foldTranscript', () => {
         members: [{ callId: CallId('write-1'), name: 'write', arguments: '{}' }], closed: true,
       }),
     ])
-    expect(nodes).toMatchObject([
-      {
-        kind: 'tool-group', key: 'execution-group:1:1:0', activity: 'parallel', closed: true,
-        tools: [{ callId: 'read-1', state: 'running' }, { callId: 'delegate-1', state: 'running' }],
-      },
-      {
-        kind: 'tool-group', key: 'execution-group:1:1:1', activity: 'exclusive', closed: true,
-        tools: [{ callId: 'write-1', state: 'queued' }],
-      },
-    ])
+    expect(nodes).toMatchObject([{
+      kind: 'tool-activity', key: 'tool-activity:1:read-1', closed: false,
+      tools: [
+        { callId: 'read-1', state: 'running' },
+        { callId: 'delegate-1', state: 'running' },
+        { callId: 'write-1', state: 'queued' },
+      ],
+    }])
   })
 
   it('applies a closing scheduler snapshot to the existing group identity', () => {
@@ -530,7 +574,7 @@ describe('foldTranscript', () => {
       }),
     ])
     expect(nodes).toMatchObject([{
-      key: 'execution-group:1:1:0', closed: true, tools: [{ callId: 'one' }],
+      key: 'tool-activity:1:one', closed: false, tools: [{ callId: 'one' }],
     }])
   })
 
@@ -556,7 +600,7 @@ describe('foldTranscript', () => {
     expect(nodes).toHaveLength(1)
     const group = nodes[0]
     expect(group).toMatchObject({
-      kind: 'tool-group',
+      kind: 'tool-activity',
       tools: [{
         callId: 'delegate-1', state: 'success',
         delegation: {
@@ -565,7 +609,7 @@ describe('foldTranscript', () => {
         },
       }],
     })
-    if (group?.kind !== 'tool-group') throw new Error('expected group')
+    if (group?.kind !== 'tool-activity') throw new Error('expected activity')
     expect(toolDetailLines(group.tools[0]!)).toContain('Child: child-1')
     expect(toolStateMark(group.tools[0]!)).toBe('✓')
   })
@@ -586,9 +630,9 @@ describe('foldTranscript', () => {
         turn: 1, step: 1, message: result, error: { name: 'Error', code: 'DISPOSAL_FAILED' },
       }),
     ])
-    const tool = nodes[0]
-    if (tool?.kind !== 'tool') throw new Error('expected tool')
-    expect(toolStateMark(tool)).toBe('✕')
+    const activity = nodes[0]
+    if (activity?.kind !== 'tool-activity') throw new Error('expected activity')
+    expect(toolStateMark(activity.tools[0]!)).toBe('✕')
   })
 })
 
@@ -699,7 +743,7 @@ describe('TuiTranscriptProjectionCache', () => {
     const cache = new TuiTranscriptProjectionCache()
     expect(cache.update(events)).toEqual(foldTranscript(events))
     expect(cache.update(events)).toMatchObject([
-      { kind: 'tool', callId: 'released-call', state: 'running' },
+      { kind: 'tool-activity', tools: [{ callId: 'released-call', state: 'running' }] },
     ])
   })
 })
@@ -750,6 +794,42 @@ describe('selectTranscriptWindow', () => {
     const group = { kind: 'tool-group', key: 'group', tools: [one, two], activity: 'explore', closed: true } as const
     expect(selectTranscriptWindow([group], 3, 80)).toEqual([{ node: group }])
     expect(selectTranscriptWindow([group], 2, 80)).toEqual([])
+  })
+
+  it('collapses completed tool activity to one row and active activity to two rows', () => {
+    const read = {
+      ...toolNode(undefined), key: 'tool:read', callId: 'read',
+      callView: { card: 'generic' as const, title: 'Read src/index.ts', kind: 'read' as const },
+    }
+    const terminal = {
+      ...toolNode(undefined), key: 'tool:terminal', callId: 'terminal', state: 'running' as const,
+      callView: { card: 'terminal' as const, title: 'pnpm test', cwd: '/workspace' },
+    }
+    const active: TranscriptToolActivityNode = {
+      kind: 'tool-activity', key: 'activity:active', turn: 1, tools: [read, terminal], closed: false,
+    }
+    expect(tuiToolActivityRows(active)).toBe(2)
+    expect(toolActivityHeadingText(active, 'en')).toBe('◌ 2 operations · 1 complete · 1 running')
+    expect(toolActivityActiveText(active, 'zh', '/workspace')).toContain('正在执行：')
+    expect(tuiToolActivityCategory(read)).toBe('read')
+    expect(tuiToolActivityCategory(terminal)).toBe('terminal')
+    expect(selectTranscriptWindow([active], 2, 80)).toEqual([{ node: active }])
+    expect(selectTranscriptWindow([active], 1, 80)).toEqual([])
+
+    const completed: TranscriptToolActivityNode = {
+      ...active, key: 'activity:completed',
+      tools: [read, { ...terminal, state: 'success' }], closed: true,
+    }
+    expect(tuiToolActivityRows(completed)).toBe(1)
+    expect(toolActivityHeadingText(completed, 'zh')).toBe('✓ 2 项操作 · 读取 1 · 终端 1')
+    expect(selectTranscriptWindow([completed], 1, 80)).toEqual([{ node: completed }])
+
+    const failed: TranscriptToolActivityNode = {
+      ...completed, key: 'activity:failed',
+      tools: [{ ...read, state: 'error' }, { ...terminal, state: 'cancelled' }],
+    }
+    expect(toolActivityHeadingText(failed, 'en'))
+      .toBe('✕ 2 operations · 1 failed · 1 cancelled · 1 read · 1 terminal')
   })
 
   it('caps structured child rows and budgets an omission marker', () => {
@@ -903,6 +983,76 @@ describe('virtual transcript viewport', () => {
     expect(scroll.reveal('virtual:8', 8)).toEqual({ key: 'virtual:replacement', index: 8 })
   })
 
+  it('moves mouse-style navigation by small physical-row deltas while paging stays separate', () => {
+    const viewport = new TuiTranscriptViewportIndex()
+    const scroll = new TuiTranscriptScrollController(viewport)
+    viewport.update(tools, 80)
+    const tail = viewport.page(6)
+    const threeRowsOlder = scroll.byRows(tail, -3, 6)
+    expect(threeRowsOlder).toEqual({ key: 'virtual:11', index: 11 })
+    const historical = viewport.page(6, threeRowsOlder)
+    expect(historical.entries.map(entry => entry.node.key)).toEqual([
+      'virtual:11', 'virtual:12', 'virtual:13', 'virtual:14', 'virtual:15', 'virtual:16',
+    ])
+    expect(scroll.byRows(historical, 3, 6)).toBeUndefined()
+  })
+
+  it('moves a dense text and compact-activity tail without falling back to the same live frame', () => {
+    const history = Array.from({ length: 11 }, (_, index): TranscriptTextNode => ({
+      kind: 'text', key: `history:${index}`, tone: 'user', label: 'You', text: `Historical prompt ${index}`,
+    }))
+    const assistant: TranscriptTextNode = {
+      kind: 'text', key: 'history:assistant', tone: 'assistant', label: 'Assistant',
+      text: 'Summary\n\nfinal answer\n\n- first\n- second',
+    }
+    const activity: TranscriptToolActivityNode = {
+      kind: 'tool-activity', key: 'history:activity', turn: 1,
+      tools: [{ ...toolNode(undefined), key: 'history:tool', callId: 'history:tool' }], closed: true,
+    }
+    const nodes: readonly TranscriptNode[] = [...history, assistant, activity]
+    const viewport = new TuiTranscriptViewportIndex()
+    const scroll = new TuiTranscriptScrollController(viewport)
+    viewport.update(nodes, 76)
+    const tail = viewport.page(20)
+    const previous = scroll.byRows(tail, -3, 20)
+    expect(previous).toBeDefined()
+    expect(viewport.page(20, previous).startIndex).toBeLessThan(tail.startIndex)
+  })
+
+  it('enters a following long answer at its beginning when the mouse wheel crosses the block boundary', () => {
+    const activity: TranscriptToolActivityNode = {
+      kind: 'tool-activity', key: 'wheel:activity', turn: 1,
+      tools: [{ ...toolNode(undefined), key: 'wheel:tool', callId: 'wheel:tool' }], closed: true,
+    }
+    const answer: TranscriptTextNode = {
+      kind: 'text', key: 'wheel:answer', tone: 'assistant', label: 'Assistant', closing: true,
+      text: Array.from({ length: 7 }, (_, index) => `answer line ${index}`).join('\n'),
+    }
+    const viewport = new TuiTranscriptViewportIndex()
+    const scroll = new TuiTranscriptScrollController(viewport)
+    viewport.update([activity, answer], 80)
+
+    const activityPage = viewport.page(8, { key: activity.key, index: 0 })
+    expect(activityPage.entries.map(entry => entry.node.key)).toEqual([activity.key])
+    const wheelAnchor = scroll.byRows(activityPage, 3, 8)
+    expect(wheelAnchor).toEqual({ key: answer.key, index: 1 })
+    expect(viewport.page(8, wheelAnchor).entries[0]).toMatchObject({
+      node: answer,
+      textRange: { start: 0 },
+    })
+    expect(scroll.next(activityPage, 8)).toEqual({ key: answer.key, index: 1 })
+  })
+
+  it('holds same-direction wheel inertia until a crossed text boundary becomes quiet', () => {
+    const guard = new TuiTranscriptWheelBoundaryGuard()
+    guard.start(1, 1_000)
+    expect(guard.consume(1, 1_100)).toBe(true)
+    expect(guard.consume(1, 1_250)).toBe(true)
+    expect(guard.consume(1, 1_431)).toBe(false)
+    guard.start(1, 2_000)
+    expect(guard.consume(-1, 2_010)).toBe(false)
+  })
+
   it('indexes physical rows while measuring only the viewport neighborhood', () => {
     const nodes = Array.from({ length: 10_000 }, (_, index): TranscriptToolNode => ({
       ...toolNode(undefined), key: `large:${index}`, callId: String(index),
@@ -934,6 +1084,37 @@ describe('virtual transcript viewport', () => {
     expect(viewport.page(4).entries).toEqual(selectTranscriptPage([long], 4, 12).entries)
     expect(viewport.page(4, { key: long.key, index: 0 }).entries)
       .toEqual(selectTranscriptPage([long], 4, 12, long.key, 0).entries)
+  })
+
+  it('pages within one oversized assistant answer before reaching earlier tool calls', () => {
+    const before = { ...toolNode(undefined), key: 'before-long-answer', callId: 'before-long-answer' }
+    const answer = {
+      kind: 'text', key: 'long-answer', tone: 'assistant', label: 'Assistant',
+      text: Array.from({ length: 30 }, (_, index) => `answer line ${String(index).padStart(2, '0')}`).join('\n'),
+    } as const
+    const viewport = new TuiTranscriptViewportIndex()
+    const scroll = new TuiTranscriptScrollController(viewport)
+    viewport.update([before, answer], 80)
+
+    const tail = viewport.page(8)
+    expect(tail.entries[0]).toMatchObject({
+      node: answer,
+      textRange: { start: 25, end: 30, total: 30 },
+    })
+    const previousAnchor = scroll.previous(tail, 8)
+    expect(previousAnchor).toEqual({ key: answer.key, index: 1, rowOffset: 21 })
+    const previous = viewport.page(8, previousAnchor)
+    expect(previous.entries).toHaveLength(1)
+    expect(previous.entries[0]).toMatchObject({
+      node: answer,
+      textRange: { start: 21, end: 25, total: 30 },
+    })
+    expect(previous.entries[0]?.text).toContain('answer line 21')
+    expect(previous.entries[0]?.text).not.toContain('before-long-answer')
+    expect(scroll.next(previous, 8)).toEqual({ key: answer.key, index: 1, rowOffset: 25 })
+    expect(scroll.byRows(tail, -3, 8)).toEqual({ key: answer.key, index: 1, rowOffset: 22 })
+    expect(scroll.byRows(viewport.page(8, { key: answer.key, index: 1, rowOffset: 22 }), 3, 8))
+      .toBeUndefined()
   })
 })
 
@@ -1549,9 +1730,13 @@ describe('inputCursorTarget', () => {
   })
 
   it('centers the startup composer and preserves multiline CJK cursor cells', () => {
-    const singleLine = layoutComposer(createComposerState('你好'), tuiStartupComposerFrame({
-      rows: 24, columns: 80,
-    }, 1).width - 4)
+    const startupPrefix = 'prompt › '
+    const singleLine = layoutComposer(
+      createComposerState('你好'),
+      tuiStartupComposerFrame({ rows: 24, columns: 80 }, 1).width - 4,
+      5,
+      stringWidth(startupPrefix),
+    )
     const singleFrame = tuiStartupComposerFrame({ rows: 24, columns: 80 }, singleLine.lines.length)
     expect(singleFrame).toEqual({ width: 57, leftColumn: 12, firstInputRow: 16, logo: 'primary' })
     expect(inputCursorTarget({ rows: 24, columns: 80 }, 'prompt › ', singleLine, singleFrame)).toEqual({
@@ -1563,12 +1748,14 @@ describe('inputCursorTarget', () => {
       column: 26,
     })
 
-    const multiline = layoutComposer(createComposerState('before\n你好'), singleFrame.width - 4)
+    const multiline = layoutComposer(
+      createComposerState('before\n你好'), singleFrame.width - 4, 5, stringWidth(startupPrefix),
+    )
     const suggestedFrame = tuiStartupComposerFrame({ rows: 24, columns: 80 }, multiline.lines.length, 3)
     expect(suggestedFrame).toEqual({ width: 57, leftColumn: 12, firstInputRow: 17, logo: 'primary' })
-    expect(inputCursorTarget({ rows: 24, columns: 80 }, 'prompt › ', multiline, suggestedFrame)).toEqual({
+    expect(inputCursorTarget({ rows: 24, columns: 80 }, startupPrefix, multiline, suggestedFrame)).toEqual({
       row: 18,
-      column: 19,
+      column: 28,
     })
     expect(tuiStartupComposerFrame({ rows: 25, columns: 80 }, 1)).toEqual({
       width: 57,
@@ -1605,6 +1792,21 @@ describe('inputCursorTarget', () => {
       leftColumn: 0,
       firstInputRow: 7,
       logo: 'compact',
+    })
+  })
+
+  it('keeps long references, wrapped CJK input, and the cursor in one fixed gutter layout', () => {
+    const prefix = '输入 › '
+    const width = 32
+    const text = '请阅读文档 @GA与维护共用基础设施--图演示.html 分析这个流程，评价其'
+    const layout = layoutComposer(createComposerState(text), width, 20, stringWidth(prefix))
+
+    expect(layout.lines.length).toBeGreaterThan(1)
+    expect(layout.lines.join('')).toBe(text)
+    expect(layout.lines.every(line => stringWidth(prefix) + stringWidth(line) <= width)).toBe(true)
+    expect(inputCursorTarget({ rows: 24, columns: 80 }, prefix, layout)).toEqual({
+      row: 22,
+      column: 3 + stringWidth(prefix) + layout.cursorColumn,
     })
   })
 })
@@ -1685,6 +1887,14 @@ describe('TUI global footer pointer ownership', () => {
 })
 
 describe('TUI transcript pointer focus', () => {
+  it('gives transcript details a readable majority of the terminal height', () => {
+    expect(tuiTranscriptDetailHeight(40)).toBe(31)
+    expect(tuiTranscriptDetailHeight(24)).toBe(18)
+    expect(tuiTranscriptDetailHeight(30, 3)).toBe(22)
+    expect(tuiTranscriptDetailHeight(24, 3)).toBe(16)
+    expect(tuiTranscriptDetailHeight(8)).toBe(7)
+  })
+
   it('opens a clicked row directly and closes the same row on a second click', () => {
     const detail = toggleTuiTranscriptFocus(undefined, 'event:4', 3)
     expect(detail).toEqual({
@@ -1696,6 +1906,68 @@ describe('TUI transcript pointer focus', () => {
       .toEqual({
         mode: 'detail', focusedKey: 'event:5', focusedIndex: 4, detailOffset: 0, returnToComposer: true,
       })
+  })
+})
+
+describe('assistant output export', () => {
+  it('preserves Markdown and resolves collision suffixes inside the Session workspace', () => {
+    expect(tuiOutputMarkdown('## Result\n\n- one\n\n')).toBe('## Result\n\n- one\n')
+    expect(resolveTuiOutputExportPath('/workspace', Date.UTC(2026, 7, 26, 1, 2, 3, 4)))
+      .toBe(resolve('/workspace', 'dsh-output-20260826T010203004Z.md'))
+    expect(resolveTuiOutputExportPath('/workspace', Date.UTC(2026, 7, 26, 1, 2, 3, 4), 1))
+      .toBe(resolve('/workspace', 'dsh-output-20260826T010203004Z-2.md'))
+    expect(resolveTuiOutputExportPath('/workspace', Date.UTC(2026, 7, 26, 1, 2, 3, 4), 0, 'response'))
+      .toBe(resolve('/workspace', 'dsh-response-20260826T010203004Z.md'))
+  })
+
+  it('creates the standalone Markdown through the Host filesystem owner', async () => {
+    let resolvedPath = ''
+    let writtenText = ''
+    let writeIntent: unknown
+    const fs = {
+      resolve: async (path: string) => {
+        resolvedPath = path
+        return { targetKey: path }
+      },
+      writeText: async (_target: unknown, text: string, intent: unknown) => {
+        writtenText = text
+        writeIntent = intent
+        return { operation: 'create', version: 'v1', before: null, after: text }
+      },
+    }
+    const result = await writeTuiOutputMarkdown(
+      fs as never, '/workspace', '# Complete answer', Date.UTC(2026, 7, 26, 1, 2, 3, 4),
+    )
+
+    expect(result).toEqual({ ok: true, path: resolve('/workspace', 'dsh-output-20260826T010203004Z.md') })
+    expect(resolvedPath).toBe(result.ok ? result.path : '')
+    expect(writtenText).toBe('# Complete answer\n')
+    expect(writeIntent).toEqual({ kind: 'createIfAbsent' })
+  })
+
+  it('preserves an existing export and retries with a unique suffix', async () => {
+    const resolvedPaths: string[] = []
+    let attempts = 0
+    const fs = {
+      resolve: async (path: string) => {
+        resolvedPaths.push(path)
+        return { targetKey: path }
+      },
+      writeText: async () => {
+        attempts += 1
+        if (attempts === 1) throw new FsError('already exists', 'FS_NOT_OBSERVED')
+        return { operation: 'create', version: 'v1', before: null, after: '# Answer\n' }
+      },
+    }
+    const result = await writeTuiOutputMarkdown(
+      fs as never, '/workspace', '# Answer', Date.UTC(2026, 7, 26, 1, 2, 3, 4),
+    )
+
+    expect(result).toEqual({ ok: true, path: resolve('/workspace', 'dsh-output-20260826T010203004Z-2.md') })
+    expect(resolvedPaths).toEqual([
+      resolve('/workspace', 'dsh-output-20260826T010203004Z.md'),
+      resolve('/workspace', 'dsh-output-20260826T010203004Z-2.md'),
+    ])
   })
 })
 
@@ -1744,7 +2016,7 @@ describe('composer editor', () => {
     const layout = layoutComposer(pasted, 4, 2)
     expect(layout.lines).toEqual(['�[31', 'm'])
     expect(layout).toMatchObject({ cursorRow: 1, cursorColumn: 1 })
-    expect(inputCursorTarget({ rows: 12, columns: 8 }, 'prompt › ', layout)).toEqual({ row: 10, column: 4 })
+    expect(inputCursorTarget({ rows: 12, columns: 8 }, '', layout)).toEqual({ row: 10, column: 4 })
   })
 
   it('keeps large paste payloads behind bounded placeholders through delete, undo, stash, and history', () => {
@@ -2571,6 +2843,7 @@ describe('TUI interaction bindings', () => {
     expect(wide.some(line => line.text.includes('Ctrl+G') && line.text.includes('Return to root Agent'))).toBe(true)
     expect(effective.some(descriptor => descriptor.id === 'transcript.copy')).toBe(true)
     expect(effective.some(descriptor => descriptor.id === 'detail.copy')).toBe(true)
+    expect(effective.some(descriptor => descriptor.id === 'detail.exportMarkdown')).toBe(true)
     expect(effective.some(descriptor => descriptor.context === 'Approval'
       && descriptor.description.toLowerCase().includes('copy'))).toBe(false)
     expect(matchTuiInteractionAction('Composer', 'r', { meta: true })).toBe('composer.openResume')

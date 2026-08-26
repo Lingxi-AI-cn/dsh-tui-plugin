@@ -663,12 +663,19 @@ function physicalLines(text: string, width: number): PositionedLine[] {
 /**
  * Wrap and vertically window the draft while retaining the insertion row.
  * @param state - current editor state.
- * @param width - available terminal display cells.
+ * @param width - available terminal display cells, including the fixed line gutter.
  * @param maxRows - maximum visible physical rows.
+ * @param gutterWidth - display cells reserved before every visible editor row.
  * @returns bounded visible lines and insertion geometry.
  */
-export function layoutComposer(state: ComposerState, width: number, maxRows = 5): ComposerLayout {
-  const lines = physicalLines(state.text, Math.max(1, width))
+export function layoutComposer(
+  state: ComposerState,
+  width: number,
+  maxRows = 5,
+  gutterWidth = 0,
+): ComposerLayout {
+  const contentWidth = Math.max(1, width - Math.max(0, gutterWidth))
+  const lines = physicalLines(state.text, contentWidth)
   const cursorIndex = Math.max(0, lines.findIndex((line, index) =>
     state.cursor >= line.start && (state.cursor < line.end || index === lines.length - 1 || state.cursor === line.end)))
   const start = Math.max(0, Math.min(cursorIndex, lines.length - Math.max(1, maxRows)))

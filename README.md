@@ -24,13 +24,15 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 
 - Full-screen terminal workspace with a compact live transcript, centered startup screen, model status, permission state, workspace, context pressure, and transcript position.
 - Structured rendering for Markdown, reasoning, tool calls and results, diffs, searches, web activity, compaction, delegated Agents, and durable Tasks.
+- Result-centered transcript layout compacts consecutive tool calls into one activity row; open the Activity Inspector only when you need category summaries or exact tool details.
 - Physical-row virtualization and Unicode-width layout keep long Sessions responsive and readable on narrow terminals.
 
 ### Session-centered workflows
 
 - Resume persisted work with `/resume`, start clean with `/new` or `/clear`, and branch safely from an earlier completed human turn with `/rewind`.
 - Browse, filter, rename, archive, and fork Sessions across Workspaces with `/sessions`; restore is shown when the Host exposes its unarchive capability. Create or select workspace roots through `/workspace` and the Host-owned directory picker.
-- Browse and search the complete durable transcript, inspect full block details, move between the root and live child Agents, and monitor cancellable background work.
+- Browse and search the complete durable transcript, inspect full block details, move between the root and live child Agents, and monitor cancellable background work. Long assistant results open in a majority-height reader with physical-row scrolling and segment/complete-response switching.
+- Copy or export either the selected assistant segment or its complete same-turn response directly from the transcript or result reader; focused exports use Markdown without replacing full-Session `/export`.
 - Export a Session for review or backup with `/export`; prompts, tool activity, and workspace paths remain explicit diagnostic data.
 
 ### Native work management and inspection
@@ -107,11 +109,11 @@ The current public TUI release is deliberately pinned to the matching official H
 
 | DSH TUI | DeepSeek Harness | Node.js | Platforms |
 | --- | --- | --- | --- |
-| `0.1.5-rc.8` | exactly `0.1.0-rc.8` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
+| `0.1.6-rc.8` | exactly `0.1.0-rc.8` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
 
 Support for a newer Harness version is added only after exact-package clean-room installation, profile composition, PTY startup/exit, and terminal-restoration verification.
 
-The TUI core version advances independently (`0.1.5` here), while the final prerelease suffix (`rc.8`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
+The TUI core version advances independently (`0.1.6` here), while the final prerelease suffix (`rc.8`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
 
 ## Install
 
@@ -119,7 +121,7 @@ Install the exact supported official Harness, then add DSH TUI to a dedicated `t
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.0-rc.8
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.6-rc.8
 dsh --profile tui
 ```
 
@@ -142,7 +144,7 @@ The canonical profile contains exactly `@deepseek-ai/dsh-base` followed by `@lin
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.6-rc.8
 ```
 
 Sessions and credentials live outside the profile directory. Reapply only reviewed custom patches; do not copy the old profile back wholesale.
@@ -162,7 +164,7 @@ Sessions and credentials live outside the profile directory. Reapply only review
 Install the exact TUI version that declares compatibility with the installed official Harness version:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.5-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.6-rc.8
 ```
 
 Release tags and npm versions are immutable. Do not mix package versions from different release candidates.

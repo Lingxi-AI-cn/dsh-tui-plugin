@@ -6,7 +6,7 @@ import {
 } from '../src/index.ts'
 import { tuiTranscriptScreenMapLines } from '../src/transcript-view.tsx'
 import { todoPanelScreenMapLines } from '../src/todo-panel.tsx'
-import type { TranscriptToolNode } from '../src/transcript.ts'
+import type { TranscriptToolActivityNode, TranscriptToolNode } from '../src/transcript.ts'
 
 function textFor(map: TuiScreenMap, selection: TuiScreenSelection): string {
   const parts: string[] = []
@@ -109,6 +109,26 @@ describe('screen selection projection', () => {
     expect(tuiScreenSelectionText(map, selection!)).toBe('hello')
   })
 
+  it('reuses the closing assistant margin for a localized Output Reader hint', () => {
+    const node = {
+      kind: 'text', key: 'event:assistant', tone: 'assistant', label: 'Assistant',
+      text: 'final answer', closing: true,
+    } as const
+    const finalLines = tuiTranscriptScreenMapLines([{ node, text: node.text }], 60, undefined, 'zh')
+    expect(finalLines.map(line => [line.text, line.selectable])).toEqual([
+      ['Assistant', false],
+      ['final answer', true],
+      ['点击查看 · 点击复制 · 点击导出', false],
+    ])
+
+    const middleLines = tuiTranscriptScreenMapLines([{
+      node,
+      text: 'middle',
+      textRange: { start: 2, end: 4, total: 8 },
+    }], 60, undefined, 'zh')
+    expect(middleLines.at(-1)?.text).toBe('')
+  })
+
   it('copies soft-wrapped text without gutters or padding and keeps hard newlines', () => {
     const map = projectTuiScreenMap([
       { semanticBlockKey: 'one', gutter: '› ', text: 'abcd\nxy' },
@@ -160,6 +180,25 @@ describe('screen selection projection', () => {
     expect(childHeading).toBeDefined()
     expect(tuiScreenSelectionText(map, heading!)).toBe('Parallel')
     expect(tuiScreenSelectionText(map, childHeading!)).toBe('src/example.ts')
+  })
+
+  it('projects compact activity as one selectable summary plus one structural active row', () => {
+    const child: TranscriptToolNode = {
+      kind: 'tool', key: 'tool:activity-child', callId: 'activity-child', name: 'read', args: {}, rawArguments: '{}',
+      state: 'running', callView: { card: 'generic', title: 'Read src/example.ts', kind: 'read' },
+    }
+    const activity: TranscriptToolActivityNode = {
+      kind: 'tool-activity', key: 'activity:selection', turn: 1, tools: [child], closed: false,
+    }
+    const lines = tuiTranscriptScreenMapLines([{ node: activity }], 60, '/workspace', 'zh')
+    expect(lines.map(line => [line.semanticBlockKey, line.selectable])).toEqual([
+      ['activity:selection', true],
+      ['activity:selection', false],
+    ])
+    const map = projectTuiScreenMap(lines, { columns: 63 })
+    const heading = resolveTuiScreenSelection(map, { kind: 'triple', at: { row: 0, column: 8 } })
+    expect(heading).toBeDefined()
+    expect(tuiScreenSelectionText(map, heading!)).toContain('操作')
   })
 
   it('projects compaction status and summary rows without selecting their structural margin', () => {
