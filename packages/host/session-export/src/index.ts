@@ -1,7 +1,7 @@
 /**
- * Host session-log export service: prepares the canonical stored-artifact ZIP,
- * exposes it as a bounded byte stream, and publishes complete archives into a
- * host directory without exposing a partial final file.
+ * Native Session-log export service: reuses the official canonical ZIP stream
+ * and publishes complete archives into a host directory without exposing a
+ * partial final file.
  * @module @lingxi-ai-cn/dsh-session-export
  */
 
@@ -21,7 +21,7 @@ import {
   streamSessionLogZip,
   type SessionLogCompressionLevel,
   type SessionLogExportReady,
-} from './zip.ts'
+} from '@deepseek-ai/dsh-session-log-export'
 import {
   renderSessionMarkdown,
   sessionMarkdownExportDeps,
@@ -36,13 +36,13 @@ export {
   sessionLogZipEntries,
   sessionLogZipFilename,
   streamSessionLogZip,
-} from './zip.ts'
+} from '@deepseek-ai/dsh-session-log-export'
 export type {
   SessionLogCompressionLevel,
   SessionLogExportDeps,
   SessionLogExportReady,
   SessionLogZipEntry,
-} from './zip.ts'
+} from '@deepseek-ai/dsh-session-log-export'
 export {
   renderSessionMarkdown,
   sessionMarkdownExportDeps,
@@ -337,9 +337,9 @@ export default class SessionLogExporter extends Service {
 
   /**
    * Render a summary-only human-readable Markdown projection and publish it
-   * atomically under the first available safe filename. The raw ZIP remains
-   * the diagnostic source of truth; tool arguments are omitted and attachment
-   * references are never copied into the Markdown file.
+   * atomically under the first available safe filename. The official raw ZIP
+   * remains the diagnostic source of truth; tool arguments are omitted and
+   * attachment bytes are never copied into the Markdown file.
    * @param request - root identity, descendant policy, and explicit attachment policy.
    * @param directory - existing absolute host directory chosen by the operator.
    * @param signal - complete projection, writing, and publication lifetime.

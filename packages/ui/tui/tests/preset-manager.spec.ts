@@ -36,6 +36,16 @@ function service(
     mount: vi.fn(),
     recompose: vi.fn(),
     composedPreset: vi.fn(),
+    compositionInventory: vi.fn(async () => roster.map(item => ({
+      id: item.id,
+      trust: item.trust,
+      ...item.name === undefined ? {} : { name: item.name },
+      isDefault: item.id === defaultId,
+      ...item.broken === undefined ? {} : { broken: item.broken },
+      rows: item.broken === undefined ? [{
+        entryId: 'tools', moduleName: '@deepseek-ai/dsh-tools', enabled: true as const,
+      }] : [],
+    }))),
     read: vi.fn(async (id: string) => `# ${id}\n- row: plugin-a\n- row: plugin-b`),
     copy: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
@@ -61,6 +71,7 @@ describe('native TUI Preset Manager', () => {
     expect(snapshot.defaultRevision).toBe(0)
     expect(snapshot.currentPresetId).toBe('standard')
     expect(snapshot.authorable).toBe(true)
+    expect(snapshot.compositionState).toBe('ready')
     expect(snapshot.rows).toHaveLength(4)
 
     const standard = snapshot.rows[0]!
@@ -72,6 +83,7 @@ describe('native TUI Preset Manager', () => {
       canCopy: true,
       canDelete: false,
       canSetDefault: false,
+      composition: { rows: [{ entryId: 'tools', moduleName: '@deepseek-ai/dsh-tools', enabled: true }] },
     })
 
     const minimal = snapshot.rows[1]!
@@ -158,6 +170,20 @@ describe('native TUI Preset Manager', () => {
     const snapshot = await collectTuiPresetManager(svc, 'standard', 'en')
     expect(snapshot.authorable).toBe(false)
     expect(snapshot.rows[0]!.canCopy).toBe(false)
+  })
+
+  it('keeps structured composition capability absence and owner failure distinct', async () => {
+    const base = service([preset({ id: 'standard', trust: 'system' })])
+    const unavailable = Object.fromEntries(Object.entries(base)
+      .filter(([name]) => name !== 'compositionInventory')) as unknown as TuiAgentPresets
+    const unavailableSnapshot = await collectTuiPresetManager(unavailable, 'standard', 'en')
+    expect(unavailableSnapshot.compositionState).toBe('unavailable')
+    expect(unavailableSnapshot.rows[0]?.composition).toBeUndefined()
+
+    const failed = { ...base, compositionInventory: vi.fn(async () => { throw new Error('private path') }) }
+    const failedSnapshot = await collectTuiPresetManager(failed, 'standard', 'en')
+    expect(failedSnapshot.compositionState).toBe('error')
+    expect(failedSnapshot.rows[0]?.composition).toBeUndefined()
   })
 
   it('hides default mutation when the official Host does not expose the newer owner seam', async () => {

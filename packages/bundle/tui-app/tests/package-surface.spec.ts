@@ -52,7 +52,7 @@ describe('post-install TUI package surface', () => {
   const top = manifests[0]!
 
   it('publishes one same-version Lingxi package family without install hooks or source exports', () => {
-    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.6-rc.8']))
+    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.7-alpha.2']))
     for (const entry of manifests) {
       expect(entry.name).toMatch(/^@lingxi-ai-cn\/dsh-/u)
       expect(entry.repository?.url).toBe(REPOSITORY)
@@ -106,7 +106,7 @@ describe('post-install TUI package surface', () => {
     expect(overrides).toEqual(new Set([
       'system-prompt', 'hmr', 'tools',
       'tool-bash', 'tool-pwsh', 'tool-jobs', 'tool-fs', 'tool-fs-search',
-      'tool-str-replace-editor', 'skill-filesystem', 'tool-skill', 'tool-goal',
+      'tool-str-replace-editor', 'skill-filesystem', 'tool-skill', 'tool-goal', 'command-goal',
       'plan-mode', 'compaction-basic', 'command-compact', 'tool-result-pruner',
       'tool-subagent-control', 'tool-subagent-list-agents', 'tool-subagent',
       'tool-subagent-fork', 'workflow-worker-thread', 'tool-workflow', 'tool-ralph',
@@ -116,13 +116,15 @@ describe('post-install TUI package surface', () => {
     const rows = patches.flatMap(entry => entry.insert ?? [])
     const inserted = rows.map(entry => entry.name).filter((name): name is string => name !== undefined)
     expect(inserted.filter(name => name.startsWith('@deepseek-ai/') || name.startsWith('@lingxi-ai-cn/'))
-      .filter(name => !closure.has(name) && !name.startsWith(`${top.name}/`))).toEqual([])
+      .filter(name => ![...closure].some(owner => name === owner || name.startsWith(`${owner}/`))
+        && !name.startsWith(`${top.name}/`))).toEqual([])
     expect(rows.some(entry => entry.id === 'code-runtime'
       && entry.name === '@deepseek-ai/dsh-code-runtime-worker-thread')).toBe(true)
     expect(rows.find(entry => entry.id === 'cordis-host-runner')?.name)
       .toBe('@deepseek-ai/dsh-cordis-host-runner')
     expect(rows.find(entry => entry.id === 'agent-presets')).toMatchObject({
-      name: '@deepseek-ai/dsh-agent-presets', inject: ['tuiStartup'],
+      name: '@deepseek-ai/dsh-agent-presets',
+      config: { default: 'standard', includeShippedRoot: true, includeUserRoot: true },
     })
     expect(rows.find(entry => entry.id === 'message-feedback')?.name)
       .toBe('@deepseek-ai/dsh-message-feedback')

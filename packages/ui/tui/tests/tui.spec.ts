@@ -12,7 +12,7 @@ import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { JobId, type JobSnapshot } from '@deepseek-ai/dsh-jobs'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import {
-  CallId, createAssistantMessage, createToolResultMessage, createUserMessage, ReasoningEffortId,
+  ToolCallId, createAssistantMessage, createToolResultMessage, createUserMessage, ReasoningEffortId,
 } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionRecord } from '@deepseek-ai/dsh-session-query'
@@ -20,6 +20,7 @@ import { SubagentRunId } from '@deepseek-ai/dsh-subagent'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import {
   apply, cancelTuiHistorySearch, createComposerState, deleteComposerText, foldTranscript,
+  navigateTuiTranscriptTurn, tuiTranscriptTurnAnchors,
   addComposerImageAttachment, insertComposerClipboard, insertComposerPasteReference, insertComposerText, isLargeComposerPaste,
   acceptTuiSuggestion, commandSuggestionState, layoutComposer, moveComposerCursor, moveTuiSuggestion,
   nextTuiHistorySearchMatch, pathSuggestionQuery, pathSuggestionState, startTuiHistorySearch,
@@ -37,6 +38,7 @@ import {
   toolActivityActiveText, toolActivityHeadingText, tuiToolActivityCategory, tuiToolActivityRows,
   tuiAssistantResponseParts, tuiAssistantResponseText,
   tuiContextSegmentBar, tuiFooterItems, tuiFooterStatusLine, tuiInteractionHelpLines, tuiSelectedFooterLine,
+  collectTuiSchedules,
   tuiAgentModeName, tuiAgentModeOptions,
   moveTuiFooterSelection, visibleTuiFooterItems, type TuiKeypress,
   filterTuiResumeCandidates, formatTuiRelativeTime,
@@ -45,7 +47,7 @@ import {
   sortTuiResumeCandidates, summarizeTuiResumeCandidate,
   tuiRewindCandidates,
   consumeTuiDoubleEscape, TUI_DOUBLE_ESCAPE_WINDOW_MS,
-  formatTuiWorkElapsed, formatTuiWorkOwner, projectTuiWork,
+  formatTuiWorkElapsed, formatTuiWorkOwner, formatTuiWorkRoute, projectTuiWork,
   applyTuiTerminalReply, TuiAgentViewStateCache, TuiTerminalInputDecoder, tuiTerminalMouseReportKind,
   resolveTuiTheme, TUI_ACTIVITY_PREFERENCES, TUI_MOUSE_PREFERENCES, TUI_SETTINGS_SCHEMA, TUI_THEME_PREFERENCES,
 } from '../src/index.ts'
@@ -278,8 +280,118 @@ describe('foldTranscript', () => {
     expect(tuiAssistantResponseText(parts)).toBe('Initial finding.\n\n---\n\nSupplemental conclusion.')
   })
 
+  it('shows exact completed-Turn usage only when the durable attempt lifecycle is complete', () => {
+    const assistant = createAssistantMessage({
+      content: [{ type: 'text', text: 'Done.' }], source: { provider: 'p', model: 'm' },
+    })
+    const complete = [
+      event(0, 'turn/start', { turn: 1 }),
+      event(1, 'step/start', { turn: 1, step: 1 }),
+      event(2, 'assistant/chunk', {
+        turn: 1, step: 1, chunk: { type: 'usage', usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 } },
+      }),
+      event(3, 'assistant/message', {
+        turn: 1, step: 1, message: assistant, usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      }),
+      event(4, 'step/end', { turn: 1, step: 1 }),
+      event(5, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+    ]
+    expect(foldTranscript(complete)).toContainEqual({
+      kind: 'turn-usage',
+      key: 'turn-usage:1',
+      turn: 1,
+      usage: {
+        uncachedInputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        routes: [{ provider: 'p', model: 'm' }],
+      },
+    })
+    expect(foldTranscript(complete.filter(candidate => candidate.type !== 'step/end'))
+      .some(node => node.kind === 'turn-usage')).toBe(false)
+  })
+
+  it('navigates completed Turns by durable semantic anchors instead of physical pages', () => {
+    const assistant = (text: string) => createAssistantMessage({
+      content: [{ type: 'text', text }], source: { provider: 'p', model: 'm' },
+    })
+    const nodes = foldTranscript([
+      event(0, 'turn/start', { turn: 1 }),
+      event(1, 'user/message', createUserMessage({ content: [{ type: 'text', text: 'one' }], source: { kind: 'user' } })),
+      event(2, 'assistant/message', { turn: 1, step: 1, message: assistant('first') }),
+      event(3, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      event(4, 'turn/start', { turn: 2 }),
+      event(5, 'user/message', createUserMessage({ content: [{ type: 'text', text: 'two' }], source: { kind: 'user' } })),
+      event(6, 'assistant/message', { turn: 2, step: 1, message: assistant('second') }),
+      event(7, 'turn/end', { turn: 2, reason: { kind: 'completed' } }),
+    ])
+    const anchors = tuiTranscriptTurnAnchors(nodes)
+    expect(anchors.map(anchor => ({ turn: anchor.turn, key: anchor.key }))).toEqual([
+      { turn: 1, key: 'event:1' },
+      { turn: 2, key: 'event:5' },
+    ])
+    expect(navigateTuiTranscriptTurn(anchors, nodes.length - 1, 'previous', true)?.turn).toBe(2)
+    expect(navigateTuiTranscriptTurn(anchors, anchors[1]?.index ?? 0, 'previous', false)?.turn).toBe(1)
+    expect(navigateTuiTranscriptTurn(anchors, anchors[0]?.index ?? 0, 'next', false)?.turn).toBe(2)
+    expect(navigateTuiTranscriptTurn(anchors, anchors[1]?.index ?? 0, 'next', false)).toBeUndefined()
+  })
+
+  it('projects settled user questions as bounded history cards without exposing secret answers', () => {
+    const callId = ToolCallId('question-1')
+    const result = createToolResultMessage({
+      callId,
+      content: [{ type: 'text', text: JSON.stringify({
+        answers: [
+          { id: 'choice', selected: ['Proceed'] },
+          { id: 'secret', selected: [], custom: 'do-not-show' },
+        ],
+      }) }],
+      isError: false,
+    })
+    const nodes = foldTranscript([
+      event(0, 'tool/call', {
+        turn: 1, step: 1, callId, name: 'ask_user_question',
+        arguments: JSON.stringify({ questions: [
+          { id: 'choice', header: 'Decision', question: 'Continue?' },
+          { id: 'secret', question: 'Credential?', secret: true },
+        ] }),
+      }),
+      event(1, 'tool/result', { turn: 1, step: 1, message: result }),
+    ])
+    expect(nodes).toEqual([expect.objectContaining({
+      kind: 'question', status: 'answered', callId: 'question-1',
+      questions: [
+        expect.objectContaining({ id: 'choice', answer: 'Proceed', secret: false }),
+        expect.not.objectContaining({ answer: 'do-not-show' }),
+      ],
+    })])
+    expect(JSON.stringify(nodes)).not.toContain('do-not-show')
+    const question = nodes[0]
+    if (question?.kind !== 'question') throw new Error('expected question history')
+    expect(tuiTranscriptDetailText(question, undefined, 'zh')).toContain('状态：已回答')
+    expect(tuiTranscriptDetailText(question, undefined, 'zh')).toContain('回答：[已隐藏]')
+    expect(tuiTranscriptDetailText(question, undefined, 'zh')).not.toContain('do-not-show')
+  })
+
+  it('distinguishes cancelled question history from generic failures', () => {
+    const callId = ToolCallId('question-cancelled')
+    const result = createToolResultMessage({
+      callId, content: [{ type: 'text', text: 'Error: TUI user question was cancelled' }], isError: true,
+    })
+    const nodes = foldTranscript([
+      event(0, 'tool/call', {
+        turn: 1, step: 1, callId, name: 'ask_user_question',
+        arguments: JSON.stringify({ questions: [{ id: 'choice', question: 'Continue?' }] }),
+      }),
+      event(1, 'tool/result', {
+        turn: 1, step: 1, message: result, error: { name: 'UserQuestionError', code: 'ASK_CANCELLED' },
+      }),
+    ])
+    expect(nodes).toEqual([expect.objectContaining({ kind: 'question', status: 'cancelled' })])
+  })
+
   it('reconciles streamed assistant text and projects user, tool, and failure facts', () => {
-    const callId = CallId('call-1')
+    const callId = ToolCallId('call-1')
     const user = createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'user' } })
     const assistant = createAssistantMessage({
       content: [{ type: 'text', text: 'complete answer' }],
@@ -438,7 +550,7 @@ describe('foldTranscript', () => {
   })
 
   it('keeps malformed calls and throwing presenters visible through generic fallbacks', () => {
-    const callId = CallId('call-bad')
+    const callId = ToolCallId('call-bad')
     const result = createToolResultMessage({
       callId,
       content: [{ type: 'text', text: 'fallback output' }],
@@ -462,7 +574,7 @@ describe('foldTranscript', () => {
   })
 
   it('pins the latest standing todo snapshot and absorbs its successful tool row', () => {
-    const callId = CallId('todo-call')
+    const callId = ToolCallId('todo-call')
     const result = createToolResultMessage({ callId, content: [{ type: 'text', text: 'updated' }], isError: false })
     const events: SessionEvent[] = [
       event(0, 'tool/call', { turn: 1, step: 1, callId, name: 'todo_write', arguments: JSON.stringify({
@@ -481,7 +593,7 @@ describe('foldTranscript', () => {
   })
 
   it('retains failed todo tools and clears the standing list on the next turn', () => {
-    const callId = CallId('todo-failed')
+    const callId = ToolCallId('todo-failed')
     const result = createToolResultMessage({ callId, content: [{ type: 'text', text: 'invalid list' }], isError: true })
     const events: SessionEvent[] = [
       event(0, 'turn/start', { turn: 1 }),
@@ -513,9 +625,9 @@ describe('foldTranscript', () => {
       presentCall: () => ({ card: 'generic', title: 'Glob src/**', kind: 'search' }),
     } as unknown as ToolDefinition
     const events: SessionEvent[] = [
-      event(0, 'tool/call', { turn: 1, step: 1, callId: CallId('read-1'), name: 'read', arguments: '{"path":"a.ts"}' }),
-      event(1, 'tool/call', { turn: 1, step: 1, callId: CallId('glob-1'), name: 'glob', arguments: '{}' }),
-      event(2, 'tool/call', { turn: 1, step: 1, callId: CallId('bash-1'), name: 'bash', arguments: '{}' }),
+      event(0, 'tool/call', { turn: 1, step: 1, callId: ToolCallId('read-1'), name: 'read', arguments: '{"path":"a.ts"}' }),
+      event(1, 'tool/call', { turn: 1, step: 1, callId: ToolCallId('glob-1'), name: 'glob', arguments: '{}' }),
+      event(2, 'tool/call', { turn: 1, step: 1, callId: ToolCallId('bash-1'), name: 'bash', arguments: '{}' }),
     ]
     const nodes = foldTranscript(events, name => name === 'read' ? read : name === 'glob' ? search : undefined)
     expect(nodes).toHaveLength(1)
@@ -526,8 +638,8 @@ describe('foldTranscript', () => {
 
   it('keeps consecutive tool activity from different scheduler turns separate', () => {
     const nodes = foldTranscript([
-      event(0, 'tool/call', { turn: 1, step: 1, callId: CallId('turn-1'), name: 'read', arguments: '{}' }),
-      event(1, 'tool/call', { turn: 2, step: 1, callId: CallId('turn-2'), name: 'read', arguments: '{}' }),
+      event(0, 'tool/call', { turn: 1, step: 1, callId: ToolCallId('turn-1'), name: 'read', arguments: '{}' }),
+      event(1, 'tool/call', { turn: 2, step: 1, callId: ToolCallId('turn-2'), name: 'read', arguments: '{}' }),
     ])
     expect(nodes).toMatchObject([
       { kind: 'tool-activity', turn: 1, tools: [{ callId: 'turn-1' }] },
@@ -537,8 +649,8 @@ describe('foldTranscript', () => {
 
   it('folds authoritative scheduler groups with stable model order and exclusive boundaries', () => {
     const calls = [
-      { callId: CallId('read-1'), name: 'read', arguments: '{}' },
-      { callId: CallId('delegate-1'), name: 'subagent', arguments: '{}' },
+      { callId: ToolCallId('read-1'), name: 'read', arguments: '{}' },
+      { callId: ToolCallId('delegate-1'), name: 'subagent', arguments: '{}' },
     ]
     const nodes = foldTranscript([
       event(0, 'tool/execution-group', { turn: 1, step: 1, group: 0, mode: 'parallel', members: calls, closed: false }),
@@ -547,7 +659,7 @@ describe('foldTranscript', () => {
       event(3, 'tool/execution-group', { turn: 1, step: 1, group: 0, mode: 'parallel', members: calls, closed: true }),
       event(4, 'tool/execution-group', {
         turn: 1, step: 1, group: 1, mode: 'exclusive',
-        members: [{ callId: CallId('write-1'), name: 'write', arguments: '{}' }], closed: true,
+        members: [{ callId: ToolCallId('write-1'), name: 'write', arguments: '{}' }], closed: true,
       }),
     ])
     expect(nodes).toMatchObject([{
@@ -562,8 +674,8 @@ describe('foldTranscript', () => {
 
   it('applies a closing scheduler snapshot to the existing group identity', () => {
     const candidates = [
-      { callId: CallId('one'), name: 'read', arguments: '{}' },
-      { callId: CallId('barrier'), name: 'write', arguments: '{}' },
+      { callId: ToolCallId('one'), name: 'read', arguments: '{}' },
+      { callId: ToolCallId('barrier'), name: 'write', arguments: '{}' },
     ]
     const nodes = foldTranscript([
       event(0, 'tool/execution-group', {
@@ -579,7 +691,7 @@ describe('foldTranscript', () => {
   })
 
   it('replays one structured delegation activity without duplicating its tool row', () => {
-    const callId = CallId('delegate-1')
+    const callId = ToolCallId('delegate-1')
     const result = createToolResultMessage({ callId, content: [{ type: 'text', text: 'child accepted' }], isError: false })
     const nodes = foldTranscript([
       event(0, 'tool/execution-group', {
@@ -615,7 +727,7 @@ describe('foldTranscript', () => {
   })
 
   it('keeps an owning tool failure authoritative over a completed delegation', () => {
-    const callId = CallId('delegate-failed-disposal')
+    const callId = ToolCallId('delegate-failed-disposal')
     const result = createToolResultMessage({
       callId, content: [{ type: 'text', text: 'dispose failed' }], isError: true,
     })
@@ -638,7 +750,7 @@ describe('foldTranscript', () => {
 
 describe('TuiTranscriptProjectionCache', () => {
   it('matches a fresh full fold after every streaming, tool, delegation, group, and Tasks append', () => {
-    const callId = CallId('incremental-tool')
+    const callId = ToolCallId('incremental-tool')
     const members = [{ callId, name: 'subagent', arguments: '{}' }]
     const events: SessionEvent[] = [
       event(0, 'user/message', createUserMessage({
@@ -729,7 +841,7 @@ describe('TuiTranscriptProjectionCache', () => {
   })
 
   it('restores a known call as an independent row after its group releases ownership', () => {
-    const callId = CallId('released-call')
+    const callId = ToolCallId('released-call')
     const member = { callId, name: 'read', arguments: '{}' }
     const events: SessionEvent[] = [
       event(0, 'tool/execution-group', {
@@ -2657,6 +2769,10 @@ describe('TUI interaction bindings', () => {
       'ctrl+j': { input: '\n', key: {} },
       up: { input: '', key: { upArrow: true } },
       down: { input: '', key: { downArrow: true } },
+      'ctrl+up': { input: '', key: { upArrow: true, ctrl: true } },
+      'ctrl+down': { input: '', key: { downArrow: true, ctrl: true } },
+      'shift+up': { input: '', key: { upArrow: true, shift: true } },
+      'shift+down': { input: '', key: { downArrow: true, shift: true } },
       left: { input: '', key: { leftArrow: true } },
       right: { input: '', key: { rightArrow: true } },
       'ctrl+f': { input: '\u0006', key: {} },
@@ -2979,6 +3095,24 @@ describe('TUI actionable footer', () => {
     expect(visibleTuiFooterItems(items, 40).map(item => item.id)).toContain('work')
   })
 
+  it('shows only ready non-empty Schedule projections as an actionable item', () => {
+    const schedules = collectTuiSchedules([{
+      id: 'daily' as never,
+      kind: 'every',
+      prompt: 'Review the build',
+      everySeconds: 86_400,
+      scheduledAt: '2026-08-31T00:00:00.000Z',
+    }], Date.parse('2026-08-31T01:00:00.000Z'))
+    const items = tuiFooterItems({ ...sources, schedules })
+    expect(items.find(item => item.id === 'schedules')).toMatchObject({
+      label: 'plans', value: '1/1 overdue', action: 'schedules',
+    })
+    expect(tuiFooterItems({ ...sources, schedules: collectTuiSchedules([]) })
+      .some(item => item.id === 'schedules')).toBe(false)
+    expect(tuiFooterItems({ ...sources, schedules: collectTuiSchedules(undefined) })
+      .some(item => item.id === 'schedules')).toBe(false)
+  })
+
   it('keeps high-priority narrow items bounded and navigates only mounted items', () => {
     const items = tuiFooterItems(sources)
     const narrow = visibleTuiFooterItems(items, 38)
@@ -3048,7 +3182,11 @@ describe('TUI background work', () => {
       ],
       liveAgents: new Map([[
         childId,
-        { status: 'running', timing: { settledMs: 500, active: { since: 2_000, through: 2_500 } } },
+        {
+          status: 'running',
+          route: { provider: 'mock', model: 'child-model', reasoningEffort: 'high', maxTokens: 4096, source: 'live-agent' },
+          timing: { settledMs: 500, active: { since: 2_000, through: 2_500 } },
+        },
       ]]),
       remoteRuns: [{
         info: { runId: SubagentRunId('remote-1'), provider: 'acp', id: SessionId('remote'), local: false },
@@ -3072,6 +3210,12 @@ describe('TUI background work', () => {
     expect(snapshot.summary).toEqual({ running: 2, queued: 0, failed: 1, total: 3 })
     expect(snapshot.items[1] === undefined ? undefined : formatTuiWorkOwner(snapshot.items[1])).toBe('owner root')
     expect(snapshot.items[2] === undefined ? undefined : formatTuiWorkOwner(snapshot.items[2])).toBe('owner not exposed')
+    expect(snapshot.items[1] === undefined ? undefined : formatTuiWorkRoute(snapshot.items[1])).toBe(
+      'provider mock · model child-model · reasoning high · max output 4096 · source resolved live Agent options',
+    )
+    expect(snapshot.items[2] === undefined ? undefined : formatTuiWorkRoute(snapshot.items[2], 'zh')).toBe(
+      '提供方 acp · 模型 不可用 · 思考强度 不可用 · 最大输出 不可用 · 来源 远端生命周期摘要',
+    )
   })
 
   it('uses waiting and inactive states without inventing queued work', () => {
@@ -3081,7 +3225,7 @@ describe('TUI background work', () => {
         kind: 'child', id: childId, mode: 'continuable', label: 'reviewer', activity: 'running',
         hasChildren: false, parentId: rootId, depth: 1,
       }],
-      liveAgents: new Map([[childId, { status: 'idle' }]]),
+      liveAgents: new Map([[childId, { status: 'idle', route: { source: 'live-agent' } }]]),
       remoteRuns: [],
     })
     expect(waiting.items[0]).toMatchObject({ state: 'waiting', action: 'none', inspectable: true })
@@ -3100,6 +3244,9 @@ describe('TUI background work', () => {
       state: 'inactive', action: 'none', inspectable: false,
       readOnlyReason: 'The local child Agent is not live; its durable summary remains available.',
     })
+    expect(inactive.items[0] === undefined ? undefined : formatTuiWorkRoute(inactive.items[0])).toContain(
+      'source durable catalog (route not exposed)',
+    )
   })
 
   it('formats frozen job duration and durable open-turn timing', () => {
@@ -3120,7 +3267,10 @@ describe('TUI background work', () => {
       }],
       liveAgents: new Map([[
         childId,
-        { status: 'running', timing: { settledMs: 2_000, active: { since: 10_000, through: 11_000 } } },
+        {
+          status: 'running', route: { source: 'live-agent' },
+          timing: { settledMs: 2_000, active: { since: 10_000, through: 11_000 } },
+        },
       ]]),
       remoteRuns: [],
     }).items[0]

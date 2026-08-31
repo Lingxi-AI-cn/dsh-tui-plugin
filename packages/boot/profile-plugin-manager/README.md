@@ -1,8 +1,22 @@
+---
+description: "Host-side profile inspection, detached package plans, exact local mutations, locking, and validation for trusted consumers."
+kind: "package-reference"
+---
+
 # `@lingxi-ai-cn/dsh-profile-plugin-manager`
 
 English | [中文](README.zh.md)
 
+## Summary
+
 Host-side profile plugin management shared by command-line and trusted local consumers. `ProfilePluginManager` accepts an explicit profile directory and shared lock path; it does not select a profile from TUI input, fetch Registry data, verify descriptors, render UI, or activate a generation.
+
+## Table of Contents
+
+- [Operations](#operations)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
 
 ## Operations
 
@@ -30,3 +44,8 @@ None; this package never assembles model input.
 - **No Registry trust decisions** - a trusted caller must verify descriptor identity, compatibility, artifact size, and digest before constructing a `ProfilePluginArtifact`; the manager only rechecks the supplied local file facts.
 - **No activation transaction** - materialization writes a separate directory, but generation journals, active-profile swaps, maintenance helpers, ready markers, recovery, and rollback remain outside this package stage.
 - **Windows requires a no-shell pnpm entry** - `.cmd` shims are not executed through a command shell; a Windows consumer must provide a directly executable pnpm command such as Node plus pnpm's JavaScript entry.
+
+<a id="dev-note"></a>
+### Dev Note
+
+None.

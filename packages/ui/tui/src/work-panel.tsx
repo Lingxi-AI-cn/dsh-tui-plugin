@@ -8,7 +8,7 @@ import { tuiTextStyle, useTuiTheme, type TuiTheme } from './theme.tsx'
 import { tuiMessage, useTuiLocale, type TuiLocale, type TuiMessageKey } from './locale.ts'
 
 /** Fixed rows reserved around the selectable work list. */
-const TUI_WORK_PANEL_CHROME_ROWS = 4
+const TUI_WORK_PANEL_CHROME_ROWS = 5
 
 const WORK_STATE_MESSAGE_KEYS: Readonly<Record<TuiWorkItemState, TuiMessageKey>> = Object.freeze({
   running: 'work.state.running',
@@ -56,6 +56,23 @@ export function formatTuiWorkOwner(item: TuiWorkItemView, locale: TuiLocale = 'e
   })
 }
 
+/** Format only owner-provided child-route facts, with explicit unavailable fields. */
+export function formatTuiWorkRoute(item: TuiWorkItemView, locale: TuiLocale = 'en'): string {
+  const route = item.route
+  if (route === undefined) return tuiMessage(locale, 'work.route.notApplicable')
+  const unavailable = tuiMessage(locale, 'work.route.unavailable')
+  const source = tuiMessage(locale, `work.route.source.${route.source}`)
+  return [
+    tuiMessage(locale, 'work.route.provider', { value: route.provider ?? unavailable }),
+    tuiMessage(locale, 'work.route.model', { value: route.model ?? unavailable }),
+    tuiMessage(locale, 'work.route.reasoning', { value: route.reasoningEffort ?? unavailable }),
+    tuiMessage(locale, 'work.route.maxOutput', {
+      value: route.maxTokens === undefined ? unavailable : route.maxTokens,
+    }),
+    tuiMessage(locale, 'work.route.source', { value: source }),
+  ].join(' · ')
+}
+
 /**
  * Render the selectable slice of one work snapshot.
  * @param props - snapshot, selection, dimensions, and current clock.
@@ -101,6 +118,9 @@ export function TuiWorkPanel(props: {
             {' · '}{terminalSafe(item.detail ?? tuiMessage(locale, WORK_STATE_MESSAGE_KEYS[item.state]))} · {formatTuiWorkElapsed(item, props.now)}
           </Text>
         })}
+    <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim} wrap="truncate-end">
+      {selectedItem === undefined ? '' : formatTuiWorkRoute(selectedItem, locale)}
+    </Text>
     <Text {...tuiTextStyle(theme.tokens.muted)} dimColor={theme.dim}>
       {selectedItem === undefined
         ? tuiMessage(locale, 'work.footer.empty')

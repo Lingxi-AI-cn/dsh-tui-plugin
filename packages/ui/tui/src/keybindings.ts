@@ -42,6 +42,8 @@ export type TuiInteractionActionId =
   | 'composer.cancel'
   | 'composer.transcriptPreviousPage'
   | 'composer.transcriptNextPage'
+  | 'composer.transcriptPreviousTurn'
+  | 'composer.transcriptNextTurn'
   | 'composer.transcriptOldest'
   | 'composer.transcriptLatest'
   | 'suggestion.previous'
@@ -58,6 +60,8 @@ export type TuiInteractionActionId =
   | 'transcript.open'
   | 'transcript.previous'
   | 'transcript.next'
+  | 'transcript.previousTurn'
+  | 'transcript.nextTurn'
   | 'transcript.inspect'
   | 'transcript.copy'
   | 'transcript.close'
@@ -276,6 +280,8 @@ export const TUI_INTERACTION_REGISTRY: readonly TuiInteractionDescriptor[] = Obj
   descriptor('composer.openFooter', 'Composer', 'Focus status footer', [key('tab', 'Tab')]),
   descriptor('composer.transcriptPreviousPage', 'Composer', 'Previous transcript page', [key('pageup', 'PageUp')]),
   descriptor('composer.transcriptNextPage', 'Composer', 'Next transcript page', [key('pagedown', 'PageDown')]),
+  descriptor('composer.transcriptPreviousTurn', 'Composer', 'Previous completed Turn', [key('ctrl+up', 'Ctrl+Up')]),
+  descriptor('composer.transcriptNextTurn', 'Composer', 'Next completed Turn', [key('ctrl+down', 'Ctrl+Down')]),
   descriptor('composer.transcriptOldest', 'Composer', 'Oldest transcript block when prompt is empty', [key('home', 'Home')]),
   descriptor('composer.transcriptLatest', 'Composer', 'Latest transcript block when prompt is empty', [key('end', 'End')]),
   descriptor('composer.cancel', 'Composer', 'Cancel running Agent', [key('escape', 'Escape')]),
@@ -306,6 +312,8 @@ export const TUI_INTERACTION_REGISTRY: readonly TuiInteractionDescriptor[] = Obj
 
   descriptor('transcript.previous', 'Transcript', 'Previous transcript block', [key('up', 'Up')]),
   descriptor('transcript.next', 'Transcript', 'Next transcript block', [key('down', 'Down')]),
+  descriptor('transcript.previousTurn', 'Transcript', 'Previous completed Turn', [key('shift+up', 'Shift+Up')]),
+  descriptor('transcript.nextTurn', 'Transcript', 'Next completed Turn', [key('shift+down', 'Shift+Down')]),
   descriptor('transcript.inspect', 'Transcript', 'Open focused detail', [key('enter', 'Enter')]),
   descriptor('transcript.copy', 'Transcript', 'Copy focused transcript block', [key('y', 'Y')]),
   descriptor('transcript.close', 'Transcript', 'Return to composer', [key('escape', 'Escape')]),
@@ -394,6 +402,8 @@ const TUI_INTERACTION_DESCRIPTIONS_ZH: Readonly<Record<TuiInteractionActionId, s
   'composer.openFooter': '聚焦状态栏',
   'composer.transcriptPreviousPage': '上一页 Transcript',
   'composer.transcriptNextPage': '下一页 Transcript',
+  'composer.transcriptPreviousTurn': '上一个已完成 Turn',
+  'composer.transcriptNextTurn': '下一个已完成 Turn',
   'composer.transcriptOldest': '输入为空时跳到最早 Transcript 块',
   'composer.transcriptLatest': '输入为空时跳到最新 Transcript 块',
   'composer.cancel': '取消运行中的 Agent',
@@ -410,6 +420,8 @@ const TUI_INTERACTION_DESCRIPTIONS_ZH: Readonly<Record<TuiInteractionActionId, s
   'transcriptSearch.cancel': '恢复之前的 Transcript 位置',
   'transcript.previous': '上一个 Transcript 块',
   'transcript.next': '下一个 Transcript 块',
+  'transcript.previousTurn': '上一个已完成 Turn',
+  'transcript.nextTurn': '下一个已完成 Turn',
   'transcript.inspect': '打开聚焦项详情',
   'transcript.copy': '复制聚焦的 Transcript 块',
   'transcript.close': '返回输入框',
@@ -711,23 +723,35 @@ function tuiKeybindingLabel(sequence: string): string {
   }).join('+')
 }
 
+function modifiedNamedKey(value: string, keypress: TuiKeypress): string {
+  if (value.includes('+')) return value
+  const modifiers = [
+    keypress.ctrl === true ? 'ctrl' : undefined,
+    keypress.meta === true ? 'meta' : undefined,
+    keypress.super === true ? 'super' : undefined,
+    keypress.hyper === true ? 'hyper' : undefined,
+    keypress.shift === true ? 'shift' : undefined,
+  ].filter((part): part is string => part !== undefined)
+  return modifiers.length === 0 ? value : `${modifiers.join('+')}+${value}`
+}
+
 function normalizeKeypress(input: string, keypress: TuiKeypress): string | undefined {
   if (keypress.paste === true) return undefined
   const control = controlSequences[input]
   if (control !== undefined) return control
   const terminal = terminalSequences[input]
-  if (terminal !== undefined) return terminal
-  if (keypress.pageUp === true) return 'pageup'
-  if (keypress.pageDown === true) return 'pagedown'
-  if (keypress.home === true) return 'home'
-  if (keypress.end === true) return 'end'
+  if (terminal !== undefined) return modifiedNamedKey(terminal, keypress)
+  if (keypress.pageUp === true) return modifiedNamedKey('pageup', keypress)
+  if (keypress.pageDown === true) return modifiedNamedKey('pagedown', keypress)
+  if (keypress.home === true) return modifiedNamedKey('home', keypress)
+  if (keypress.end === true) return modifiedNamedKey('end', keypress)
   if (keypress.return === true) return keypress.shift === true ? 'shift+enter' : 'enter'
   if (keypress.escape === true) return 'escape'
   if (keypress.tab === true) return keypress.shift === true ? 'shift+tab' : 'tab'
-  if (keypress.upArrow === true) return 'up'
-  if (keypress.downArrow === true) return 'down'
-  if (keypress.leftArrow === true) return 'left'
-  if (keypress.rightArrow === true) return 'right'
+  if (keypress.upArrow === true) return modifiedNamedKey('up', keypress)
+  if (keypress.downArrow === true) return modifiedNamedKey('down', keypress)
+  if (keypress.leftArrow === true) return modifiedNamedKey('left', keypress)
+  if (keypress.rightArrow === true) return modifiedNamedKey('right', keypress)
   if (input === '' || input.includes('\u001b')) return undefined
   const value = input === ' ' ? 'space' : input.toLocaleLowerCase()
   if (keypress.ctrl === true && keypress.shift === true && (value === '-' || value === '_')) return 'ctrl+shift+-'

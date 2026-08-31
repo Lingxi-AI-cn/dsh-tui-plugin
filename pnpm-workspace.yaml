@@ -11,7 +11,19 @@ allowBuilds:
 
 linkWorkspacePackages: true
 
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+
 minimumReleaseAgeExclude:
+  - '@deepseek-ai/dsh'
+  - '@deepseek-ai/dsh-*'
+  - '@deepseek-ai/cordis'
+  - '@deepseek-ai/cordis-plugin-hmr'
+  - '@deepseek-ai/cordis-plugin-include'
+  - '@deepseek-ai/cordis-plugin-loader'
+  - '@deepseek-ai/cordis-plugin-timer'
+  - '@deepseek-ai/cosmokit'
+  - '@deepseek-ai/schemastery'
   - '@deepseek-ai/dsh-agent-default-model@0.1.0-rc.8'
   - '@deepseek-ai/dsh-agent-presets@0.1.0-rc.8'
   - '@deepseek-ai/dsh-agent@0.1.0-rc.8'

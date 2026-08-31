@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.7-alpha.2
+
+- Aligns the post-install TUI with exact official DeepSeek Harness `0.1.2-alpha.2`, including its Authorization, Credentials, settings, projection, preset-composition, Schedule, Session export, Todo, and subagent owners.
+- Migrates Codex production authentication to Host-owned Authorization and scoped Credentials records without signing users in or rewriting provider state during installation.
+- Adds metadata-only Session storage preflight, authoritative Turn usage, settled-question and child-route facts, canonical `ptc` preset identity, and Host-owned preset/plug-in composition diagnostics.
+- Adds the read-only `/schedules` surface and footer status, preserving official Schedule ownership for creation, deletion, persistence, and dispatch.
+- Retains capability-gated fallback behavior for older supported Hosts while validating the exact alpha.2 package graph, composition, PTY exit, and terminal restoration in a clean room.
+
 ## 0.1.6-rc.8
 
 - Reorganizes consecutive same-turn tool calls into compact activity summaries with a two-level Activity Inspector for category and exact-call details.

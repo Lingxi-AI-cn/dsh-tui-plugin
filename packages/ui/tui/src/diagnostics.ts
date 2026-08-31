@@ -93,6 +93,20 @@ export type TuiPluginHubDiagnostic =
   }
   | { readonly state: 'failed'; readonly error: string; readonly profileMutations: boolean }
 
+/** Read-only persistence metadata collected without loading Session content. */
+export type TuiSessionStorageDiagnostic =
+  | { readonly state: 'unavailable' }
+  | { readonly state: 'failed'; readonly error: string }
+  | {
+    readonly state: 'available'
+    readonly backend: string
+    readonly currentFormat: number
+    readonly expectedFormat: number
+    readonly compatibleSessions: number
+    readonly incompatibleSessions: number
+    readonly supportsRawArtifacts: boolean
+  }
+
 /** Optional runtime capabilities whose absence changes only the corresponding TUI feature. */
 export interface TuiRuntimeCapabilityDiagnostics {
   readonly settings: boolean
@@ -109,6 +123,7 @@ export interface TuiDiagnosticInput {
   readonly providers: readonly TuiProviderDiagnostic[]
   readonly omittedProviders?: number
   readonly pluginHub: TuiPluginHubDiagnostic
+  readonly storage?: TuiSessionStorageDiagnostic
   readonly capabilities: TuiRuntimeCapabilityDiagnostics
 }
 
@@ -347,6 +362,41 @@ function capabilityRow(capabilities: TuiRuntimeCapabilityDiagnostics, locale: Tu
   })
 }
 
+function storageRow(storage: TuiSessionStorageDiagnostic | undefined, locale: TuiLocale): TuiDiagnosticRow {
+  if (storage === undefined || storage.state === 'unavailable') return row({
+    id: 'session-storage', severity: 'warning',
+    summary: diagnosticMessage(locale, 'diagnostics.storage.unavailable.summary'),
+    remediation: diagnosticMessage(locale, 'diagnostics.storage.unavailable.remediation'),
+    source: diagnosticMessage(locale, 'diagnostics.storage.source'),
+  })
+  if (storage.state === 'failed') return row({
+    id: 'session-storage', severity: 'error',
+    summary: diagnosticMessage(locale, 'diagnostics.storage.failed.summary'),
+    detail: storage.error,
+    remediation: diagnosticMessage(locale, 'diagnostics.storage.failed.remediation'),
+    source: diagnosticMessage(locale, 'diagnostics.storage.source'),
+  })
+  const compatible = storage.currentFormat === storage.expectedFormat && storage.incompatibleSessions === 0
+  return row({
+    id: 'session-storage', severity: compatible ? 'pass' : 'warning',
+    summary: diagnosticMessage(locale, compatible
+      ? 'diagnostics.storage.compatible.summary'
+      : 'diagnostics.storage.incompatible.summary', {
+      backend: storage.backend,
+      current: storage.currentFormat,
+      expected: storage.expectedFormat,
+    }),
+    detail: diagnosticMessage(locale, 'diagnostics.storage.detail', {
+      compatible: storage.compatibleSessions,
+      incompatible: storage.incompatibleSessions,
+      raw: diagnosticMessage(locale, storage.supportsRawArtifacts ? 'diagnostics.yes' : 'diagnostics.no'),
+      repair: diagnosticMessage(locale, 'diagnostics.storage.repair.owner'),
+    }),
+    ...compatible ? {} : { remediation: diagnosticMessage(locale, 'diagnostics.storage.incompatible.remediation') },
+    source: diagnosticMessage(locale, 'diagnostics.storage.source'),
+  })
+}
+
 /**
  * Project one bounded process-local diagnostic snapshot.
  * @param input - Host, terminal, provider, Plugin Hub, and optional-service facts.
@@ -363,6 +413,7 @@ export function projectTuiDiagnostics(
       terminalRow(input.terminal, locale),
       ...providerRows(input.providers, input.omittedProviders ?? 0, locale),
       pluginHubRow(input.pluginHub, locale),
+      storageRow(input.storage, locale),
       capabilityRow(input.capabilities, locale),
     ].slice(0, MAX_DIAGNOSTIC_ROWS)),
   })

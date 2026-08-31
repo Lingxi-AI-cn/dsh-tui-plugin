@@ -37,7 +37,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 
 ### Native work management and inspection
 
-- Revision-aware pending-input cards expose the Host-supported steer and follow-up lanes without inventing unsupported queue mutations on official rc.8.
+- Revision-aware pending-input cards expose Host-owned steer and follow-up lanes, with compare-and-set edit and delete actions only when the active Inbox owner supports them.
 - Unified completion resolves both workspace files and referenced Sessions; referenced Sessions are preflighted before submission while the original prompt remains intact.
 - Durable Goal and Plan status, per-Turn deliverables, and inline output paths provide direct detail, copy, and Host-gated open actions.
 - `/trajectory` presents a searchable, foldable, hierarchical Turn ledger and bounded event inspector designed for long-running Sessions.
@@ -52,7 +52,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 ### Fast keyboard and mouse interaction
 
 - Command and path completion, submitted-prompt history, full-transcript search, draft stash, undo/redo, multiline editing, external editor integration, and bounded clipboard operations.
-- Workspace-rooted `@` completion remains available on the exact official rc.8 Host through bounded Host filesystem traversal; it never expands into an unrestricted machine-wide search.
+- Workspace-rooted `@` completion uses the official file-reference and Host filesystem owners; it never expands into an unrestricted machine-wide search.
 - Negotiated mouse support for transcript scrolling and common selectable UI targets, while `/config` can return selection and scrolling to the outer terminal.
 - One configurable interaction registry powers runtime keybindings and the built-in `/help` panel, so available gestures stay discoverable.
 - Capability-oriented `/commands`, `/skills`, `/mcp`, `/tips`, `/provider`, `/update`, and `/btw` views make installed functionality, provider setup, compatible updates, and lightweight side questions directly discoverable.
@@ -68,7 +68,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 
 ### Bilingual and terminal-aware
 
-- Switch the first-party interface at runtime with `/lang en` or `/lang zh`; menus, hints, dialogs, official rc.8 command descriptions, Plugin Hub chrome, and footer details follow the selected language.
+- Switch the first-party interface at runtime with `/lang en` or `/lang zh`; menus, hints, dialogs, official command descriptions, Plugin Hub chrome, and footer details follow the selected language.
 - Automatic, dark, light, and no-color themes preserve semantic status even on limited-color terminals.
 - Unicode display-width layout, a real IME cursor anchor, bounded terminal capability negotiation, and idempotent teardown protect CJK input and restore terminal state on exit.
 
@@ -109,19 +109,19 @@ The current public TUI release is deliberately pinned to the matching official H
 
 | DSH TUI | DeepSeek Harness | Node.js | Platforms |
 | --- | --- | --- | --- |
-| `0.1.6-rc.8` | exactly `0.1.0-rc.8` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
+| `0.1.7-alpha.2` | exactly `0.1.2-alpha.2` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
 
 Support for a newer Harness version is added only after exact-package clean-room installation, profile composition, PTY startup/exit, and terminal-restoration verification.
 
-The TUI core version advances independently (`0.1.6` here), while the final prerelease suffix (`rc.8`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
+The TUI core version advances independently (`0.1.7` here), while the final prerelease suffix (`alpha.2`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
 
 ## Install
 
 Install the exact supported official Harness, then add DSH TUI to a dedicated `tui` profile:
 
 ```sh
-npm install --global @deepseek-ai/dsh@0.1.0-rc.8
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.6-rc.8
+npm install --global @deepseek-ai/dsh@0.1.2-alpha.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.7-alpha.2
 dsh --profile tui
 ```
 
@@ -144,7 +144,7 @@ The canonical profile contains exactly `@deepseek-ai/dsh-base` followed by `@lin
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.6-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.7-alpha.2
 ```
 
 Sessions and credentials live outside the profile directory. Reapply only reviewed custom patches; do not copy the old profile back wholesale.
@@ -164,7 +164,7 @@ Sessions and credentials live outside the profile directory. Reapply only review
 Install the exact TUI version that declares compatibility with the installed official Harness version:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.6-rc.8
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.7-alpha.2
 ```
 
 Release tags and npm versions are immutable. Do not mix package versions from different release candidates.

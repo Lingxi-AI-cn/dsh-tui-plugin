@@ -1,10 +1,23 @@
+---
+description: "Trusted local Registry client, artifact verifier, and optional profile transaction provider for Plugin Hub."
+kind: "package-reference"
+---
+
 # @lingxi-ai-cn/dsh-plugin-hub-local
 
 English | [中文](README.zh.md)
 
+## Summary
+
 Trusted local Plugin Hub provider. A deployment explicitly supplies an HTTPS `registryUrl` and locally pinned Ed25519 keys; absent configuration leaves the optional provider unmounted. Catalog responses are runtime-parsed, API-version checked, redirected at most three times within the configured Registry origin, bounded by bytes, cancelled by caller signal, and retained as an in-memory last-good view when the Registry is temporarily unavailable. An HTTP 304 response validates the matching ETag entry and returns its cached value without marking the catalog stale; other Registry failures may use the last-good fallback. Registry detail responses normalize `validationMatrix` rows (`manifest`, `install`, and `tui-boot`) and strictly project quarantine, repository archive, operating-system, curation, and structured advisory facts into provider-neutral DTOs; malformed detail metadata fails closed.
 
-`profileMutations` defaults to `false`. In that post-install-safe mode, Registry browsing and active-profile `installed()` truth remain available, mutation methods fail with `CONTRACT_UNSUPPORTED`, and startup readiness is a no-op. The published TUI bundle uses this mode because official DSH `0.1.0-rc.8` has no generic recovery hook before profile composition; users make changes with `dsh plugin --profile tui ...`. Setting `profileMutations: true` enables the downstream maintenance lifecycle described below and is reserved for compositions that install its matching pre-composition recovery hook.
+## Table of Contents
+
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
+`profileMutations` defaults to `false`. In that post-install-safe mode, Registry browsing and active-profile `installed()` truth remain available, mutation methods fail with `CONTRACT_UNSUPPORTED`, and startup readiness is a no-op. The published TUI bundle uses this mode because official DSH `0.1.2-alpha.2` has no generic recovery hook before profile composition; users make changes with `dsh plugin --profile tui ...`. Setting `profileMutations: true` enables the downstream maintenance lifecycle described below and is reserved for compositions that install its matching pre-composition recovery hook.
 
 Catalog search forwards provider-neutral `relevance`, `stars`, `updated`, or `newest` ordering to the Registry, includes the ordering in its request cache key, and applies the same ordering and cursor binding to signed snapshot fallback. A Registry `INVALID_CURSOR` response remains a typed provider error rather than being silently restarted.
 
@@ -30,3 +43,8 @@ No effect; catalog refreshes and cached records do not alter model-request conte
 
 - **Catalog cache remains in memory** - signed artifacts use a persistent content-addressed cache, but Catalog query/detail ETags and last-good snapshots are process-local.
 - **No user-selected rollback yet** - automatic failed-boot restoration retains the old and failed generations, but history retention, pruning, and an explicit rollback action remain deferred.
+
+<a id="dev-note"></a>
+### Dev Note
+
+None.

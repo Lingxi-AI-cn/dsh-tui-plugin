@@ -46,6 +46,9 @@
 - id: tool-goal
   disabled: true
 
+- id: command-goal
+  disabled: true
+
 - id: plan-mode
   disabled: true
 
@@ -89,6 +92,11 @@
   disabled: true
 
 - insert:
+    # Delegation tools read the Host-owned opt-in sampled when a Session
+    # mounts its preset.
+    - id: subagent-model-selection-settings
+      name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+
     # PTC owns only the per-Agent Code Mode presentation. Its worker runtime is
     # a Host singleton shared by every PTC Session.
     - id: code-runtime
@@ -99,32 +107,11 @@
     - id: cordis-host-runner
       name: '@deepseek-ai/dsh-cordis-host-runner'
 
-    # The native Session picker shares projection checkpoints with the Web
-    # surface, so repeated scans read metadata and bounded log tails.
-    - id: storage
-      name: '@deepseek-ai/dsh-storage'
-
-    - id: storage-json
-      name: '@deepseek-ai/dsh-storage-json'
-      config:
-        root: !!js dshHomePath('storages')
-
-    - id: storage-domain
-      name: '@deepseek-ai/dsh-storage-domain'
-      config:
-        backend: json
-
     # The terminal Session Manager uses the same durable Workspace owner as
     # the Web sidebar. Removing a Workspace registration never removes its
     # directory or Session logs.
     - id: workspace
       name: '@deepseek-ai/dsh-workspace'
-
-    - id: session-projection-cache
-      name: '@deepseek-ai/dsh-session-projection-cache'
-      config:
-        writeEveryEvents: 200
-        writeIntervalMs: 5000
 
     # Canonical cross-Session mentions and bounded host-local @file discovery
     # share the same owners as the Web composer. No referenced content is
@@ -140,6 +127,12 @@
     # contains provider timing boundaries.
     - id: session-stats
       name: '@deepseek-ai/dsh-session-stats'
+
+    # The native status row and /schedules panel consume this owner's active
+    # projection. Creation, deletion, persistence, and dispatch remain owned
+    # by the Schedule package and its model-facing tools.
+    - id: schedule
+      name: '@deepseek-ai/dsh-schedule'
 
     # A terminal-rendered, bounded directory browser works both on local
     # desktops and on headless/SSH Hosts; an overlay may replace this row with
@@ -160,6 +153,11 @@
     # owner; it never walks Cordis internals from the TUI package.
     - id: host-plugin-inventory
       name: '@deepseek-ai/dsh-host-plugin-inventory'
+
+    # Terminal and provider plugins share the official human authorization
+    # conversation owner. Credentials remain in the base profile's store.
+    - id: authorization
+      name: '@deepseek-ai/dsh-authorization'
 
     # ChatGPT OAuth credentials and the account model catalog remain owned by
     # the independently installed adapter. The official base supplies only its
@@ -184,7 +182,7 @@
       name: '@lingxi-ai-cn/dsh-plugin-hub-local'
       config:
         profile: tui
-        # Official rc.8 has no generic pre-composition recovery hook. Keep the
+        # Official alpha.2 has no generic pre-composition recovery hook. Keep the
         # published post-install bundle catalog-only and use `dsh plugin` for
         # profile changes.
         profileMutations: false
@@ -199,17 +197,14 @@
     - id: tui-startup
       name: '@lingxi-ai-cn/dsh-tui/startup'
 
-    # The writable user root is derived by dsh-agent-presets itself. The
-    # official system root comes from the validated running DSH installation,
-    # never from npm-prefix or checkout path guessing.
+    # The official package owns both its bundled system presets and the
+    # writable DSH_HOME user root.
     - id: agent-presets
       name: '@deepseek-ai/dsh-agent-presets'
-      inject: [tuiStartup]
       config:
         default: standard
-        roots:
-          - path: !!js ctx.tuiStartup.presetRoot
-            trust: system
+        includeShippedRoot: true
+        includeUserRoot: true
 
     - id: tui-app
       name: '@lingxi-ai-cn/dsh-tui'

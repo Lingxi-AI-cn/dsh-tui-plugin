@@ -159,6 +159,20 @@ function transcriptNodeSearchText(node: TranscriptNode): string {
   if (node.kind === 'deliverables') {
     return compactSearchText(['Files', ...node.items.map(item => `${item.operation} ${item.path}`)])
   }
+  if (node.kind === 'turn-usage') {
+    return compactSearchText([
+      'Exact turn usage',
+      `${node.usage.uncachedInputTokens} uncached input`,
+      `${node.usage.outputTokens} output`,
+      `${node.usage.totalTokens} total`,
+    ])
+  }
+  if (node.kind === 'question') {
+    return compactSearchText([
+      'Question history', node.status,
+      ...node.questions.flatMap(question => [question.header ?? '', question.question, question.secret ? '' : question.answer ?? '']),
+    ])
+  }
   if (node.kind === 'tool-activity') {
     return compactSearchText([
       'Tool activity',

@@ -9,8 +9,24 @@ import type {
 export interface TuiWorkAgentSnapshot {
   /** Exact live Agent status. */
   readonly status: AgentStatus
+  /** Resolved request route currently owned by the live child Agent. */
+  readonly route: TuiWorkRouteFacts
   /** Durable active-turn timing folded by the subagent projection. */
   readonly timing?: SubagentTimingProjection | undefined
+}
+
+/** Owner facts available for one subagent's LLM route. */
+export interface TuiWorkRouteFacts {
+  /** Provider id when the owner exposes it. */
+  readonly provider?: string | undefined
+  /** Model id when the owner exposes it. */
+  readonly model?: string | undefined
+  /** Reasoning effort when the owner exposes it. */
+  readonly reasoningEffort?: string | undefined
+  /** Per-request output cap. This is live-only because durable descriptors deliberately omit it. */
+  readonly maxTokens?: number | undefined
+  /** Exact surface that supplied these facts. */
+  readonly source: 'live-agent' | 'remote-lifecycle' | 'durable-catalog'
 }
 
 /** One owner-scoped remote subagent lifecycle observed during this TUI process. */
@@ -58,6 +74,8 @@ export interface TuiWorkItemView {
   readonly action: 'cancel-job' | 'interrupt-subagent' | 'none'
   /** Durable accumulated execution and optional open-turn timing. */
   readonly timing?: SubagentTimingProjection | undefined
+  /** Owner-provided route facts; omitted for jobs. */
+  readonly route?: TuiWorkRouteFacts | undefined
 }
 
 /** Footer counters derived from the same work rows as the panel. */
@@ -134,6 +152,7 @@ export function projectTuiWork(input: TuiWorkProjectionInput): TuiWorkSnapshot {
         readOnlyReason: 'The local child Agent is not live; its durable summary remains available.',
       } : {},
       action: state === 'running' ? 'interrupt-subagent' : 'none',
+      route: freezeRoute(live?.route ?? { source: 'durable-catalog' }),
       ...live?.timing === undefined ? {} : { timing: freezeTiming(live.timing) },
     }))
   }
@@ -152,6 +171,7 @@ export function projectTuiWork(input: TuiWorkProjectionInput): TuiWorkSnapshot {
       inspectable: false,
       readOnlyReason: 'Remote provider exposed a summary only; no local Session transcript is available.',
       action: 'none',
+      route: freezeRoute({ provider: run.info.provider, source: 'remote-lifecycle' }),
     }))
   }
   items.sort(compareWorkItems)
@@ -221,4 +241,8 @@ function freezeTiming(timing: SubagentTimingProjection): SubagentTimingProjectio
     settledMs: timing.settledMs,
     ...timing.active === undefined ? {} : { active: Object.freeze({ ...timing.active }) },
   })
+}
+
+function freezeRoute(route: TuiWorkRouteFacts): TuiWorkRouteFacts {
+  return Object.freeze({ ...route })
 }

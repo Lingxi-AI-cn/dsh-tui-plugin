@@ -3,8 +3,8 @@
 import { terminalSafe } from './sanitize.ts'
 import { tuiMessage, type TuiLocale } from './locale.ts'
 import type {
-  PluginEntryId, PluginFiberPhase, PluginInventoryEntry, SettingsDescriptor, SettingsNamespace,
-  SettingsPathOp,
+  AgentPresetPluginGroup, PluginEntryId, PluginFiberPhase, PluginInventoryEntry,
+  PluginInventorySnapshot, SettingsDescriptor, SettingsNamespace, SettingsPathOp,
 } from './host.ts'
 
 export type { PluginEntryId, PluginFiberPhase }
@@ -19,6 +19,13 @@ export interface TuiHostPluginRow {
   readonly enabled: boolean
   readonly phase: PluginFiberPhase
   readonly phaseLabel: string
+}
+
+/** One Agent preset composition projected from the official Host inventory owner. */
+export interface TuiHostPresetPluginGroup {
+  readonly preset: AgentPresetPluginGroup
+  readonly name: string
+  readonly broken: string | undefined
 }
 
 /** One settings namespace projected for the Host Plugin Center panel. */
@@ -49,8 +56,10 @@ export type TuiHostPluginSourceState = 'ready' | 'unavailable' | 'error'
 /** Host Plugin Center snapshot. */
 export interface TuiHostPluginCenterSnapshot {
   readonly plugins: readonly TuiHostPluginRow[]
+  readonly agentPresets: readonly TuiHostPresetPluginGroup[]
   readonly settingsNamespaces: readonly TuiHostSettingsRow[]
   readonly omittedPlugins: number
+  readonly omittedPresets: number
   readonly omittedNamespaces: number
   readonly inventoryState: TuiHostPluginSourceState
   readonly settingsState: TuiHostPluginSourceState
@@ -60,7 +69,7 @@ export interface TuiHostPluginCenterSnapshot {
 /** Inputs borrowed for one Host Plugin Center refresh. */
 export interface TuiHostPluginCenterCollectOptions {
   readonly inventory?: {
-    list(): { entries: readonly PluginInventoryEntry[] }
+    list(): PluginInventorySnapshot | Promise<PluginInventorySnapshot>
   }
   readonly settings?: {
     readonly writable?: boolean
@@ -152,18 +161,22 @@ function phaseLabel(phase: PluginFiberPhase, locale: TuiLocale): string {
  * @param locale - active TUI locale.
  * @returns frozen snapshot.
  */
-export function collectTuiHostPluginCenter(
+export async function collectTuiHostPluginCenter(
   options: TuiHostPluginCenterCollectOptions,
   locale: TuiLocale,
-): TuiHostPluginCenterSnapshot {
+): Promise<TuiHostPluginCenterSnapshot> {
   let inventoryState: TuiHostPluginSourceState = options.inventory === undefined ? 'unavailable' : 'ready'
   let allEntries: readonly PluginInventoryEntry[] = []
+  let allPresets: readonly AgentPresetPluginGroup[] = []
   try {
-    allEntries = options.inventory?.list().entries ?? []
+    const inventory = options.inventory === undefined ? undefined : await options.inventory.list()
+    allEntries = inventory?.entries ?? []
+    allPresets = inventory?.agentPresets ?? []
   } catch {
     inventoryState = 'error'
   }
   const boundedEntries = allEntries.slice(0, MAX_ENTRIES)
+  const boundedPresets = allPresets.slice(0, MAX_ENTRIES)
 
   const plugins: TuiHostPluginRow[] = boundedEntries.map(entry => Object.freeze({
     entry,
@@ -171,6 +184,11 @@ export function collectTuiHostPluginCenter(
     enabled: entry.enabled,
     phase: entry.fiberPhase,
     phaseLabel: phaseLabel(entry.fiberPhase, locale),
+  }))
+  const agentPresets: TuiHostPresetPluginGroup[] = boundedPresets.map(preset => Object.freeze({
+    preset,
+    name: terminalSafe(preset.name ?? preset.id),
+    broken: preset.broken === undefined ? undefined : terminalSafe(preset.broken),
   }))
 
   let settingsState: TuiHostPluginSourceState = options.settings === undefined ? 'unavailable' : 'ready'
@@ -193,8 +211,10 @@ export function collectTuiHostPluginCenter(
 
   return Object.freeze({
     plugins: Object.freeze(plugins),
+    agentPresets: Object.freeze(agentPresets),
     settingsNamespaces: Object.freeze(settingsNamespaces),
     omittedPlugins: Math.max(0, allEntries.length - MAX_ENTRIES),
+    omittedPresets: Math.max(0, allPresets.length - MAX_ENTRIES),
     omittedNamespaces: Math.max(0, allDescriptors.length - MAX_NAMESPACES),
     inventoryState,
     settingsState,

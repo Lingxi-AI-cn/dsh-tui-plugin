@@ -42,7 +42,7 @@ describe('OpenAICodexAdapter', () => {
     const spec = resolveSpec({ dshHome: await home() })
     const credentials = new FileCredentialStore(spec.credentialsPath)
     await credentials.modify('openai-codex', async () => ({
-      type: 'oauth', access: 'access', refresh: 'refresh', expires: Date.now() + 60_000, accountId: 'acct',
+      type: 'oauth', access: 'access', refresh: 'refresh', expires: Date.now() + 60 * 60_000, accountId: 'acct',
     }))
     const fetchImpl = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ models: [{
       slug: 'gpt-account', display_name: 'GPT Account', description: 'Account-visible model',
@@ -72,7 +72,7 @@ describe('OpenAICodexAdapter', () => {
     const spec = resolveSpec({ dshHome: await home() })
     const credentials = new FileCredentialStore(spec.credentialsPath)
     await credentials.modify('openai-codex', async () => ({
-      type: 'oauth', access: 'access', refresh: 'refresh', expires: Date.now() + 60_000, accountId: 'acct',
+      type: 'oauth', access: 'access', refresh: 'refresh', expires: Date.now() + 60 * 60_000, accountId: 'acct',
     }))
     const fetchImpl = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ models: [{
       slug: 'gpt-image', display_name: 'GPT Image', visibility: 'list', priority: 1,

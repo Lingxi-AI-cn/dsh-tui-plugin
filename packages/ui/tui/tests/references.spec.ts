@@ -36,7 +36,7 @@ describe('unified reference suggestion projection', () => {
     const state = tuiReferenceSuggestionState(query!, {
       files: [{ path: 'source.ts', kind: 'file' }, { path: 'source dir', kind: 'directory' }],
       sessions: [{
-        sessionId, label: 'Source Session', cwd: '/work', createdAt: 10, updatedAt: 20,
+        sessionId, label: 'Source Session', cwd: '/work', sameWorkspace: false, createdAt: 10, updatedAt: 20,
       }],
       errors: [],
     }, 'en', 20)
@@ -99,11 +99,11 @@ describe('unified reference suggestion projection', () => {
     await expect(collectTuiReferenceResolution('keep', {
       files: () => { throw new Error('file owner unavailable') },
       sessions: async () => [{
-        sessionId, label: 'Kept Session', createdAt: 1, updatedAt: 2,
+        sessionId, label: 'Kept Session', sameWorkspace: false, createdAt: 1, updatedAt: 2,
       }],
     }, new AbortController().signal)).resolves.toEqual({
       files: [],
-      sessions: [{ sessionId, label: 'Kept Session', createdAt: 1, updatedAt: 2 }],
+      sessions: [{ sessionId, label: 'Kept Session', sameWorkspace: false, createdAt: 1, updatedAt: 2 }],
       errors: ['file'],
     })
   })

@@ -15,7 +15,7 @@ const MAX_LEDGER_ENTRIES = 100_000
 const MAX_INSPECTOR_BYTES = 16 * 1024
 const TRIM_BATCH = 1_024
 
-/** Structural event emitted by newer Hosts; official rc.8 logs simply omit it. */
+/** Structural event emitted by newer Hosts; legacy logs simply omit it. */
 interface TuiToolExecutionGroupEvent {
   readonly type: 'tool/execution-group'
   readonly seq: number

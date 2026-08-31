@@ -16,11 +16,13 @@ import { tuiAgentModeDescription, tuiAgentModeName } from './mode.ts'
 import type { TuiWorkSummary } from './work.ts'
 import type { TuiSpeedProjection } from './live-feedback.ts'
 import type { TuiGoalPlanSurface } from './goal-plan.ts'
+import type { TuiScheduleSnapshot } from './schedules.ts'
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 /** Stable action targets exposed by the native TUI footer. */
-export type TuiFooterItemId = 'model' | 'mode' | 'permission' | 'goalPlan' | 'work' | 'speed' | 'context' | 'workspace' | 'transcript'
+export type TuiFooterItemId = 'model' | 'mode' | 'permission' | 'goalPlan' | 'work' | 'schedules'
+  | 'speed' | 'context' | 'workspace' | 'transcript'
 
 /** One actionable status item derived from authoritative runtime state. */
 export interface TuiFooterItemDescriptor {
@@ -31,7 +33,7 @@ export interface TuiFooterItemDescriptor {
   /** Compact current value shown in the status row. */
   readonly value: string
   /** Enter behavior for this item. */
-  readonly action: 'models' | 'modes' | 'permissions' | 'goalPlan' | 'work' | 'detail' | 'bottom'
+  readonly action: 'models' | 'modes' | 'permissions' | 'goalPlan' | 'work' | 'schedules' | 'detail' | 'bottom'
   /** Complete read-only detail shown for local status items. */
   readonly detailLines: readonly string[]
 }
@@ -58,6 +60,10 @@ export interface TuiFooterTranscriptPosition {
   readonly hasOlder: boolean
   /** Whether content exists below the mounted page. */
   readonly hasNewer: boolean
+  /** One-based completed Turn currently represented by the viewport. */
+  readonly currentTurn?: number | undefined
+  /** Complete projected count of navigable completed Turns. */
+  readonly totalTurns?: number | undefined
 }
 
 /** Authoritative values from which the current footer is projected. */
@@ -82,6 +88,8 @@ export interface TuiFooterSources {
   readonly speed?: TuiSpeedProjection | undefined
   /** Authoritative background-work counters. */
   readonly work?: TuiWorkSummary | undefined
+  /** Official active Schedule projection; unavailable is distinct from an empty ready list. */
+  readonly schedules?: TuiScheduleSnapshot | undefined
   /** Compact durable Goal/Plan state used only when the full strip is folded. */
   readonly goalPlan?: TuiGoalPlanSurface | undefined
   /** Full Session workspace path. */
@@ -212,6 +220,27 @@ export function tuiFooterItems(
     ))
   }
 
+  const schedules = sources.schedules
+  if (schedules?.sourceState === 'ready' && schedules.rows.length > 0) {
+    const overdue = schedules.rows.filter(row => row.state === 'overdue').length
+    items.push(item(
+      'schedules',
+      tuiMessage(locale, 'footer.label.schedules'),
+      overdue > 0
+        ? tuiMessage(locale, 'footer.schedules.compactOverdue', { count: schedules.rows.length, overdue })
+        : String(schedules.rows.length),
+      'schedules',
+      [
+        tuiMessage(locale, 'footer.schedules.active', { count: schedules.rows.length }),
+        tuiMessage(locale, 'footer.schedules.overdue', { count: overdue }),
+        tuiMessage(locale, 'footer.schedules.next', {
+          prompt: schedules.rows[0]?.prompt ?? '',
+          time: schedules.rows[0]?.scheduledAt ?? '',
+        }),
+      ],
+    ))
+  }
+
   const speed = sources.speed
   if (speed !== undefined) {
     items.push(item(
@@ -272,13 +301,21 @@ export function tuiFooterItems(
     : `${position.startIndex + 1}-${position.endIndex + 1}/${position.total}`
   const newerCount = position.hasNewer ? Math.max(0, position.total - position.endIndex - 1) : 0
   const positionValue = `${position.hasOlder ? '↑' : ''}${range}${newerCount > 0 ? `↓${newerCount}` : ''}`
+  const turnValue = position.currentTurn === undefined || position.totalTurns === undefined
+    ? positionValue
+    : `T${position.currentTurn}/${position.totalTurns} · ${positionValue}`
   items.push(item(
     'transcript',
     tuiMessage(locale, 'footer.label.transcript'),
-    positionValue,
+    turnValue,
     newerCount > 0 ? 'bottom' : 'detail',
     [
       tuiMessage(locale, 'footer.transcript.mounted', { range }),
+      ...(position.currentTurn === undefined || position.totalTurns === undefined ? [] : [
+        tuiMessage(locale, 'footer.transcript.turn', {
+          current: position.currentTurn, total: position.totalTurns,
+        }),
+      ]),
       tuiMessage(locale, 'footer.transcript.older', {
         value: tuiMessage(locale, position.hasOlder ? 'footer.transcript.available' : 'footer.transcript.none'),
       }),

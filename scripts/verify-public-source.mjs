@@ -3,8 +3,8 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const tuiVersion = '0.1.6-rc.8'
-const dshVersion = '0.1.0-rc.8'
+const tuiVersion = '0.1.7-alpha.2'
+const dshVersion = '0.1.2-alpha.2'
 const repository = 'git+https://github.com/Lingxi-AI-cn/dsh-tui-plugin.git'
 const packages = [
   'packages/boot/profile-plugin-manager',
@@ -16,10 +16,10 @@ const packages = [
   'packages/bundle/tui-app',
 ]
 const externalVersions = new Map([
-  ['@deepseek-ai/cordis', '4.0.1'],
-  ['@deepseek-ai/cordis-plugin-loader', '1.0.2'],
-  ['@deepseek-ai/schemastery', '3.18.1'],
-  ['@earendil-works/pi-ai', '0.82.1'],
+  ['@deepseek-ai/cordis', '4.0.2'],
+  ['@deepseek-ai/cordis-plugin-loader', '1.0.3'],
+  ['@deepseek-ai/schemastery', '3.18.2'],
+  ['@earendil-works/pi-ai', '0.84.4'],
 ])
 const violations = []
 

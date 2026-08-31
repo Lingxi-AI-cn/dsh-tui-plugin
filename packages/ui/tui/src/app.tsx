@@ -13,7 +13,10 @@ import type {
 import {
   AgentStatusStore, InteractionStore, SessionEventStore, ValueStore, type PendingQuestion,
 } from './store.ts'
-import { STRUCTURED_CHILD_LIMIT, TuiTranscriptProjectionCache } from './transcript.ts'
+import {
+  navigateTuiTranscriptTurn, STRUCTURED_CHILD_LIMIT,
+  tuiTranscriptTurnAnchors, TuiTranscriptProjectionCache,
+} from './transcript.ts'
 import { TodoPanel, todoPanelRows, todoPanelScreenMapLines } from './todo-panel.tsx'
 import {
   TuiTranscriptSearchText, TuiTranscriptView,
@@ -92,10 +95,12 @@ import {
   type TuiPresetCompositionPreview, type TuiPresetManagerSnapshot, type TuiPresetManagerRow,
   tuiPresetMutationErrorMessage, validateTuiPresetId, TuiPresetIdError,
 } from './preset-manager.ts'
+import type { TuiScheduleRow, TuiScheduleSnapshot } from './schedules.ts'
 import {
   filterTuiHostPlugins, planTuiHostSettingsMutation, tuiHostSettingsErrorMessage,
   type TuiHostPluginCenterSnapshot,
-  type TuiHostPluginRow, type TuiHostPluginFilter, type TuiHostSettingsMutation,
+  type TuiHostPluginRow, type TuiHostPluginFilter, type TuiHostPresetPluginGroup,
+  type TuiHostSettingsMutation,
   type TuiHostSettingsRow,
 } from './host-plugin-center.ts'
 import {
@@ -135,6 +140,7 @@ import {
   tuiPluginHubPointerRegions, tuiQuestionPointerRegions, tuiResumePointerRegions, tuiSuggestionPointerRegions,
   tuiHostPluginCenterPointerRegions, tuiAttachmentRailPointerRegions,
   tuiPresetManagerPointerRegions,
+  tuiSchedulePointerRegions,
   tuiTrajectoryPointerRegions,
   tuiFeedbackPointerRegions,
   tuiActivityPointerRegions,
@@ -298,6 +304,9 @@ export interface TuiAppProps {
   presetManager: ValueStore<TuiPresetManagerSnapshot | undefined>
   onClosePresetManager(): void
   onRefreshPresetManager(): Promise<void>
+  schedules: ValueStore<TuiScheduleSnapshot>
+  scheduleDialog: ValueStore<TuiScheduleSnapshot | undefined>
+  onCloseScheduleDialog(): void
   hostPluginCenter: ValueStore<TuiHostPluginCenterSnapshot | undefined>
   onCloseHostPluginCenter(): void
   onRefreshHostPluginCenter(): Promise<void>
@@ -321,7 +330,7 @@ export interface TuiAppProps {
   onForkManagedSession(candidate: TuiResumeCandidate): Promise<void>
   onRenameManagedSession(candidate: TuiResumeCandidate, title: string): Promise<void>
   onArchiveManagedSession(candidate: TuiResumeCandidate, archived: boolean): Promise<void>
-  /** Newer Workspace owner capability; official rc.8 keeps archived Sessions read-only. */
+  /** Newer Workspace owner capability; legacy owners keep archived Sessions read-only. */
   canUnarchiveManagedSessions?: boolean
   onCreateManagedWorkspace(path: string): Promise<void>
   onRenameManagedWorkspace(workspace: TuiWorkspaceManagerRow, title: string): Promise<void>
@@ -1101,6 +1110,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const resumeDialog = useSyncExternalStore(props.resumeDialog.subscribe, props.resumeDialog.getSnapshot)
   const sessionManager = useSyncExternalStore(props.sessionManager.subscribe, props.sessionManager.getSnapshot)
   const presetManager = useSyncExternalStore(props.presetManager.subscribe, props.presetManager.getSnapshot)
+  const schedules = useSyncExternalStore(props.schedules.subscribe, props.schedules.getSnapshot)
+  const scheduleDialog = useSyncExternalStore(props.scheduleDialog.subscribe, props.scheduleDialog.getSnapshot)
   const hostPluginCenter = useSyncExternalStore(props.hostPluginCenter.subscribe, props.hostPluginCenter.getSnapshot)
   const trajectory = useSyncExternalStore(props.trajectory.subscribe, props.trajectory.getSnapshot)
   const messageFeedbackSnap = useSyncExternalStore(props.messageFeedback.subscribe, props.messageFeedback.getSnapshot)
@@ -1135,6 +1146,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   )
   const currentTodo = useMemo(() => projection.find(node => node.kind === 'todo'), [projection])
   const rows = useMemo(() => projection.filter(node => node.kind !== 'todo'), [projection])
+  const turnAnchors = useMemo(() => tuiTranscriptTurnAnchors(rows), [rows])
   const { stdout } = useStdout()
   const [terminalSize, setTerminalSize] = useState(() => ({
     rows: stdout.rows || 24,
@@ -1226,6 +1238,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     readonly truncated?: boolean
   } | undefined>()
   const [presetManagerError, setPresetManagerError] = useState('')
+  const [scheduleSelection, setScheduleSelection] = useState(0)
+  const [scheduleDetail, setScheduleDetail] = useState<TuiScheduleRow | undefined>()
   const [trajectorySelection, setTrajectorySelection] = useState(0)
   const [trajectoryDetailKey, setTrajectoryDetailKey] = useState<string | undefined>()
   const [trajectoryQuery, setTrajectoryQuery] = useState('')
@@ -1234,11 +1248,12 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const [trajectoryCollapsedSteps, setTrajectoryCollapsedSteps] = useState<ReadonlySet<string>>(new Set())
   const [trajectoryInspectorTab, setTrajectoryInspectorTab] = useState<'summary' | 'input' | 'output' | 'timing'>('summary')
   const [trajectoryTailFollow, setTrajectoryTailFollow] = useState(true)
-  const [hostPluginTab, setHostPluginTab] = useState<'plugins' | 'settings'>('plugins')
+  const [hostPluginTab, setHostPluginTab] = useState<'plugins' | 'presets' | 'settings'>('plugins')
   const [hostPluginSelection, setHostPluginSelection] = useState(0)
   const [hostPluginFilter, setHostPluginFilter] = useState<TuiHostPluginFilter>('all')
   const [hostPluginQuery, setHostPluginQuery] = useState('')
   const [hostPluginDetail, setHostPluginDetail] = useState<TuiHostPluginRow | undefined>()
+  const [hostPresetDetail, setHostPresetDetail] = useState<TuiHostPresetPluginGroup | undefined>()
   const [hostSettingsDetailNs, setHostSettingsDetailNs] = useState<string | undefined>()
   const [hostSettingsFieldSelection, setHostSettingsFieldSelection] = useState(0)
   const [hostSettingsDrafts, setHostSettingsDrafts] = useState<Readonly<Record<string, {
@@ -1394,6 +1409,11 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   }, [presetManager === undefined])
 
   useEffect(() => {
+    setScheduleSelection(0)
+    setScheduleDetail(undefined)
+  }, [scheduleDialog === undefined])
+
+  useEffect(() => {
     setTrajectorySelection(0)
     setTrajectoryDetailKey(undefined)
     setTrajectoryQuery('')
@@ -1410,6 +1430,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     setHostPluginFilter('all')
     setHostPluginQuery('')
     setHostPluginDetail(undefined)
+    setHostPresetDetail(undefined)
     setHostSettingsDetailNs(undefined)
     setHostSettingsFieldSelection(0)
     setHostSettingsDrafts({})
@@ -1526,7 +1547,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             : node.kind === 'text' ? node.label
               : node.kind === 'compaction' ? tuiMessage(locale, 'transcript.compaction.title')
                 : node.kind === 'deliverables' ? tuiMessage(locale, 'deliverables.title')
-                  : node.kind === 'tool-activity' ? toolActivityHeadingText(node, locale) : node.name,
+                  : node.kind === 'turn-usage' ? tuiMessage(locale, 'turn.usage.exact')
+                    : node.kind === 'question' ? tuiMessage(locale, 'question.history.title')
+                      : node.kind === 'tool-activity' ? toolActivityHeadingText(node, locale) : node.name,
           node,
         }]
       }
@@ -1633,9 +1656,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       : focusedActivity !== undefined
         ? inspectedActivityTool === undefined
           ? focusedActivity.tools.map(tool => `${toolStateMark(tool)} ${focusTitle(tool)}`)
-          : transcriptDetailCache.lines(focusedActivity, detailColumns, inspectedActivityTool)
+          : transcriptDetailCache.lines(focusedActivity, detailColumns, inspectedActivityTool, locale)
         : focusedDeliverables === undefined
-          ? transcriptDetailCache.lines(focusedTarget.node, detailColumns, focusedTarget.child)
+          ? transcriptDetailCache.lines(focusedTarget.node, detailColumns, focusedTarget.child, locale)
           : formatTuiDeliverableDetailLines(focusedDeliverables, Math.max(1, detailColumns - 2), locale)
   const transcriptDetailBaseLines = focusedActivity !== undefined && inspectedActivityTool === undefined
     ? transcriptDetailRawLines.map((line, index) => index === activitySelection ? `› ${line}` : `  ${line}`)
@@ -1779,6 +1802,27 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const visiblePresetManagerItems = presetManagerRows.slice(
     presetManagerVisibleStart, presetManagerVisibleStart + presetManagerVisibleCount,
   )
+  const scheduleRows = scheduleDialog?.rows ?? []
+  const effectiveScheduleSelection = scheduleRows.length === 0
+    ? 0
+    : Math.min(scheduleSelection, scheduleRows.length - 1)
+  const selectedScheduleRow = scheduleRows[effectiveScheduleSelection]
+  const currentScheduleDetail = scheduleDetail === undefined
+    ? undefined
+    : scheduleRows.find(row => row.id === scheduleDetail.id)
+  const scheduleRowHeight = 2
+  const scheduleVisibleCount = Math.max(1, Math.floor((terminalRows - 8) / scheduleRowHeight))
+  const scheduleVisibleStart = Math.min(
+    Math.max(0, effectiveScheduleSelection - Math.floor(scheduleVisibleCount / 2)),
+    Math.max(0, scheduleRows.length - scheduleVisibleCount),
+  )
+  const visibleScheduleRows = scheduleRows.slice(
+    scheduleVisibleStart, scheduleVisibleStart + scheduleVisibleCount,
+  )
+
+  useEffect(() => {
+    if (scheduleDetail !== undefined && currentScheduleDetail === undefined) setScheduleDetail(undefined)
+  }, [currentScheduleDetail, scheduleDetail])
 
   const trajectoryEntries = useMemo(() => visibleTuiTrajectoryEntries(
     trajectory?.entries ?? [], trajectoryQuery, trajectoryCollapsedTurns, trajectoryCollapsedSteps,
@@ -1823,6 +1867,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       ? filterTuiHostPlugins(hostPluginCenter.plugins, hostPluginFilter, hostPluginQuery)
       : []
   const hostSettingsRows = hostPluginCenter?.settingsNamespaces ?? []
+  const hostPresetRows = hostPluginCenter?.agentPresets ?? []
   const hostSettingsDetail = hostSettingsDetailNs === undefined
     ? undefined
     : hostSettingsRows.find(row => String(row.ns) === hostSettingsDetailNs)
@@ -1832,7 +1877,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     : Math.min(hostSettingsFieldSelection, hostSettingsFields.length - 1)
   const selectedHostSettingsField = hostSettingsFields[effectiveHostSettingsFieldSelection]
   const hostSettingsCanEdit = hostPluginCenter?.settingsWritable === true && hostSettingsFields.length > 0
-  const hostPluginItems = hostPluginTab === 'plugins' ? hostPluginRows : hostSettingsRows
+  const hostPluginItems = hostPluginTab === 'plugins'
+    ? hostPluginRows
+    : hostPluginTab === 'presets' ? hostPresetRows : hostSettingsRows
   const effectiveHostPluginSelection = hostPluginItems.length === 0
     ? 0
     : Math.min(hostPluginSelection, hostPluginItems.length - 1)
@@ -1885,6 +1932,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   ].filter(value => value !== undefined && value !== '').join(' · ')
   const providerCenterVisible = providerCenter !== undefined && interaction === undefined
     && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && scheduleDialog === undefined
     && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
     && diagnostics === undefined && loadedContext === undefined && rewindDialog === undefined
     && sessionExportDialog === undefined && pluginHubDialog === undefined && !goalPlanOpen
@@ -2031,6 +2079,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     && rows.length === 0 && currentTodo === undefined && agentStatus === 'idle' && !busy
     && interaction === undefined && !helpOpen && diagnostics === undefined && loadedContext === undefined
     && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && scheduleDialog === undefined
     && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
     && rewindDialog === undefined && sessionExportDialog === undefined && pluginHubDialog === undefined
     && providerCenter === undefined && !queueOpen
@@ -2099,6 +2148,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const referenceQuery = historySearch === undefined && transcriptSearch === undefined
     && diagnostics === undefined && loadedContext === undefined && rewindDialog === undefined
     && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && scheduleDialog === undefined
     && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
     && sessionExportDialog === undefined && pluginHubDialog === undefined && providerCenter === undefined
     && !helpOpen && !workOpen && !queueOpen && !goalPlanOpen
@@ -2135,6 +2185,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     && diagnostics === undefined && loadedContext === undefined && rewindDialog === undefined
     && sessionExportDialog === undefined && pluginHubDialog === undefined && providerCenter === undefined
     && sessionManager === undefined && presetManager === undefined && hostPluginCenter === undefined && trajectory === undefined
+    && scheduleDialog === undefined
     ? referenceSuggestion ?? commandSuggestionState(composer.text, composer.cursor, props.commands, locale)
     : undefined
   const suggestionKey = baseSuggestion === undefined ? undefined
@@ -2149,17 +2200,20 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const selectedWorkItem = work.items[effectiveWorkSelection]
   const helpVisible = helpOpen && interaction === undefined
     && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && scheduleDialog === undefined
     && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
     && diagnostics === undefined && loadedContext === undefined && rewindDialog === undefined
     && sessionExportDialog === undefined && pluginHubDialog === undefined && providerCenter === undefined
     && !queueOpen && !goalPlanOpen
   const doctorVisible = diagnostics !== undefined && interaction === undefined
     && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && scheduleDialog === undefined
     && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
     && rewindDialog === undefined && sessionExportDialog === undefined && pluginHubDialog === undefined
     && providerCenter === undefined && !queueOpen && !goalPlanOpen
   const loadedContextVisible = loadedContext !== undefined && interaction === undefined
     && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && scheduleDialog === undefined
     && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
     && diagnostics === undefined && rewindDialog === undefined
     && sessionExportDialog === undefined && pluginHubDialog === undefined && providerCenter === undefined
@@ -2169,7 +2223,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     dialog: resumeDialog !== undefined || sessionManager !== undefined || freshSessionDialog !== undefined
       || rewindDialog !== undefined || sessionExportDialog !== undefined
       || helpVisible || doctorVisible || loadedContextVisible || providerCenterVisible || queueOpen || goalPlanOpen
-      || presetManager !== undefined || hostPluginCenter !== undefined || trajectory !== undefined || interaction?.kind === 'question',
+      || presetManager !== undefined || scheduleDialog !== undefined || hostPluginCenter !== undefined
+      || trajectory !== undefined || interaction?.kind === 'question',
     pluginHub: pluginHubDialog !== undefined,
     work: workOpen,
     detail: focus?.mode === 'detail' || footerDetail !== undefined,
@@ -2202,6 +2257,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     && resumeDialog === undefined
     && sessionManager === undefined
     && presetManager === undefined
+    && scheduleDialog === undefined
     && hostPluginCenter === undefined
     && trajectory === undefined
     && freshSessionDialog === undefined
@@ -2465,6 +2521,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const goalPlanRowVisible = goalPlanSurface !== undefined && !compactGoalPlan && !goalPlanOpen
     && !helpVisible && !workOpen && interaction === undefined && !queueOpen
     && resumeDialog === undefined && sessionManager === undefined && presetManager === undefined
+    && scheduleDialog === undefined
     && hostPluginCenter === undefined && trajectory === undefined && freshSessionDialog === undefined
     && rewindDialog === undefined && sessionExportDialog === undefined
     && pluginHubDialog === undefined && providerCenter === undefined
@@ -2479,6 +2536,17 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const transcriptColumns = Math.max(1, (stdout.columns || 80) - (focus === undefined ? 2 : 4))
   transcriptViewport.update(rows, transcriptColumns)
   const transcriptPage = transcriptViewport.page(transcriptRows, transcriptAnchor)
+  const navigateCompletedTurn = (direction: 'previous' | 'next'): void => {
+    const target = navigateTuiTranscriptTurn(
+      turnAnchors,
+      transcriptPage.startIndex,
+      direction,
+      transcriptAnchor === undefined,
+    )
+    setTranscriptAnchor(target === undefined ? undefined : {
+      key: target.key, index: target.index,
+    })
+  }
   const visible = transcriptPage.entries
   const pointerContext: TuiInteractionContext | undefined = inputContext
   const transcriptContentRows = visible.length === 0
@@ -2531,6 +2599,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       ? projectTuiLatestSpeed(eventSnapshot, Date.now()) ?? projectTuiSettledSpeed(sessionStats)
       : undefined,
     work: work.summary,
+    schedules: props.view.kind === 'root' ? schedules : undefined,
     goalPlan: compactGoalPlan ? goalPlanSurface : undefined,
     workspace,
     transcript: {
@@ -2539,6 +2608,12 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       total: rows.length,
       hasOlder: transcriptPage.hasOlder,
       hasNewer: transcriptPage.hasNewer,
+      ...(turnAnchors.length === 0 ? {} : {
+        currentTurn: transcriptAnchor === undefined
+          ? turnAnchors.length
+          : Math.max(1, turnAnchors.findLastIndex(anchor => anchor.index <= transcriptPage.startIndex) + 1),
+        totalTurns: turnAnchors.length,
+      }),
     },
   }, locale)
   const mountedFooterItems = visibleTuiFooterItems(completeFooterItems, Math.max(1, columns - 2))
@@ -2715,14 +2790,16 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     }
     if (hostPluginCenter !== undefined) {
       const hostPluginQueryRows = hostPluginTab === 'plugins' && hostPluginQuery.length > 0 ? 3 : 0
-      const hostPluginSourceWarningRows = ((hostPluginTab === 'plugins'
+      const hostPluginSourceWarningRows = (((hostPluginTab === 'plugins' || hostPluginTab === 'presets')
         && hostPluginCenter.inventoryState !== 'ready') || (hostPluginTab === 'settings'
         && hostPluginCenter.settingsState !== 'ready'))
-        && hostPluginDetail === undefined && hostSettingsDetail === undefined ? 1 : 0
+        && hostPluginDetail === undefined && hostPresetDetail === undefined
+        && hostSettingsDetail === undefined ? 1 : 0
       const hostFooterKey = hostSettingsDetail !== undefined
         ? hostSettingsCanEdit ? 'hostPlugins.footer.settingsDetail' : 'hostPlugins.footer.settingsReadOnly'
-        : hostPluginDetail !== undefined ? 'hostPlugins.footer.detail'
-          : hostPluginTab === 'plugins' ? 'hostPlugins.footer.plugins' : 'hostPlugins.footer.settings'
+        : hostPluginDetail !== undefined || hostPresetDetail !== undefined ? 'hostPlugins.footer.detail'
+          : hostPluginTab === 'plugins' ? 'hostPlugins.footer.plugins'
+            : hostPluginTab === 'presets' ? 'hostPlugins.footer.presets' : 'hostPlugins.footer.settings'
       const hostFooterLabels = tuiMessage(locale, hostFooterKey).split(' · ')
       const footerActions: TuiPointerFooterAction[] = hostSettingsDetail !== undefined
         ? hostSettingsCanEdit ? [
@@ -2734,7 +2811,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           { action: { id: 'hostPlugins.discard' as const }, label: hostFooterLabels[4] ?? '' },
           { action: { id: 'hostPlugins.close' as const }, label: hostFooterLabels[5] ?? '' },
         ] : [{ action: { id: 'hostPlugins.close' as const }, label: hostFooterLabels.at(-1) ?? '' }]
-        : hostPluginDetail
+        : hostPluginDetail || hostPresetDetail
           ? [{ action: { id: 'hostPlugins.close' as const }, label: hostFooterLabels[0] ?? '' }]
           : hostPluginTab === 'plugins' ? [
             { action: { id: 'hostPlugins.accept' as const }, label: hostFooterLabels[0] ?? '' },
@@ -2749,7 +2826,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       return tuiHostPluginCenterPointerRegions({
         columns,
         rows: terminalRows,
-        listVisible: hostPluginDetail === undefined && hostSettingsDetail === undefined,
+        listVisible: hostPluginDetail === undefined && hostPresetDetail === undefined
+          && hostSettingsDetail === undefined,
         visibleStart: hostPluginVisibleStart,
         visibleCount: visibleHostPluginItems.length,
         rowHeight: hostPluginRowHeight,
@@ -2759,6 +2837,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           left: 3,
           labels: {
             plugins: tuiMessage(locale, 'hostPlugins.tab.plugins'),
+            presets: tuiMessage(locale, 'hostPlugins.tab.presets'),
             settings: tuiMessage(locale, 'hostPlugins.tab.settings'),
           },
         },
@@ -2767,6 +2846,27 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         }),
         footerActions,
         footerLine: tuiMessage(locale, hostFooterKey),
+        context: 'Dialog',
+      })
+    }
+    if (scheduleDialog !== undefined) {
+      const footerLine = tuiMessage(locale, currentScheduleDetail === undefined
+        ? 'schedules.footer.list' : 'schedules.footer.detail')
+      const labels = footerLine.split(' · ')
+      return tuiSchedulePointerRegions({
+        columns,
+        rows: terminalRows,
+        listVisible: currentScheduleDetail === undefined && scheduleDialog.sourceState === 'ready',
+        visibleStart: scheduleVisibleStart,
+        visibleCount: visibleScheduleRows.length,
+        rowHeight: scheduleRowHeight,
+        listTop: 4,
+        footerActions: currentScheduleDetail === undefined ? [
+          { action: { id: 'schedules.accept' as const }, label: labels[0] ?? '' },
+          { action: { id: 'schedules.refresh' as const }, label: labels[1] ?? '' },
+          { action: { id: 'schedules.close' as const }, label: labels[2] ?? '' },
+        ] : [{ action: { id: 'schedules.close' as const }, label: labels[0] ?? '' }],
+        footerLine,
         context: 'Dialog',
       })
     }
@@ -4497,7 +4597,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       : focusedAssistantOutput !== undefined
         ? focusedAssistantReaderText
         : (footerDetailItem === undefined && focusedTarget !== undefined
-          ? tuiTranscriptDetailText(focusedTarget.node, inspectedActivityTool ?? focusedTarget.child)
+          ? tuiTranscriptDetailText(focusedTarget.node, inspectedActivityTool ?? focusedTarget.child, locale)
           : footerDetailItem?.detailLines.join('\n') ?? '')
     const result = props.onCopy(copyText)
     if (result.ok) {
@@ -4563,6 +4663,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     setHostSettingsEditing(false)
     setHostSettingsError('')
     setHostPluginDetail(undefined)
+    setHostPresetDetail(undefined)
   }
 
   const discardHostSettingsDrafts = (): void => {
@@ -4571,10 +4672,11 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     setHostSettingsError('')
   }
 
-  const selectHostPluginTab = (tab: 'plugins' | 'settings'): void => {
+  const selectHostPluginTab = (tab: 'plugins' | 'presets' | 'settings'): void => {
     setHostPluginTab(tab)
     setHostPluginSelection(0)
     setHostPluginDetail(undefined)
+    setHostPresetDetail(undefined)
     setHostSettingsDetailNs(undefined)
     discardHostSettingsDrafts()
   }
@@ -5070,6 +5172,11 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       setHostPluginSelection(index)
       if (hostPluginTab === 'plugins' && hostPluginRows[index] !== undefined) {
         setHostPluginDetail(hostPluginRows[index])
+        setHostPresetDetail(undefined)
+        setHostSettingsDetailNs(undefined)
+      } else if (hostPluginTab === 'presets' && hostPresetRows[index] !== undefined) {
+        setHostPresetDetail(hostPresetRows[index])
+        setHostPluginDetail(undefined)
         setHostSettingsDetailNs(undefined)
       } else if (hostPluginTab === 'settings' && hostSettingsRows[index] !== undefined) {
         openHostSettingsRow(hostSettingsRows[index])
@@ -5080,7 +5187,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       setHostPluginFilter(f => f === 'all' ? 'enabled' : f === 'enabled' ? 'disabled' : f === 'disabled' ? 'failed' : 'all')
       setHostPluginSelection(0)
     } else if (action.id === 'hostPlugins.tab') {
-      selectHostPluginTab(action.tab ?? (hostPluginTab === 'plugins' ? 'settings' : 'plugins'))
+      selectHostPluginTab(action.tab ?? (hostPluginTab === 'plugins'
+        ? 'presets' : hostPluginTab === 'presets' ? 'settings' : 'plugins'))
     } else if (action.id === 'hostPlugins.refresh') {
       void props.onRefreshHostPluginCenter()
     } else if (action.id === 'hostPlugins.edit') {
@@ -5095,11 +5203,24 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       resetSelectedHostSetting()
     } else if (action.id === 'hostPlugins.close') {
       if (hostPluginDetail !== undefined) setHostPluginDetail(undefined)
+      else if (hostPresetDetail !== undefined) setHostPresetDetail(undefined)
       else if (hostSettingsDetailNs !== undefined) {
         setHostSettingsDetailNs(undefined)
         discardHostSettingsDrafts()
       }
       else props.onCloseHostPluginCenter()
+    } else if (action.id === 'schedules.accept') {
+      const index = action.index ?? effectiveScheduleSelection
+      const row = scheduleRows[index]
+      if (row !== undefined) {
+        setScheduleSelection(index)
+        setScheduleDetail(row)
+      }
+    } else if (action.id === 'schedules.refresh') {
+      void props.onActivateFooter('schedules')
+    } else if (action.id === 'schedules.close') {
+      if (currentScheduleDetail !== undefined) setScheduleDetail(undefined)
+      else props.onCloseScheduleDialog()
     } else if (action.id === 'presetManager.accept') {
       if (action.index === undefined && (presetManagerCopyDraft !== undefined
         || presetManagerDeleteConfirm !== undefined)) {
@@ -5491,9 +5612,18 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           return
         }
         if (hostPluginCenter !== undefined) {
-          if (hostPluginDetail === undefined && hostPluginItems.length > 0) {
+          if (hostPluginDetail === undefined && hostPresetDetail === undefined
+            && hostSettingsDetail === undefined && hostPluginItems.length > 0) {
             setHostPluginSelection(previous => Math.max(
               0, Math.min(hostPluginItems.length - 1, previous + wheelDirection),
+            ))
+          }
+          return
+        }
+        if (scheduleDialog !== undefined) {
+          if (currentScheduleDetail === undefined && scheduleRows.length > 0) {
+            setScheduleSelection(previous => Math.max(
+              0, Math.min(scheduleRows.length - 1, previous + wheelDirection),
             ))
           }
           return
@@ -5667,6 +5797,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       else if (queueOpen) closeQueueLayer()
       else if (trajectory !== undefined) props.onCloseTrajectory()
       else if (hostPluginCenter !== undefined) props.onCloseHostPluginCenter()
+      else if (scheduleDialog !== undefined) props.onCloseScheduleDialog()
       else if (presetManager !== undefined) props.onClosePresetManager()
       else if (sessionManager !== undefined) closeSessionManagerLayer()
       else if (workOpen) setWorkOpen(false)
@@ -6339,6 +6470,10 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         if (action === 'dialog.cancel') setHostPluginDetail(undefined)
         return
       }
+      if (hostPresetDetail !== undefined) {
+        if (action === 'dialog.cancel') setHostPresetDetail(undefined)
+        return
+      }
       if (hostSettingsDetailNs !== undefined) {
         if (hostSettingsEditing) {
           if (action === 'dialog.cancel' || action === 'dialog.accept') {
@@ -6380,7 +6515,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         return
       }
       if (key.tab) {
-        selectHostPluginTab(hostPluginTab === 'plugins' ? 'settings' : 'plugins')
+        selectHostPluginTab(hostPluginTab === 'plugins'
+          ? 'presets' : hostPluginTab === 'presets' ? 'settings' : 'plugins')
       } else if (lower === 'f' && hostPluginTab === 'plugins') {
         setHostPluginFilter(f => f === 'all' ? 'enabled' : f === 'enabled' ? 'disabled' : f === 'disabled' ? 'failed' : 'all')
         setHostPluginSelection(0)
@@ -6399,6 +6535,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       } else if (action === 'dialog.accept') {
         if (hostPluginTab === 'plugins' && hostPluginRows[effectiveHostPluginSelection] !== undefined) {
           setHostPluginDetail(hostPluginRows[effectiveHostPluginSelection])
+        } else if (hostPluginTab === 'presets' && hostPresetRows[effectiveHostPluginSelection] !== undefined) {
+          setHostPresetDetail(hostPresetRows[effectiveHostPluginSelection])
         } else if (hostPluginTab === 'settings' && hostSettingsRows[effectiveHostPluginSelection] !== undefined) {
           openHostSettingsRow(hostSettingsRows[effectiveHostPluginSelection])
         }
@@ -6410,6 +6548,30 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       } else if (input !== '' && acceptsCommittedText(key) && hostPluginTab === 'plugins') {
         setHostPluginQuery(previous => `${previous}${input}`.slice(0, 256))
         setHostPluginSelection(0)
+      }
+      return
+    }
+    if (scheduleDialog !== undefined && interaction === undefined) {
+      const action = matchAction('Dialog', input, key)
+      if (currentScheduleDetail !== undefined) {
+        if (action === 'dialog.cancel') setScheduleDetail(undefined)
+        return
+      }
+      if (action === 'dialog.previous' || action === 'dialog.next') {
+        if (scheduleRows.length === 0) return
+        setScheduleSelection(previous => action === 'dialog.previous'
+          ? (Math.min(previous, scheduleRows.length - 1) + scheduleRows.length - 1) % scheduleRows.length
+          : (Math.min(previous, scheduleRows.length - 1) + 1) % scheduleRows.length)
+      } else if (action === 'dialog.previousPage' || action === 'dialog.nextPage') {
+        setScheduleSelection(previous => action === 'dialog.previousPage'
+          ? Math.max(0, previous - scheduleVisibleCount)
+          : Math.min(Math.max(0, scheduleRows.length - 1), previous + scheduleVisibleCount))
+      } else if (action === 'dialog.accept' && selectedScheduleRow !== undefined) {
+        setScheduleDetail(selectedScheduleRow)
+      } else if (action === 'dialog.cancel') {
+        props.onCloseScheduleDialog()
+      } else if (input === 'R') {
+        void props.onActivateFooter('schedules')
       }
       return
     }
@@ -6945,7 +7107,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           ? tuiScreenSelectionText(screenSelection.map, screenSelection.range)
           : focusedTarget === undefined
             ? ''
-            : tuiTranscriptDetailText(focusedTarget.node, focusedTarget.child)
+            : tuiTranscriptDetailText(focusedTarget.node, focusedTarget.child, locale)
         const result = props.onCopy(copyText)
         if (result.ok) {
           setNotice('')
@@ -6965,6 +7127,10 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           : Math.min(focusTargets.length - 1, focusedIndex + 1)
         const target = focusTargets[next]
         if (target !== undefined) focusTranscriptTarget(target, next)
+        return
+      }
+      if (action === 'transcript.previousTurn' || action === 'transcript.nextTurn') {
+        navigateCompletedTurn(action === 'transcript.previousTurn' ? 'previous' : 'next')
         return
       }
       if (action === 'transcript.inspect') {
@@ -7027,6 +7193,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         setTranscriptAnchor(transcriptScroll.previous(transcriptPage, transcriptRows))
       } else if (composerAction === 'composer.transcriptNextPage') {
         setTranscriptAnchor(transcriptScroll.next(transcriptPage, transcriptRows))
+      } else if (composerAction === 'composer.transcriptPreviousTurn'
+        || composerAction === 'composer.transcriptNextTurn') {
+        navigateCompletedTurn(composerAction === 'composer.transcriptPreviousTurn' ? 'previous' : 'next')
       } else if (composerAction === 'composer.transcriptOldest') {
         setTranscriptAnchor(transcriptScroll.oldest())
       } else if (composerAction === 'composer.transcriptLatest') {
@@ -7130,6 +7299,11 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     }
     if (interaction === undefined && composerAction === 'composer.transcriptNextPage') {
       setTranscriptAnchor(transcriptScroll.next(transcriptPage, transcriptRows))
+      return
+    }
+    if (interaction === undefined && (composerAction === 'composer.transcriptPreviousTurn'
+      || composerAction === 'composer.transcriptNextTurn')) {
+      navigateCompletedTurn(composerAction === 'composer.transcriptPreviousTurn' ? 'previous' : 'next')
       return
     }
     if (interaction === undefined && composer.text === '' && (composer.attachments?.length ?? 0) === 0
@@ -8163,6 +8337,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
           <Text bold={hostPluginTab === 'plugins'} {...hostPluginTab === 'plugins'
             ? tuiTextStyle(theme.tokens.selection) : {}}>{tuiMessage(locale, 'hostPlugins.tab.plugins')}</Text>
           <Text {...tuiTextStyle(theme.tokens.muted)}> · </Text>
+          <Text bold={hostPluginTab === 'presets'} {...hostPluginTab === 'presets'
+            ? tuiTextStyle(theme.tokens.selection) : {}}>{tuiMessage(locale, 'hostPlugins.tab.presets')}</Text>
+          <Text {...tuiTextStyle(theme.tokens.muted)}> · </Text>
           <Text bold={hostPluginTab === 'settings'} {...hostPluginTab === 'settings'
             ? tuiTextStyle(theme.tokens.selection) : {}}>{tuiMessage(locale, 'hostPlugins.tab.settings')}</Text>
           <Text {...tuiTextStyle(theme.tokens.muted)}> · Tab</Text>
@@ -8173,12 +8350,14 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         <Text {...tuiTextStyle(theme.tokens.selection)}>{tuiMessage(locale, 'composer.find')} › </Text>
         <Text>{terminalSafe(hostPluginQuery)}</Text>
       </TuiSection>}
-      {((hostPluginTab === 'plugins' && hostPluginCenter.inventoryState !== 'ready')
+      {(((hostPluginTab === 'plugins' || hostPluginTab === 'presets')
+        && hostPluginCenter.inventoryState !== 'ready')
         || (hostPluginTab === 'settings' && hostPluginCenter.settingsState !== 'ready'))
-        && hostPluginDetail === undefined && hostSettingsDetail === undefined
+        && hostPluginDetail === undefined && hostPresetDetail === undefined
+        && hostSettingsDetail === undefined
         && <TuiSection paddingX={2}>
           <Text {...tuiTextStyle(theme.tokens.warning)}>{tuiMessage(locale,
-            hostPluginTab === 'plugins'
+            hostPluginTab === 'plugins' || hostPluginTab === 'presets'
               ? `hostPlugins.source.${hostPluginCenter.inventoryState}` as 'hostPlugins.source.unavailable'
               : `hostPlugins.source.${hostPluginCenter.settingsState}` as 'hostPlugins.source.unavailable')}</Text>
         </TuiSection>}
@@ -8192,78 +8371,131 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             <Text wrap="wrap">{tuiMessage(locale, 'hostPlugins.detail.configBoundary')}</Text>
           </TuiSection>
         </TuiScrollablePanel>
-        : hostSettingsDetail !== undefined
+        : hostPresetDetail !== undefined
           ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
-            <TuiSection title={String(hostSettingsDetail.ns)} tone="accent" paddingX={0}>
-              <Text>{tuiMessage(locale, 'hostPlugins.settings.revision', {
-                revision: String(hostSettingsDetail.revision), applies: hostSettingsDetail.applies,
+            <TuiSection title={terminalSafe(hostPresetDetail.name)} tone="accent" paddingX={0}>
+              <Text>{tuiMessage(locale, 'hostPlugins.presets.detail.identity', {
+                id: hostPresetDetail.preset.id,
+                trust: tuiMessage(locale, hostPresetDetail.preset.trust === 'system'
+                  ? 'presets.system' : 'presets.user'),
               })}</Text>
-              <Text>{hostPluginCenter.settingsWritable
-                ? tuiMessage(locale, 'hostPlugins.settings.writable')
-                : tuiMessage(locale, 'hostPlugins.settings.readOnly')}</Text>
-            </TuiSection>
-            {hostSettingsFields.length === 0
-              ? <TuiEmptyState message={tuiMessage(locale, 'hostPlugins.settings.unsupported')} />
-              : hostSettingsFields.map((field, index) => {
-                const draft = hostSettingsDrafts[field.id]
-                const value = draft?.reset === true
-                  ? tuiMessage(locale, 'hostPlugins.settings.resetValue', { value: field.value })
-                  : draft?.text ?? field.value
-                const badge = draft === undefined
-                  ? field.overridden
-                    ? tuiMessage(locale, 'hostPlugins.settings.overridden')
-                    : tuiMessage(locale, 'hostPlugins.settings.inherited')
-                  : tuiMessage(locale, 'hostPlugins.settings.staged')
-                return <TuiListRow
-                  key={field.id}
-                  selected={index === effectiveHostSettingsFieldSelection}
+              {hostPresetDetail.preset.isDefault
+                && <Text bold>{tuiMessage(locale, 'hostPlugins.presets.default')}</Text>}
+              {hostPresetDetail.broken !== undefined
+                && <Text {...tuiTextStyle(theme.tokens.error)}>{tuiMessage(locale,
+                  'hostPlugins.presets.broken', { reason: hostPresetDetail.broken })}</Text>}
+              {hostPresetDetail.preset.rows.length === 0 && hostPresetDetail.broken === undefined
+                ? <TuiEmptyState message={tuiMessage(locale, 'hostPlugins.presets.rows.empty')} />
+                : hostPresetDetail.preset.rows.map((row, index) => <TuiListRow
+                  key={`${row.entryId ?? 'row'}:${index}`}
+                  selected={false}
                   height={2}
-                  title={`${field.id}: ${terminalSafe(value)}`}
-                  description={`${badge}${hostSettingsEditing && index === effectiveHostSettingsFieldSelection
-                    ? ` · ${tuiMessage(locale, 'hostPlugins.settings.editing')}` : ''}`}
-                />
-              })}
-            {hostSettingsError !== '' && <Text {...tuiTextStyle(theme.tokens.error)}>{terminalSafe(hostSettingsError)}</Text>}
+                  title={terminalSafe(row.moduleName)}
+                  description={tuiMessage(locale, 'hostPlugins.presets.row', {
+                    id: row.entryId ?? '—',
+                    enabled: row.enabled === 'conditional'
+                      ? tuiMessage(locale, 'hostPlugins.presets.conditional')
+                      : row.enabled
+                        ? tuiMessage(locale, 'hostPlugins.filter.enabled')
+                        : tuiMessage(locale, 'hostPlugins.filter.disabled'),
+                    phase: row.fiberPhase === null
+                      ? tuiMessage(locale, 'hostPlugins.phase.unloaded')
+                      : tuiMessage(locale, `hostPlugins.phase.${row.fiberPhase}`),
+                  })}
+                />)}
+            </TuiSection>
           </TuiScrollablePanel>
-          : <TuiScrollablePanel paddingX={2}>
-            {visibleHostPluginItems.length === 0
-              ? <TuiEmptyState tone="warning" message={tuiMessage(locale,
-                hostPluginTab === 'plugins' ? 'hostPlugins.empty' : 'hostPlugins.settings.empty')} />
-              : hostPluginTab === 'plugins'
-                ? (visibleHostPluginItems as readonly TuiHostPluginRow[]).map((row, visibleIndex) => {
-                  const index = hostPluginVisibleStart + visibleIndex
-                  const badge = row.enabled
-                    ? row.phaseLabel
-                    : `${tuiMessage(locale, 'hostPlugins.filter.disabled')} · ${row.phaseLabel}`
+          : hostSettingsDetail !== undefined
+            ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
+              <TuiSection title={String(hostSettingsDetail.ns)} tone="accent" paddingX={0}>
+                <Text>{tuiMessage(locale, 'hostPlugins.settings.revision', {
+                  revision: String(hostSettingsDetail.revision), applies: hostSettingsDetail.applies,
+                })}</Text>
+                <Text>{hostPluginCenter.settingsWritable
+                  ? tuiMessage(locale, 'hostPlugins.settings.writable')
+                  : tuiMessage(locale, 'hostPlugins.settings.readOnly')}</Text>
+              </TuiSection>
+              {hostSettingsFields.length === 0
+                ? <TuiEmptyState message={tuiMessage(locale, 'hostPlugins.settings.unsupported')} />
+                : hostSettingsFields.map((field, index) => {
+                  const draft = hostSettingsDrafts[field.id]
+                  const value = draft?.reset === true
+                    ? tuiMessage(locale, 'hostPlugins.settings.resetValue', { value: field.value })
+                    : draft?.text ?? field.value
+                  const badge = draft === undefined
+                    ? field.overridden
+                      ? tuiMessage(locale, 'hostPlugins.settings.overridden')
+                      : tuiMessage(locale, 'hostPlugins.settings.inherited')
+                    : tuiMessage(locale, 'hostPlugins.settings.staged')
                   return <TuiListRow
-                    key={String(row.entry.entryId)}
-                    selected={index === effectiveHostPluginSelection}
-                    height={hostPluginRowHeight}
-                    title={terminalSafe(row.moduleName)}
-                    description={badge}
-                  />
-                })
-                : (visibleHostPluginItems as readonly {
-                  ns: unknown
-                  revision: number
-                  applies: string
-                  hasUserOverride: boolean
-                }[]).map((row, visibleIndex) => {
-                  const index = hostPluginVisibleStart + visibleIndex
-                  const override = row.hasUserOverride
-                    ? tuiMessage(locale, 'hostPlugins.settings.overridden')
-                    : tuiMessage(locale, 'hostPlugins.settings.inherited')
-                  return <TuiListRow
-                    key={String(row.ns)}
-                    selected={index === effectiveHostPluginSelection}
-                    height={hostPluginRowHeight}
-                    title={String(row.ns)}
-                    description={`${tuiMessage(locale, 'hostPlugins.settings.revision', {
-                      revision: String(row.revision), applies: row.applies,
-                    })} · ${override}`}
+                    key={field.id}
+                    selected={index === effectiveHostSettingsFieldSelection}
+                    height={2}
+                    title={`${field.id}: ${terminalSafe(value)}`}
+                    description={`${badge}${hostSettingsEditing && index === effectiveHostSettingsFieldSelection
+                      ? ` · ${tuiMessage(locale, 'hostPlugins.settings.editing')}` : ''}`}
                   />
                 })}
-          </TuiScrollablePanel>}
+              {hostSettingsError !== '' && <Text {...tuiTextStyle(theme.tokens.error)}>{terminalSafe(hostSettingsError)}</Text>}
+            </TuiScrollablePanel>
+            : <TuiScrollablePanel paddingX={2}>
+              {visibleHostPluginItems.length === 0
+                ? <TuiEmptyState tone="warning" message={tuiMessage(locale,
+                  hostPluginTab === 'plugins' ? 'hostPlugins.empty'
+                    : hostPluginTab === 'presets' ? 'hostPlugins.presets.empty' : 'hostPlugins.settings.empty')} />
+                : hostPluginTab === 'plugins'
+                  ? (visibleHostPluginItems as readonly TuiHostPluginRow[]).map((row, visibleIndex) => {
+                    const index = hostPluginVisibleStart + visibleIndex
+                    const badge = row.enabled
+                      ? row.phaseLabel
+                      : `${tuiMessage(locale, 'hostPlugins.filter.disabled')} · ${row.phaseLabel}`
+                    return <TuiListRow
+                      key={String(row.entry.entryId)}
+                      selected={index === effectiveHostPluginSelection}
+                      height={hostPluginRowHeight}
+                      title={terminalSafe(row.moduleName)}
+                      description={badge}
+                    />
+                  })
+                  : hostPluginTab === 'presets'
+                    ? (visibleHostPluginItems as readonly TuiHostPresetPluginGroup[]).map((row, visibleIndex) => {
+                      const index = hostPluginVisibleStart + visibleIndex
+                      const detail = row.broken === undefined
+                        ? tuiMessage(locale, 'hostPlugins.presets.count', { count: row.preset.rows.length })
+                        : tuiMessage(locale, 'hostPlugins.presets.broken', { reason: row.broken })
+                      const badges = [
+                        tuiMessage(locale, row.preset.trust === 'system' ? 'presets.system' : 'presets.user'),
+                        row.preset.isDefault ? tuiMessage(locale, 'presets.default') : undefined,
+                      ].filter(Boolean).join(' · ')
+                      return <TuiListRow
+                        key={row.preset.id}
+                        selected={index === effectiveHostPluginSelection}
+                        height={hostPluginRowHeight}
+                        title={terminalSafe(row.name)}
+                        description={`${badges} · ${detail}`}
+                      />
+                    })
+                    : (visibleHostPluginItems as readonly {
+                      ns: unknown
+                      revision: number
+                      applies: string
+                      hasUserOverride: boolean
+                    }[]).map((row, visibleIndex) => {
+                      const index = hostPluginVisibleStart + visibleIndex
+                      const override = row.hasUserOverride
+                        ? tuiMessage(locale, 'hostPlugins.settings.overridden')
+                        : tuiMessage(locale, 'hostPlugins.settings.inherited')
+                      return <TuiListRow
+                        key={String(row.ns)}
+                        selected={index === effectiveHostPluginSelection}
+                        height={hostPluginRowHeight}
+                        title={String(row.ns)}
+                        description={`${tuiMessage(locale, 'hostPlugins.settings.revision', {
+                          revision: String(row.revision), applies: row.applies,
+                        })} · ${override}`}
+                      />
+                    })}
+            </TuiScrollablePanel>}
       <TuiActionFooter
         status={hostPluginItems.length > hostPluginVisibleCount
           ? <TuiHintLine>{tuiMessage(locale, 'common.showing', {
@@ -8275,11 +8507,79 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         actions={<TuiHintLine>{hostSettingsDetail !== undefined
           ? tuiMessage(locale, hostSettingsCanEdit
             ? 'hostPlugins.footer.settingsDetail' : 'hostPlugins.footer.settingsReadOnly')
-          : hostPluginDetail !== undefined
+          : hostPluginDetail !== undefined || hostPresetDetail !== undefined
             ? tuiMessage(locale, 'hostPlugins.footer.detail')
             : hostPluginTab === 'plugins'
               ? tuiMessage(locale, 'hostPlugins.footer.plugins')
-              : tuiMessage(locale, 'hostPlugins.footer.settings')}</TuiHintLine>}
+              : hostPluginTab === 'presets'
+                ? tuiMessage(locale, 'hostPlugins.footer.presets')
+                : tuiMessage(locale, 'hostPlugins.footer.settings')}</TuiHintLine>}
+      />
+    </TuiPane>
+  }
+
+  if (scheduleDialog !== undefined && interaction === undefined) {
+    return <TuiPane title={tuiMessage(locale, 'schedules.header')} height={stdout.rows}>
+      <TuiSection paddingX={2} height={2}>
+        <Text bold>{tuiMessage(locale, 'schedules.header')}</Text>
+        <TuiHintLine>{scheduleDialog.sourceState === 'ready'
+          ? tuiMessage(locale, 'footer.schedules.active', { count: scheduleRows.length })
+          : tuiMessage(locale, scheduleDialog.sourceState === 'unavailable'
+            ? 'schedules.unavailable' : 'schedules.error', { reason: scheduleDialog.error ?? '' })}</TuiHintLine>
+      </TuiSection>
+      {currentScheduleDetail !== undefined
+        ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
+          <TuiSection title={terminalSafe(currentScheduleDetail.prompt)} tone="accent" paddingX={0}>
+            <Text>{tuiMessage(locale, 'schedules.detail.id', { id: currentScheduleDetail.id })}</Text>
+            <Text>{tuiMessage(locale, 'schedules.detail.kind', {
+              kind: tuiMessage(locale, `schedules.kind.${currentScheduleDetail.kind}`),
+            })}</Text>
+            <Text>{tuiMessage(locale, 'schedules.detail.target', { time: currentScheduleDetail.scheduledAt })}</Text>
+            <Text bold {...tuiTextStyle(currentScheduleDetail.state === 'overdue'
+              ? theme.tokens.error : theme.tokens.success)}>{tuiMessage(locale,
+                `schedules.state.${currentScheduleDetail.state}`)}</Text>
+            {currentScheduleDetail.intervalSeconds !== undefined
+              && <Text>{tuiMessage(locale, 'schedules.detail.interval', {
+                seconds: currentScheduleDetail.intervalSeconds,
+              })}</Text>}
+            <Text wrap="wrap">{currentScheduleDetail.prompt}</Text>
+            <TuiHintLine>{tuiMessage(locale, 'schedules.detail.owner')}</TuiHintLine>
+          </TuiSection>
+        </TuiScrollablePanel>
+        : scheduleDialog.sourceState === 'unavailable'
+          ? <TuiEmptyState tone="warning" message={tuiMessage(locale, 'schedules.unavailable')} />
+          : scheduleDialog.sourceState === 'error'
+            ? <TuiEmptyState tone="warning" message={tuiMessage(locale, 'schedules.error', {
+              reason: scheduleDialog.error ?? '',
+            })} />
+            : <TuiScrollablePanel paddingX={2}>
+              {visibleScheduleRows.length === 0
+                ? <TuiEmptyState message={tuiMessage(locale, 'schedules.empty')} />
+                : visibleScheduleRows.map((row, visibleIndex) => {
+                  const index = scheduleVisibleStart + visibleIndex
+                  return <TuiListRow
+                    key={row.id}
+                    selected={index === effectiveScheduleSelection}
+                    height={scheduleRowHeight}
+                    title={row.prompt}
+                    description={tuiMessage(locale, 'schedules.row', {
+                      state: tuiMessage(locale, `schedules.state.${row.state}`),
+                      kind: tuiMessage(locale, `schedules.kind.${row.kind}`),
+                      time: row.scheduledAt,
+                    })}
+                  />
+                })}
+            </TuiScrollablePanel>}
+      <TuiActionFooter
+        status={scheduleRows.length > scheduleVisibleCount && currentScheduleDetail === undefined
+          ? <TuiHintLine>{tuiMessage(locale, 'common.showing', {
+            start: scheduleVisibleStart + 1,
+            end: scheduleVisibleStart + visibleScheduleRows.length,
+            total: scheduleRows.length,
+          })}</TuiHintLine>
+          : undefined}
+        actions={<TuiHintLine>{tuiMessage(locale, currentScheduleDetail === undefined
+          ? 'schedules.footer.list' : 'schedules.footer.detail')}</TuiHintLine>}
       />
     </TuiPane>
   }
@@ -8340,6 +8640,31 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                 {presetManagerDetail.description !== undefined
                   && <Text wrap="wrap">{terminalSafe(presetManagerDetail.description)}</Text>}
                 <Text>{tuiMessage(locale, 'presets.detail.path', { path: presetManagerDetail.preset.path })}</Text>
+                <TuiSection title={tuiMessage(locale, 'presets.detail.plugins')} paddingX={0}>
+                  {presetManager.compositionState === 'unavailable'
+                    ? <TuiHintLine>{tuiMessage(locale, 'presets.detail.pluginsUnavailable')}</TuiHintLine>
+                    : presetManager.compositionState === 'error'
+                      ? <Text {...tuiTextStyle(theme.tokens.error)}>{tuiMessage(locale,
+                        'presets.detail.pluginsError')}</Text>
+                      : presetManagerDetail.composition?.broken !== undefined
+                        ? <Text {...tuiTextStyle(theme.tokens.error)}>{tuiMessage(locale, 'presets.broken', {
+                          reason: presetManagerDetail.composition.broken,
+                        })}</Text>
+                        : (presetManagerDetail.composition?.rows.length ?? 0) === 0
+                          ? <TuiHintLine>{tuiMessage(locale, 'presets.detail.pluginsEmpty')}</TuiHintLine>
+                          : presetManagerDetail.composition?.rows.map((row, index) => <Text
+                            key={`${row.entryId ?? 'row'}:${index}`}
+                            wrap="truncate-end"
+                          >{tuiMessage(locale, 'presets.detail.pluginRow', {
+                              module: row.moduleName,
+                              id: row.entryId ?? '—',
+                              enabled: row.enabled === 'conditional'
+                                ? tuiMessage(locale, 'presets.detail.pluginConditional')
+                                : row.enabled
+                                  ? tuiMessage(locale, 'presets.detail.pluginEnabled')
+                                  : tuiMessage(locale, 'presets.detail.pluginDisabled'),
+                            })}</Text>)}
+                </TuiSection>
                 {presetManagerComposition?.id === presetManagerDetail.preset.id
                   && (presetManagerComposition.phase === 'loading'
                     ? <TuiLoadingState message={tuiMessage(locale, 'presets.composition.loading')} />

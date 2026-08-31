@@ -1,6 +1,13 @@
+---
+description: "面向 catalog、installed truth、plan 与 maintenance handoff 的 provider-neutral Plugin Hub service contract。"
+kind: "package-reference"
+---
+
 # @lingxi-ai-cn/dsh-plugin-hub
 
-中文 | [English](README.md)
+[English](README.md) | 中文
+
+## 概述
 
 这是通过 `ctx.pluginHub` 提供的 provider-neutral 人工 Plugin Hub 能力。服务拥有稳定的目录、installed state、detached plan、staging 和 activation handoff DTO，以及 provider 注册、临时 progress event、错误分类和显式 `supportsProfileMutations()` capability；HTTP、cache、signature、profile 修改、包管理器、journal 和 maintenance process 都属于 provider。只提供目录的 provider 会报告 `false`，因此 consumer 可以继续提供发现与已安装事实，而不呈现进程内修改操作。
 
@@ -14,6 +21,12 @@ provider 还可以提供独立的发现仓库 page。Discovery row 携带 reposi
 
 安装计划只接受 opaque `PluginId` 和 `PluginVersionId`。plan 公开精确确认事实，但绝不公开 artifact URL、本地路径、executable、包管理器参数或 signature bypass。staging 和 activation 只接受 provider 签发的 branded id；`markMaintenanceReady()` 在 authenticated relaunch handoff 之外是 no-op。
 
+## 目录
+
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
+
 ## Model Experience
 
 无，因为该服务只向人工 UI consumer 提供目录、README 和进度，并且绝不会将它们写入 Session log。
@@ -26,3 +39,8 @@ provider 还可以提供独立的发现仓库 page。Discovery row 携带 reposi
 
 - **需要 provider 实现** — Service Definition 自身不执行 Registry 校验或 profile 修改；挂载的 Host provider 拥有全部 trust 和 transaction decision。
 - **无 rollback contract** — generation 保留、history、rollback plan 和 advisory remediation 不属于首个安装 lifecycle。
+
+<a id="dev-note"></a>
+### 开发备注
+
+无。

@@ -2,7 +2,7 @@
 
 import { terminalSafe } from './sanitize.ts'
 import { tuiAgentModeDescription, tuiAgentModeName } from './mode.ts'
-import type { AgentPreset, TuiAgentPresets } from './host.ts'
+import type { AgentPreset, AgentPresetCompositionRow, TuiAgentPresets } from './host.ts'
 import { tuiMessage, type TuiLocale } from './locale.ts'
 
 const MAX_COMPOSITION_PREVIEW = 4_096
@@ -20,6 +20,14 @@ export interface TuiPresetManagerRow {
   readonly canCopy: boolean
   readonly canDelete: boolean
   readonly canSetDefault: boolean
+  /** Structured plugin rows from the preset owner; absent when the capability is unavailable. */
+  readonly composition: TuiPresetCompositionInventory | undefined
+}
+
+/** Terminal-safe structured composition facts owned by AgentPresets. */
+export interface TuiPresetCompositionInventory {
+  readonly broken: string | undefined
+  readonly rows: readonly AgentPresetCompositionRow[]
 }
 
 /** Snapshot of the complete roster projected for the Preset Manager panel. */
@@ -29,6 +37,7 @@ export interface TuiPresetManagerSnapshot {
   readonly defaultPresetId: string
   readonly defaultRevision: number | undefined
   readonly authorable: boolean
+  readonly compositionState: 'ready' | 'unavailable' | 'error'
 }
 
 /**
@@ -46,6 +55,25 @@ export async function collectTuiPresetManager(
   const roster = await presets.list()
   const defaultId = presets.defaultId
   const canAuthor = presets.authorable
+  let compositionState: TuiPresetManagerSnapshot['compositionState'] =
+    typeof presets.compositionInventory === 'function' ? 'ready' : 'unavailable'
+  let compositionById = new Map<string, TuiPresetCompositionInventory>()
+  if (presets.compositionInventory !== undefined) {
+    try {
+      const inventory = await presets.compositionInventory()
+      compositionById = new Map(inventory.map(composition => [composition.id, Object.freeze({
+        broken: composition.broken === undefined ? undefined : terminalSafe(composition.broken),
+        rows: Object.freeze(composition.rows.map(row => Object.freeze({
+          ...row,
+          moduleName: terminalSafe(row.moduleName),
+          entryId: row.entryId === null ? null : terminalSafe(row.entryId),
+          ...row.condition === undefined ? {} : { condition: terminalSafe(row.condition) },
+        }))),
+      })]))
+    } catch {
+      compositionState = 'error'
+    }
+  }
 
   const rows: TuiPresetManagerRow[] = roster
     .sort((a, b) =>
@@ -65,6 +93,7 @@ export async function collectTuiPresetManager(
         && presets.defaultRevision !== undefined
         && preset.id !== defaultId
         && preset.broken === undefined,
+      composition: compositionById.get(preset.id),
     }))
 
   return Object.freeze({
@@ -73,6 +102,7 @@ export async function collectTuiPresetManager(
     defaultPresetId: defaultId,
     defaultRevision: presets.defaultRevision,
     authorable: canAuthor,
+    compositionState,
   })
 }
 

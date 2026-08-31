@@ -1,6 +1,8 @@
 /** Optional-host compatibility adapters used by the post-install TUI. */
 
 import { describe, expect, it, vi } from 'vitest'
+import { credentialKey } from '@deepseek-ai/dsh-credentials'
+import type { AuthorizationRequest } from '@deepseek-ai/dsh-authorization'
 import type { FileSystem, FsTarget } from '@deepseek-ai/dsh-fs'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -12,6 +14,8 @@ import {
   hostReadSessionPreview,
   hostSessionReferences,
   resolveSessionForkAnchor,
+  resolveSessionPreset,
+  sessionUsesLegacyCodePreset,
   TuiHostCommandCatalog,
 } from '../src/host.ts'
 import { commandSuggestionState } from '../src/suggestion.ts'
@@ -42,6 +46,58 @@ describe('optional Host compatibility', () => {
     expect(login).toHaveBeenCalledWith('codex', 'oauth', interaction)
     await expect(hostLogout(llm, 'codex')).resolves.toBeUndefined()
     expect(logout).toHaveBeenCalledWith('codex')
+  })
+
+  it('uses the provider-owned official Authorization flow and credential record when available', async () => {
+    const privateKey = credentialKey('llm-openai-codex', 'openai-codex')
+    const upstreamKey = credentialKey('llm-pi-ai', 'openai-codex')
+    const prompt = vi.fn(() => Promise.resolve('browser'))
+    const notify = vi.fn()
+    const begin = vi.fn(async (request: AuthorizationRequest) => {
+      request.interaction.notify({ message: 'Use this code', url: 'https://example.test/device', code: 'ABCD' })
+      expect(await request.interaction.prompt({
+        kind: 'select', message: 'Choose', options: [{ id: 'browser', label: 'Browser' }],
+      })).toBe('browser')
+      return { status: 'authorized' as const }
+    })
+    const describeRecord = vi.fn(async key => ({
+      configured: key === privateKey, kind: 'grant' as const, writable: true,
+    }))
+    const deleteRecord = vi.fn(() => Promise.resolve())
+    const authorization = {
+      list: () => [
+        { key: upstreamKey, label: 'Upstream', methods: [{ id: 'oauth', label: 'Upstream OAuth' }] },
+        { key: privateKey, label: 'ChatGPT', methods: [{ id: 'oauth', label: 'Sign in with ChatGPT' }] },
+      ],
+      begin,
+    }
+    const credentials = { describeRecord, deleteRecord }
+    const host = {
+      llm: {},
+      get(name: string) {
+        if (name === 'authorization') return authorization
+        if (name === 'credentials') return credentials
+        return undefined
+      },
+    } as never
+
+    await expect(hostAuthentication(host, 'openai-codex')).resolves.toEqual({
+      configured: true,
+      source: 'grant',
+      methods: [{ id: 'oauth', name: 'Sign in with ChatGPT' }],
+      canLogout: true,
+    })
+    expect(describeRecord).toHaveBeenCalledWith(privateKey)
+    await expect(hostLogin(host, 'openai-codex', 'oauth', { prompt, notify })).resolves.toBe('authorized')
+    expect(begin).toHaveBeenCalledWith(expect.objectContaining({ key: privateKey, method: 'oauth' }))
+    expect(notify).toHaveBeenCalledWith({
+      type: 'device-code', verificationUri: 'https://example.test/device', userCode: 'ABCD',
+    })
+    expect(prompt).toHaveBeenCalledWith({
+      type: 'select', message: 'Choose', options: [{ id: 'browser', label: 'Browser' }],
+    })
+    await hostLogout(host, 'openai-codex')
+    expect(deleteRecord).toHaveBeenCalledWith(privateKey)
   })
 
   it('normalizes official rc.8 Session reference timestamps and treats preflight as optional', async () => {
@@ -164,5 +220,21 @@ describe('optional Host compatibility', () => {
       kind: 'unavailable',
       reason: 'anchored-turn-open',
     })
+  })
+
+  it('reads the retired code preset as PTC while preserving newer durable selections', () => {
+    const legacy = {
+      header: { agentPreset: 'code' },
+      events: [],
+    } as never
+    expect(sessionUsesLegacyCodePreset(legacy)).toBe(true)
+    expect(resolveSessionPreset(legacy)).toBe('ptc')
+
+    const migrated = {
+      header: { agentPreset: 'code' },
+      events: [{ type: 'agent-preset/selected', data: { agentPreset: 'ptc' } }],
+    } as never
+    expect(sessionUsesLegacyCodePreset(migrated)).toBe(false)
+    expect(resolveSessionPreset(migrated)).toBe('ptc')
   })
 })

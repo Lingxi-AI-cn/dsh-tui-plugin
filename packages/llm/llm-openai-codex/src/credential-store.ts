@@ -4,6 +4,22 @@ import { mkdir, readFile, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { Credential, CredentialInfo, CredentialStore } from '@earendil-works/pi-ai'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import {
+  credentialKey, credentialKeyId, credentialKeyScope,
+  type CredentialKey, type CredentialProvider, type CredentialRecord,
+} from '@deepseek-ai/dsh-credentials'
+
+/** Record namespace owned by this adapter family in the official credential plane. */
+export const OPENAI_CODEX_CREDENTIAL_SCOPE = 'llm-openai-codex'
+
+/**
+ * Official credential-record address for one Codex provider route.
+ * @param providerId - registered provider route identifier.
+ * @returns scoped credential-record key owned by this adapter family.
+ */
+export function openAICodexCredentialKey(providerId: string): CredentialKey {
+  return credentialKey(OPENAI_CODEX_CREDENTIAL_SCOPE, providerId)
+}
 
 interface CredentialDocument {
   version: 1
@@ -47,6 +63,77 @@ function credentialOf(value: unknown, provider: string): Credential {
   }
   if (input.type === 'api_key') return structuredClone(input) as Credential
   throw new TypeError(`llm-openai-codex: credential for "${provider}" has an unknown type`)
+}
+
+/** Lossless JSON image accepted by the opaque grant record. */
+function jsonImage(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(entry => entry === undefined ? null : jsonImage(entry))
+  if (typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype) {
+    const image: Record<string, unknown> = {}
+    for (const [key, member] of Object.entries(value)) {
+      if (member !== undefined) image[key] = jsonImage(member)
+    }
+    return image
+  }
+  return value
+}
+
+function fromRecord(record: CredentialRecord | undefined, providerId: string): Credential | undefined {
+  if (record === undefined) return undefined
+  if (record.kind === 'api-key') {
+    return {
+      type: 'api_key',
+      ...record.key === undefined ? {} : { key: record.key },
+      ...record.env === undefined ? {} : { env: { ...record.env } },
+    }
+  }
+  return credentialOf(record.payload, providerId)
+}
+
+function toRecord(credential: Credential, providerId: string): CredentialRecord {
+  const checked = credentialOf(credential, providerId)
+  return checked.type === 'api_key'
+    ? {
+      kind: 'api-key',
+      ...checked.key === undefined ? {} : { key: checked.key },
+      ...checked.env === undefined ? {} : { env: { ...checked.env } },
+    }
+    : { kind: 'grant', payload: jsonImage(checked) }
+}
+
+/** pi-ai credential store backed by the official scoped credential-record owner. */
+export class HarnessCredentialStore implements CredentialStore {
+  constructor(private readonly provider: CredentialProvider) {}
+
+  /** @inheritdoc */
+  async read(providerId: string): Promise<Credential | undefined> {
+    return fromRecord(await this.provider.readRecord(openAICodexCredentialKey(providerId)), providerId)
+  }
+
+  /** @inheritdoc */
+  async list(): Promise<readonly CredentialInfo[]> {
+    const records = await this.provider.listRecords()
+    return records.flatMap(entry => credentialKeyScope(entry.key) === OPENAI_CODEX_CREDENTIAL_SCOPE
+      ? [{ providerId: credentialKeyId(entry.key), type: entry.kind === 'grant' ? 'oauth' as const : 'api_key' as const }]
+      : [])
+  }
+
+  /** @inheritdoc */
+  async modify(
+    providerId: string,
+    fn: (current: Credential | undefined) => Promise<Credential | undefined>,
+  ): Promise<Credential | undefined> {
+    const next = await this.provider.modifyRecord(openAICodexCredentialKey(providerId), async (current) => {
+      const replacement = await fn(fromRecord(current, providerId))
+      return replacement === undefined ? undefined : toRecord(replacement, providerId)
+    })
+    return fromRecord(next, providerId)
+  }
+
+  /** @inheritdoc */
+  async delete(providerId: string): Promise<void> {
+    await this.provider.deleteRecord(openAICodexCredentialKey(providerId))
+  }
 }
 
 function parseDocument(text: string, filename: string): CredentialDocument {

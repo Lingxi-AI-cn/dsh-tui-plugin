@@ -8,7 +8,7 @@ import { Box, render, Text } from 'ink'
 import { describe, expect, it } from 'vitest'
 import { CommandId } from '@deepseek-ai/dsh-commands'
 import {
-  CallId, createAssistantMessage, createToolResultMessage, createUserMessage,
+  ToolCallId, createAssistantMessage, createToolResultMessage, createUserMessage,
 } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subagent'
@@ -121,7 +121,7 @@ function longSessionFixture(nodeCount: number): LongSessionFixture {
       continue
     }
     if (index % 5 === 2) {
-      const callId = CallId(`tool-${index}`)
+      const callId = ToolCallId(`tool-${index}`)
       append('tool/call', {
         turn, step: 1, callId, name: 'fixture_tool',
         arguments: JSON.stringify({ path: `/workspace/src/file-${index}.ts`, needle: index }),
@@ -138,7 +138,7 @@ function longSessionFixture(nodeCount: number): LongSessionFixture {
     }
     if (index % 5 === 3) {
       const members = Array.from({ length: 3 }, (_, member) => ({
-        callId: CallId(`group-${index}-${member}`),
+        callId: ToolCallId(`group-${index}-${member}`),
         name: member === 0 ? 'subagent' : 'fixture_tool',
         arguments: JSON.stringify({ index, member }),
       }))

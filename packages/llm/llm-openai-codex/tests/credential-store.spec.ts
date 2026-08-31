@@ -2,7 +2,15 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { FileCredentialStore } from '../src/credential-store.ts'
+import { vi } from 'vitest'
+import type {
+  CredentialKey, CredentialProvider, CredentialRecord, CredentialRecordEntry,
+} from '@deepseek-ai/dsh-credentials'
+import {
+  FileCredentialStore,
+  HarnessCredentialStore,
+  openAICodexCredentialKey,
+} from '../src/credential-store.ts'
 
 const roots: string[] = []
 
@@ -50,5 +58,53 @@ describe('FileCredentialStore', () => {
     await Promise.all([first, second])
     const unchanged = await credentials.modify('openai-codex', async () => undefined)
     expect(unchanged).toEqual({ type: 'api_key', key: 'first-second' })
+  })
+})
+
+describe('HarnessCredentialStore', () => {
+  it('stores OAuth and API-key values in the official scoped record owner', async () => {
+    const records = new Map<CredentialKey, CredentialRecord>()
+    const provider = {
+      readRecord: vi.fn(async (key: CredentialKey): Promise<CredentialRecord | undefined> => records.get(key)),
+      listRecords: vi.fn(async (): Promise<readonly CredentialRecordEntry[]> => (
+        [...records].map(([key, record]) => ({ key, kind: record.kind }))
+      )),
+      modifyRecord: vi.fn(async (
+        key: CredentialKey,
+        mutate: (current: CredentialRecord | undefined) => Promise<CredentialRecord | undefined>,
+      ): Promise<CredentialRecord | undefined> => {
+        const next = await mutate(records.get(key))
+        if (next !== undefined) records.set(key, next)
+        return next ?? records.get(key)
+      }),
+      deleteRecord: vi.fn(async (key: CredentialKey) => { records.delete(key) }),
+    } as unknown as CredentialProvider
+    const credentials = new HarnessCredentialStore(provider)
+    const key = openAICodexCredentialKey('openai-codex')
+
+    await credentials.modify('openai-codex', async () => ({
+      type: 'oauth', access: 'access', refresh: 'refresh', expires: 123, accountId: 'acct',
+    }))
+    expect(records.get(key)).toEqual({
+      kind: 'grant',
+      payload: { type: 'oauth', access: 'access', refresh: 'refresh', expires: 123, accountId: 'acct' },
+    })
+    expect(await credentials.read('openai-codex')).toMatchObject({ type: 'oauth', accountId: 'acct' })
+    expect(await credentials.list()).toEqual([{ providerId: 'openai-codex', type: 'oauth' }])
+
+    await credentials.modify('openai-codex', async () => ({ type: 'api_key', key: 'secret' }))
+    expect(records.get(key)).toEqual({ kind: 'api-key', key: 'secret' })
+    expect(await credentials.list()).toEqual([{ providerId: 'openai-codex', type: 'api_key' }])
+    await credentials.delete('openai-codex')
+    expect(records.has(key)).toBe(false)
+  })
+
+  it('ignores records owned by other credential scopes', async () => {
+    const provider = {
+      listRecords: vi.fn(async () => [{
+        key: 'llm-pi-ai/openai-codex', kind: 'grant',
+      }]),
+    } as unknown as CredentialProvider
+    await expect(new HarnessCredentialStore(provider).list()).resolves.toEqual([])
   })
 })

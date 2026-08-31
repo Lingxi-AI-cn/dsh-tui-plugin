@@ -1,10 +1,23 @@
+---
+description: "Plugin Hub 的可信本地 Registry client、artifact verifier 与可选 profile transaction provider。"
+kind: "package-reference"
+---
+
 # @lingxi-ai-cn/dsh-plugin-hub-local
 
-中文 | [English](README.md)
+[English](README.md) | 中文
+
+## 概述
 
 这是可信本地 Plugin Hub provider。部署显式提供 HTTPS `registryUrl` 和本地固定的 Ed25519 key；缺少配置时可选 provider 不挂载。目录响应会进行 runtime parse 和 API 版本校验，最多在配置的 Registry origin 内跟随三次 redirect，限制字节数并遵守调用方取消；Registry 暂时不可用时保留进程内 last-good view。HTTP 304 响应会验证匹配的 ETag entry，并返回其 cached value 而不把目录标记为 stale；其他 Registry failure 可以使用 last-good fallback。Registry detail 响应会归一化 `validationMatrix` row（`manifest`、`install` 和 `tui-boot`），并严格把 quarantine、repository archive、operating-system、curation 和结构化 advisory 事实投影为 provider-neutral DTO；detail metadata 异常时会 fail closed。
 
-`profileMutations` 默认为 `false`。在这种适用于后装插件的安全模式中，Registry 浏览和 active-profile `installed()` 事实仍然可用，修改方法以 `CONTRACT_UNSUPPORTED` 失败，启动 ready 操作则为空操作。已发布 TUI bundle 使用该模式，因为官方 DSH `0.1.0-rc.8` 在 profile composition 之前没有通用 recovery hook；用户通过 `dsh plugin --profile tui ...` 执行修改。设置 `profileMutations: true` 会启用下文所述的下游 maintenance lifecycle，只供安装了配套 pre-composition recovery hook 的 composition 使用。
+## 目录
+
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
+
+`profileMutations` 默认为 `false`。在这种适用于后装插件的安全模式中，Registry 浏览和 active-profile `installed()` 事实仍然可用，修改方法以 `CONTRACT_UNSUPPORTED` 失败，启动 ready 操作则为空操作。已发布 TUI bundle 使用该模式，因为官方 DSH `0.1.2-alpha.2` 在 profile composition 之前没有通用 recovery hook；用户通过 `dsh plugin --profile tui ...` 执行修改。设置 `profileMutations: true` 会启用下文所述的下游 maintenance lifecycle，只供安装了配套 pre-composition recovery hook 的 composition 使用。
 
 目录 search 会把 provider-neutral 的 `relevance`、`stars`、`updated` 或 `newest` ordering 传给 Registry，将 ordering 纳入 request cache key，并让 signed snapshot fallback 使用相同 ordering 和 cursor binding。Registry 返回 `INVALID_CURSOR` 时会保留为 typed provider error，不会静默从第一页重启。
 
@@ -30,3 +43,8 @@ provider 会对 Registry 提供的 category、package kind、metadata source 和
 
 - **目录 cache 仍在内存** — signed artifact 使用持久 content-addressed cache，但 Catalog query/detail ETag 和 last-good snapshot 属于进程本地状态。
 - **尚无用户选择的 rollback** — failed-boot 自动恢复会保留 old 与 failed generation，但 history retention、清理和显式 rollback action 仍然延后。
+
+<a id="dev-note"></a>
+### 开发备注
+
+无。

@@ -1,6 +1,13 @@
+---
+description: "Provider-neutral Plugin Hub service contract for catalog, installed truth, plans, and maintenance handoff."
+kind: "package-reference"
+---
+
 # @lingxi-ai-cn/dsh-plugin-hub
 
 English | [中文](README.zh.md)
+
+## Summary
 
 Provider-neutral human Plugin Hub capability exposed as `ctx.pluginHub`. The service owns stable catalog, installed-state, detached-plan, staging, and activation-handoff DTOs plus provider registration, transient progress events, the error taxonomy, and an explicit `supportsProfileMutations()` capability. HTTP, cache, signatures, profile mutation, package-manager work, journals, and maintenance processes belong to providers. A catalog-only provider reports `false`, so a consumer can keep discovery and installed truth active without presenting an in-process mutation action.
 
@@ -14,6 +21,12 @@ Providers may also expose a separate discovered-repository page. Discovery rows 
 
 Install planning accepts only opaque `PluginId` and `PluginVersionId` values. Plans expose exact confirmation facts but never artifact URLs, local paths, executables, package-manager arguments, or a signature bypass. Staging and activation accept only provider-issued branded ids, and `markMaintenanceReady()` is a no-op outside an authenticated relaunch handoff.
 
+## Table of Contents
+
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
 ## Model Experience
 
 None, as the service exposes catalog rows, README text, and progress only to human UI consumers and never writes them to the Session log.
@@ -26,3 +39,8 @@ No effect; the service does not add, replace, or retain model-request content.
 
 - **Provider implementation required** - the Service Definition performs no Registry verification or profile mutation by itself; the mounted Host provider owns every trust and transaction decision.
 - **No rollback contract** - retained generations, history, rollback planning, and advisory remediation remain outside the initial install lifecycle.
+
+<a id="dev-note"></a>
+### Dev Note
+
+None.

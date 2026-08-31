@@ -16,6 +16,7 @@ import { tuiOsc8Text } from './hyperlink.ts'
 import { tuiBidiVisualText } from './bidi.ts'
 import { formatTuiDeliverablesRow } from './deliverables.ts'
 import { tuiMessage, useTuiLocale, type TuiLocale } from './locale.ts'
+import { formatTuiTurnUsage } from './turn-usage.ts'
 
 function toneColor(theme: TuiTheme, tone: TranscriptTextNode['tone']): string | undefined {
   if (tone === 'user') return theme.tokens.accent
@@ -177,6 +178,29 @@ export function tuiTranscriptScreenMapLines(
       })
       continue
     }
+    if (entry.node.kind === 'turn-usage') {
+      lines.push({
+        semanticBlockKey: key,
+        gutter: ' '.repeat(3),
+        text: formatTuiTurnUsage(entry.node.usage, locale),
+        selectable: true,
+      })
+      continue
+    }
+    if (entry.node.kind === 'question') {
+      const first = entry.node.questions[0]
+      lines.push({
+        semanticBlockKey: key,
+        gutter: ' '.repeat(3),
+        text: tuiMessage(locale, 'question.history.row', {
+          status: tuiMessage(locale, `question.history.status.${entry.node.status}`),
+          count: entry.node.questions.length + entry.node.omitted,
+          question: first?.question ?? tuiMessage(locale, 'question.history.unknown'),
+        }),
+        selectable: true,
+      })
+      continue
+    }
     const rows = tuiTranscriptWindowEntryRows(entry, columns)
     for (let row = 0; row < rows; row += 1) {
       lines.push({ semanticBlockKey: key, gutter: ' '.repeat(3), text: '', selectable: false })
@@ -262,6 +286,25 @@ function DeliverablesCard({
   const locale = useTuiLocale()
   const row = formatTuiDeliverablesRow(node, columns, locale)
   return <Text wrap="truncate-end" {...tuiTextStyle(theme.tokens.success)}>{row.text}</Text>
+}
+
+function TurnUsageCard({ node }: { node: Extract<TranscriptNode, { kind: 'turn-usage' }> }): React.ReactElement {
+  const theme = useTuiTheme()
+  const locale = useTuiLocale()
+  return <Text wrap="truncate-end" {...tuiTextStyle(theme.tokens.muted)}>{formatTuiTurnUsage(node.usage, locale)}</Text>
+}
+
+function QuestionHistoryCard({ node }: { node: Extract<TranscriptNode, { kind: 'question' }> }): React.ReactElement {
+  const theme = useTuiTheme()
+  const locale = useTuiLocale()
+  const first = node.questions[0]
+  const text = tuiMessage(locale, 'question.history.row', {
+    status: tuiMessage(locale, `question.history.status.${node.status}`),
+    count: node.questions.length + node.omitted,
+    question: first?.question ?? tuiMessage(locale, 'question.history.unknown'),
+  })
+  return <Text wrap="truncate-end" {...tuiTextStyle(node.status === 'answered'
+    ? theme.tokens.success : node.status === 'error' ? theme.tokens.error : theme.tokens.warning)}>{text}</Text>
 }
 
 /**
@@ -371,15 +414,19 @@ export function TuiTranscriptView({
                   ? <CompactionCard node={entry.node} selectionMap={selectionMap} selection={selection} />
                   : entry.node.kind === 'deliverables'
                     ? <DeliverablesCard node={entry.node} columns={columns} />
-                    : entry.node.kind === 'todo'
-                      ? <TodoPanel node={entry.node} />
-                      : <>
-                        <Text bold {...tuiTextStyle(toneColor(theme, entry.node.tone))}>{transcriptTextLabel(entry.node, locale)}</Text>
-                        {entry.text !== '' && <Text wrap="wrap">{transcriptBodyView(
-                          theme, entry, selectionMap, selection, searchSelectedKey, searchQuery,
-                        )}</Text>}
-                        {readerHint !== undefined && <Text {...tuiTextStyle(theme.tokens.selection)}>{readerHint}</Text>}
-                      </>}
+                    : entry.node.kind === 'turn-usage'
+                      ? <TurnUsageCard node={entry.node} />
+                      : entry.node.kind === 'question'
+                        ? <QuestionHistoryCard node={entry.node} />
+                        : entry.node.kind === 'todo'
+                          ? <TodoPanel node={entry.node} />
+                          : <>
+                            <Text bold {...tuiTextStyle(toneColor(theme, entry.node.tone))}>{transcriptTextLabel(entry.node, locale)}</Text>
+                            {entry.text !== '' && <Text wrap="wrap">{transcriptBodyView(
+                              theme, entry, selectionMap, selection, searchSelectedKey, searchQuery,
+                            )}</Text>}
+                            {readerHint !== undefined && <Text {...tuiTextStyle(theme.tokens.selection)}>{readerHint}</Text>}
+                          </>}
         </Box>
       </Box>
     })}

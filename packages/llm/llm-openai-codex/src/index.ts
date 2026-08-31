@@ -5,7 +5,9 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { createModels, type AuthEvent, type AuthInteraction, type AuthPrompt, type Models } from '@earendil-works/pi-ai'
+import {
+  createModels, type AuthContext, type AuthEvent, type AuthInteraction, type AuthPrompt, type Models,
+} from '@earendil-works/pi-ai'
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex'
 import type {
   GenerateOptions,
@@ -15,21 +17,50 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import { LlmError, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
-import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
+import type { PiAiAdapterOptions, ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
+import type {
+  AuthorizationNotice, AuthorizationPrompt, AuthorizationSession,
+} from '@deepseek-ai/dsh-authorization'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import { access } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { CodexCatalog, DynamicCodexProvider, OPENAI_CODEX_PROVIDER } from './catalog.ts'
-import { FileCredentialStore } from './credential-store.ts'
+import {
+  FileCredentialStore, HarnessCredentialStore, openAICodexCredentialKey,
+} from './credential-store.ts'
 
 export const name = 'llm-openai-codex'
-export const inject = ['llm']
+export const inject = ['llm', 'credentials']
 
 /** Default idle interval while one Codex stream read is outstanding. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
 /** Default request-level bound on base64-encoded image history. */
 export const DEFAULT_MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
+/** Provider request-version pixel budget aligned with the official pi-ai owner. */
+export const DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET = 2048 * 2048
+/** Raw request-version byte target aligned with the official pi-ai owner. */
+export const DEFAULT_REQUEST_IMAGE_MAX_BYTES = 1024 * 1024
+
+/** Host ambient lookup passed to the auth-backed pi-ai collection. */
+function ambientAuthContext(): AuthContext {
+  return {
+    env(name) { return Promise.resolve(process.env[name]) },
+    async fileExists(path) {
+      const expanded = path === '~' || path.startsWith('~/')
+        ? resolve(homedir(), path.slice(1).replace(/^\//, ''))
+        : path
+      try {
+        await access(expanded)
+        return true
+      } catch {
+        return false
+      }
+    },
+  }
+}
 
 /** OpenAI Codex OAuth storage and catalog configuration. */
 export interface Config {
@@ -163,6 +194,31 @@ function piInteraction(interaction: OpenAICodexAuthenticationInteraction): AuthI
   }
 }
 
+function authorizationPrompt(prompt: OpenAICodexAuthenticationPrompt): AuthorizationPrompt {
+  const signal = prompt.signal === undefined ? {} : { signal: prompt.signal }
+  if (prompt.type === 'select') return { ...signal, kind: 'select', message: prompt.message, options: prompt.options }
+  return {
+    ...signal,
+    kind: prompt.type === 'secret' ? 'secret' : 'text',
+    message: prompt.message,
+    ...prompt.placeholder === undefined ? {} : { placeholder: prompt.placeholder },
+  }
+}
+
+function authorizationNotice(event: OpenAICodexAuthenticationEvent): AuthorizationNotice {
+  if (event.type === 'auth-url') {
+    return { message: event.instructions ?? 'Continue in your browser to authorize ChatGPT.', url: event.url }
+  }
+  if (event.type === 'device-code') {
+    return {
+      message: 'Enter this device code to authorize ChatGPT.',
+      url: event.verificationUri,
+      code: event.userCode,
+    }
+  }
+  return { message: event.message }
+}
+
 /** OpenAI Codex adapter over pi-ai's stream and OAuth implementations. */
 export class OpenAICodexAdapter extends PiAiAdapter {
   private readonly collection: Models
@@ -179,16 +235,20 @@ export class OpenAICodexAdapter extends PiAiAdapter {
     fetchImpl: typeof fetch = fetch,
     reportError?: (message: string, error?: unknown) => void,
     resolveAttachments?: () => AttachmentStore | undefined,
+    auth?: PiAiAdapterOptions['auth'],
   ) {
-    const credentials = new FileCredentialStore(spec.credentialsPath)
+    const credentials = auth?.credentials ?? new FileCredentialStore(spec.credentialsPath)
+    const authContext = auth?.authContext ?? ambientAuthContext()
     const provider = new DynamicCodexProvider(openaiCodexProvider())
-    const collection = createModels({ credentials })
+    const collection = createModels({ credentials, authContext })
     collection.setProvider(provider)
     const profile: ResolvedPiAiProviderProfile = Object.freeze({
       provider: OPENAI_CODEX_PROVIDER,
       displayName: OPENAI_CODEX_PROVIDER,
       streamIdleTimeoutMs: spec.streamIdleTimeoutMs,
       maxRequestImageBytes: spec.maxRequestImageBytes,
+      requestImagePixelBudget: DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET,
+      requestImageMaxBytes: DEFAULT_REQUEST_IMAGE_MAX_BYTES,
       retryPolicy: resolveRetryPolicy(undefined, 'llm-openai-codex.retryPolicy'),
       configuredMaxTokens: new Map(),
       piProvider: provider,
@@ -202,13 +262,14 @@ export class OpenAICodexAdapter extends PiAiAdapter {
           if (current?.type !== 'oauth') throw new LlmError('OpenAI Codex is not signed in', 'AUTH_REQUIRED')
           const oauth = provider.auth.oauth
           if (oauth === undefined) throw new LlmError('OpenAI Codex OAuth implementation is unavailable', 'AUTH_UNSUPPORTED')
-          return oauth.refresh(current, signal)
+          return oauth.refresh(current, signal ?? new AbortController().signal)
         })
       },
     )
     super({
       profiles: () => profiles,
       resolveApiKey: async () => (await collection.getAuth(OPENAI_CODEX_PROVIDER))?.auth.apiKey,
+      auth: { credentials, authContext },
       ...resolveAttachments === undefined ? {} : { resolveAttachments },
     })
     this.collection = collection
@@ -232,6 +293,18 @@ export class OpenAICodexAdapter extends PiAiAdapter {
     }
     await this.collection.login(provider, 'oauth', piInteraction(interaction))
     await this.catalog.refresh(true, interaction.signal)
+  }
+
+  /**
+   * Run the official authorization-session vocabulary through the provider login owner.
+   * @param session - Host-owned prompt, notice, method, and cancellation session.
+   */
+  async authorize(session: AuthorizationSession): Promise<void> {
+    await this.login(OPENAI_CODEX_PROVIDER, session.method, {
+      signal: session.signal,
+      prompt: prompt => session.prompt(authorizationPrompt(prompt)),
+      notify: (event) => { session.notify(authorizationNotice(event)) },
+    })
   }
 
   async logout(provider: string): Promise<void> {
@@ -274,16 +347,16 @@ export class OpenAICodexAdapter extends PiAiAdapter {
 }
 
 /**
- * Add the optional authentication seam missing from official DSH rc.8.
+ * Add the optional authentication seam missing from the supported official Host.
  *
  * Newer Hosts already route these calls through their adapter registry and are
- * left untouched. The rc.8 fallback owns only the Codex route; other registered
+ * left untouched. The compatibility bridge owns only the Codex route; other registered
  * providers retain the TUI's legacy "configured, no login action" behavior.
  * The returned disposer removes only methods still owned by this bridge.
  *
  * @param runtime - active Host LLM service instance.
  * @param adapter - this package's registered Codex adapter.
- * @returns a disposer when the rc.8 bridge was installed, otherwise undefined.
+ * @returns a disposer when the compatibility bridge was installed, otherwise undefined.
  */
 export function installOpenAICodexRc8AuthenticationBridge(
   runtime: object,
@@ -332,14 +405,26 @@ export function installOpenAICodexRc8AuthenticationBridge(
 
 /** Register the authenticated OpenAI Codex provider route. */
 export function apply(ctx: Context, config: Config): void {
+  const credentials = new HarnessCredentialStore(ctx.credentials)
+  const auth = { credentials, authContext: ambientAuthContext() }
   const adapter = new OpenAICodexAdapter(resolveSpec(config), fetch, (message, error) => {
     ctx.logger.warn(message)
     if (error !== undefined) ctx.logger.warn(error)
-  }, () => ctx.get('attachments'))
+  }, () => ctx.get('attachments'), auth)
   ctx.llm.registerAdapter([OPENAI_CODEX_PROVIDER], adapter)
+  ctx.inject(['authorization'], (authorized) => {
+    authorized.authorization.registerFlow({
+      key: openAICodexCredentialKey(OPENAI_CODEX_PROVIDER),
+      label: 'ChatGPT (Codex)',
+      methods: [{ id: 'oauth', label: 'Sign in with ChatGPT' }],
+      run: session => adapter.authorize(session),
+    })
+  })
   const disposeBridge = installOpenAICodexRc8AuthenticationBridge(ctx.llm, adapter)
   if (disposeBridge !== undefined) ctx.effect(() => disposeBridge, 'llm-openai-codex: rc8 authentication bridge')
 }
 
-export { FileCredentialStore, OPENAI_CODEX_PROVIDER }
+export {
+  FileCredentialStore, HarnessCredentialStore, openAICodexCredentialKey, OPENAI_CODEX_PROVIDER,
+}
 export type { RemoteCodexModel } from './catalog.ts'

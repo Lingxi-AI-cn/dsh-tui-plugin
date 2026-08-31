@@ -6,7 +6,7 @@ import { tuiMessage, type TuiLocale, type TuiMessageKey } from './locale.ts'
 
 const OFFICIAL_MODE_KEYS: Readonly<Record<string, { name: TuiMessageKey; description: TuiMessageKey }>> = Object.freeze({
   standard: { name: 'mode.standard.name', description: 'mode.standard.description' },
-  code: { name: 'mode.code.name', description: 'mode.code.description' },
+  ptc: { name: 'mode.ptc.name', description: 'mode.ptc.description' },
   minimal: { name: 'mode.minimal.name', description: 'mode.minimal.description' },
   cordis: { name: 'mode.cordis.name', description: 'mode.cordis.description' },
 })

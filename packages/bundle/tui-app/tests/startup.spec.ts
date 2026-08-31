@@ -17,7 +17,6 @@ afterEach(() => { Object.assign(internals, originalInternals) })
 function isStartupValues(value: unknown): value is TuiStartupValues {
   return typeof value === 'object' && value !== null
     && tuiHostDiagnosticsFromStartup(value) !== undefined
-    && 'presetRoot' in value && typeof value.presetRoot === 'string'
     && (!('resume' in value) || typeof value.resume === 'string')
 }
 
@@ -43,12 +42,11 @@ describe('TUI command-line provider', () => {
       value: {
         diagnostics: {
           compatibility: 'compatible', profile: 'tui',
-          agentPresetIds: ['standard', 'code', 'minimal', 'cordis'],
+          agentPresetIds: ['standard', 'ptc', 'minimal', 'cordis'],
         },
       },
       exits: [],
     })
-    expect(fresh.value?.presetRoot).toContain('config/agent-presets')
     const resumed = await parse(['--resume', 'session-a'])
     expect(resumed).toMatchObject({
       value: {
@@ -57,7 +55,6 @@ describe('TUI command-line provider', () => {
       },
       exits: [],
     })
-    expect(resumed.value?.presetRoot).toContain('config/agent-presets')
   })
 
   it('prints app-owned help without publishing startup', async () => {

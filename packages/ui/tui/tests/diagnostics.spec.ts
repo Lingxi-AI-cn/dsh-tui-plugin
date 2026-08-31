@@ -13,20 +13,20 @@ import {
 
 const host: TuiHostDiagnosticSnapshot = Object.freeze({
   compatibility: 'compatible',
-  dshVersion: '0.1.0-rc.8',
-  supportedDshVersion: '0.1.0-rc.8',
-  tuiVersion: '0.1.6-rc.8',
+  dshVersion: '0.1.2-alpha.2',
+  supportedDshVersion: '0.1.2-alpha.2',
+  tuiVersion: '0.1.7-alpha.2',
   profile: 'tui',
   nodeVersion: '24.7.0',
   platform: 'darwin',
   architecture: 'arm64',
   packages: Object.freeze([Object.freeze({
     name: '@deepseek-ai/dsh-app-boot',
-    version: '0.1.0-rc.8',
+    version: '0.1.2-alpha.2',
     manifestPath: '/opt/dsh/node_modules/@deepseek-ai/dsh-app-boot/package.json',
   })]),
-  agentPresetIds: Object.freeze(['standard', 'code', 'minimal', 'cordis']),
-  recoveryCommand: 'dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.6-rc.8',
+  agentPresetIds: Object.freeze(['standard', 'ptc', 'minimal', 'cordis']),
+  recoveryCommand: 'dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.7-alpha.2',
 })
 
 function input(overrides: Partial<TuiDiagnosticInput> = {}): TuiDiagnosticInput {
@@ -36,6 +36,10 @@ function input(overrides: Partial<TuiDiagnosticInput> = {}): TuiDiagnosticInput 
     providers: [{ id: 'deepseek', name: 'DeepSeek', configured: true, modelCount: 2 }],
     pluginHub: {
       state: 'available', source: 'registry', stale: false, installedCount: 6, profileMutations: false,
+    },
+    storage: {
+      state: 'available', backend: 'session-persistence-jsonl', currentFormat: 0, expectedFormat: 0,
+      compatibleSessions: 12, incompatibleSessions: 0, supportsRawArtifacts: true,
     },
     capabilities: {
       settings: true, sessionProjection: true, pluginHub: true, jobs: true, subagents: true,
@@ -56,11 +60,24 @@ describe('native TUI runtime diagnostics', () => {
     expect(snapshot.rows).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'host-compatibility', severity: 'pass' }),
       expect.objectContaining({ id: 'plugin-hub', severity: 'pass' }),
+      expect.objectContaining({ id: 'session-storage', severity: 'pass' }),
       expect.objectContaining({ id: 'runtime-capabilities', summary: '5/5 optional TUI capabilities mounted.' }),
     ]))
     expect(snapshot.rows.find(row => row.id === 'terminal')?.summary).toContain('mouse sgr')
     expect(snapshot.rows.find(row => row.id === 'terminal')?.detail).toContain('background unknown')
     expect(snapshot.rows.find(row => row.id === 'provider:deepseek')?.summary).toContain('2 selectable models')
+  })
+
+  it('fails closed when persisted Session metadata belongs to another format', () => {
+    const snapshot = projectTuiDiagnostics(input({
+      storage: {
+        state: 'available', backend: 'session-persistence-jsonl', currentFormat: 0, expectedFormat: 0,
+        compatibleSessions: 10, incompatibleSessions: 2, supportsRawArtifacts: true,
+      },
+    }))
+    const row = snapshot.rows.find(row => row.id === 'session-storage')
+    expect(row?.severity).toBe('warning')
+    expect(row?.remediation).toContain('Back up')
   })
 
   it('contains provider and Plugin Hub failures while removing terminal controls', () => {

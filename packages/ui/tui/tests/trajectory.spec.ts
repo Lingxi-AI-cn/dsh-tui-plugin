@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { CallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import {
   createTuiTrajectoryTimelineScale,
   formatTuiTrajectoryTimeline,
@@ -32,13 +32,13 @@ describe('native TUI Terminal Trajectory', () => {
         ...createUserMessage({ content: [{ type: 'text', text: 'Hello agent' }], source: { kind: 'user' } }),
       }),
       event('tool/call', 1100, {
-        turn: 1, step: 1, callId: CallId('c1'), name: 'read_file',
+        turn: 1, step: 1, callId: ToolCallId('c1'), name: 'read_file',
         arguments: '{"path":"README.md"}',
       }),
       event('tool/result', 1200, {
         turn: 1, step: 1,
         message: createToolResultMessage({
-          callId: CallId('c1'), content: [{ type: 'text', text: 'file content here' }], isError: false,
+          callId: ToolCallId('c1'), content: [{ type: 'text', text: 'file content here' }], isError: false,
         }),
       }),
       event('assistant/message', 1300, {
@@ -177,11 +177,11 @@ describe('native TUI Terminal Trajectory', () => {
     const events = [
       event('turn/start', 1000, { turn: 1 }),
       event('step/start', 1010, { turn: 1, step: 1 }),
-      event('tool/call', 1100, { turn: 1, step: 1, callId: CallId('c1'), name: 'exec', arguments: '{}' }),
+      event('tool/call', 1100, { turn: 1, step: 1, callId: ToolCallId('c1'), name: 'exec', arguments: '{}' }),
       event('tool/result', 1200, {
         turn: 1, step: 1,
         message: createToolResultMessage({
-          callId: CallId('c1'), content: [{ type: 'text', text: 'failed' }], isError: true,
+          callId: ToolCallId('c1'), content: [{ type: 'text', text: 'failed' }], isError: true,
         }),
         error: { name: 'ToolError', code: 'EXEC_FAILED' },
       }),
@@ -243,7 +243,7 @@ describe('trajectory display helpers', () => {
 
   it('keeps group, call, and result hierarchy with stable identities', () => {
     resetSeq()
-    const callId = CallId('nested-call')
+    const callId = ToolCallId('nested-call')
     const snapshot = projectTuiTrajectory([
       event('turn/start', 1_000, { turn: 1 }),
       event('step/start', 1_010, { turn: 1, step: 1 }),
@@ -280,7 +280,7 @@ describe('trajectory display helpers', () => {
       event('turn/start', 1_000, { turn: 1 }),
       event('step/start', 1_010, { turn: 1, step: 1 }),
       event('tool/call', 1_030, {
-        turn: 1, step: 1, callId: CallId('needle'), name: 'read_file', arguments: '{"path":"README.md"}',
+        turn: 1, step: 1, callId: ToolCallId('needle'), name: 'read_file', arguments: '{"path":"README.md"}',
       }),
       event('step/end', 1_100, { turn: 1, step: 1 }),
       event('turn/end', 1_200, { turn: 1, reason: { kind: 'completed' } }),
@@ -311,7 +311,7 @@ describe('trajectory display helpers', () => {
 
   it('bounds inspector payloads by UTF-8 bytes', () => {
     resetSeq()
-    const callId = CallId('large')
+    const callId = ToolCallId('large')
     const snapshot = projectTuiTrajectory([
       event('tool/call', 1, { turn: 1, step: 1, callId, name: 'large', arguments: '密'.repeat(20_000) }),
       event('tool/result', 2, {

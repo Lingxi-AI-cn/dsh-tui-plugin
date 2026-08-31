@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
-import { CallId, createMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createMessage, createToolResultMessage, createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { strFromU8, unzipSync } from 'fflate'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
@@ -103,7 +103,7 @@ const attachment = {
 } satisfies ImageAttachmentRef
 
 function markdownEvents(id: string): SessionEvent[] {
-  const callId = CallId(`${id}-call`)
+  const callId = ToolCallId(`${id}-call`)
   return [
     {
       type: 'user/message', seq: 0, time: 100,

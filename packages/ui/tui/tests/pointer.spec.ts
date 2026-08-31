@@ -11,7 +11,8 @@ import {
   tuiFeedbackPointerRegions,
   tuiDialogFooterPointerRegions,
   tuiRewindCandidatePointerRegions,
-  tuiHostPluginCenterPointerRegions, tuiPresetManagerPointerRegions, tuiTrajectoryPointerRegions,
+  tuiHostPluginCenterPointerRegions, tuiPresetManagerPointerRegions, tuiSchedulePointerRegions,
+  tuiTrajectoryPointerRegions,
   tuiWorkPointerRegions, type TuiPointerRegion,
 } from '../src/pointer.ts'
 import { projectTuiScreenMap } from '../src/screen-map.ts'
@@ -191,6 +192,7 @@ describe('TUI pointer region registry', () => {
     const builders = [
       tuiPresetManagerPointerRegions,
       tuiHostPluginCenterPointerRegions,
+      tuiSchedulePointerRegions,
       tuiTrajectoryPointerRegions,
     ] as const
     for (const build of builders) {
@@ -226,7 +228,7 @@ describe('TUI pointer region registry', () => {
       visibleCount: 1,
       rowHeight: 2,
       listTop: 9,
-      tabs: { row: 4, left: 3, labels: { plugins: '已加载', settings: '配置' } },
+      tabs: { row: 4, left: 3, labels: { plugins: '已加载', presets: 'Preset', settings: '配置' } },
       footerActions: [],
       context: 'Dialog',
     })
@@ -235,6 +237,8 @@ describe('TUI pointer region registry', () => {
     expect(registry.hitTest({ column: 3, row: 4 }, 'Dialog')?.region.action)
       .toEqual({ id: 'hostPlugins.tab', tab: 'plugins' })
     expect(registry.hitTest({ column: 12, row: 4 }, 'Dialog')?.region.action)
+      .toEqual({ id: 'hostPlugins.tab', tab: 'presets' })
+    expect(registry.hitTest({ column: 21, row: 4 }, 'Dialog')?.region.action)
       .toEqual({ id: 'hostPlugins.tab', tab: 'settings' })
     expect(registry.hitTest({ column: 9, row: 4 }, 'Dialog')).toBeUndefined()
     expect(registry.hitTest({ column: 3, row: 5 }, 'Dialog')).toBeUndefined()
@@ -650,7 +654,6 @@ describe('TUI pointer region registry', () => {
   it('maps only visible work rows and preserves the centered selection window', () => {
     const regions = tuiWorkPointerRegions(10, 5, 8, 80, 'Work')
     expect(regions.map(region => region.action)).toEqual([
-      { id: 'work.select', index: 3 },
       { id: 'work.select', index: 4 },
       { id: 'work.select', index: 5 },
       { id: 'work.select', index: 6 },
@@ -659,7 +662,6 @@ describe('TUI pointer region registry', () => {
       { left: 2, top: 2, right: 78, bottom: 2 },
       { left: 2, top: 3, right: 78, bottom: 3 },
       { left: 2, top: 4, right: 78, bottom: 4 },
-      { left: 2, top: 5, right: 78, bottom: 5 },
     ])
   })
 

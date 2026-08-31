@@ -3,7 +3,7 @@
 import { FsError, type FileSystem, type FsDirEntry, type FsTarget } from '@deepseek-ai/dsh-fs'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import type { ApprovalRequest as HostApprovalRequest } from '@deepseek-ai/dsh-user-approval'
-import type { SessionEvent, SessionId as HostSessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionHeader, SessionId as HostSessionId } from '@deepseek-ai/dsh-session'
 import type {
   CommandDefinition as HostCommandDefinition,
   CommandDescriptor as HostCommandDescriptor,
@@ -18,8 +18,11 @@ import type {
 import type { Agent as HostAgent } from '@deepseek-ai/dsh-agent'
 import type { GoalProjection, GoalRef, GoalService } from '@deepseek-ai/dsh-goal'
 import type { PlanProjection } from '@deepseek-ai/dsh-plan-mode'
-import { settingsNamespace as hostSettingsNamespace } from '@deepseek-ai/dsh-settings'
-import { credentialRef as hostCredentialRef } from '@deepseek-ai/dsh-credentials'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type z from '@deepseek-ai/schemastery'
+import {
+  credentialKeyId, credentialKeyScope, credentialRef as hostCredentialRef,
+} from '@deepseek-ai/dsh-credentials'
 import type { Context as HostContext } from '@deepseek-ai/cordis'
 import type { AgentPreset, AgentPresets as HostAgentPresets } from '@deepseek-ai/dsh-agent-presets'
 import type {
@@ -36,9 +39,12 @@ import type {} from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-session-title'
+import type {} from '@deepseek-ai/dsh-schedule'
 import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-user-questions'
+import type {} from '@deepseek-ai/dsh-tool-todo'
+import type {} from '@deepseek-ai/dsh-authorization'
 
 export type { Context } from '@deepseek-ai/cordis'
 export { FsError } from '@deepseek-ai/dsh-fs'
@@ -61,8 +67,9 @@ export type {
   ModelSelection,
   ModelSelectionRef,
 } from '@deepseek-ai/dsh-agent'
-export { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
-export type { AgentPreset } from '@deepseek-ai/dsh-agent-presets'
+export type {
+  AgentPreset, AgentPresetComposition, AgentPresetCompositionRow,
+} from '@deepseek-ai/dsh-agent-presets'
 export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { JobId } from '@deepseek-ai/dsh-jobs'
 export type { JobSnapshot, JobStatus } from '@deepseek-ai/dsh-jobs'
@@ -81,10 +88,11 @@ export {
   SESSION_FORMAT_VERSION,
   SessionId,
 } from '@deepseek-ai/dsh-session'
-export type { SessionEvent, SessionId as SessionIdType, TodoItem, TurnEndReason } from '@deepseek-ai/dsh-session'
+export type { SessionEvent, SessionHeader, SessionId as SessionIdType, TurnEndReason } from '@deepseek-ai/dsh-session'
+export type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+export type { TodoItem } from '@deepseek-ai/dsh-tool-todo'
 export type { SessionProjectionCache } from '@deepseek-ai/dsh-session-projection-cache'
 export type { SessionRecord } from '@deepseek-ai/dsh-session-query'
-export { installSettingsSection } from '@deepseek-ai/dsh-settings'
 export type {
   SettingsDescriptor, SettingsNamespace, SettingsPathOp, SettingsProvider,
 } from '@deepseek-ai/dsh-settings'
@@ -92,14 +100,45 @@ export { activeAtToken, formatFileMention } from '@deepseek-ai/dsh-file-referenc
 export type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
 export { formatSessionReferenceMention } from '@deepseek-ai/dsh-session-reference'
 export type {
-  PluginEntryId, PluginFiberPhase, PluginInventoryEntry,
+  AgentPresetPluginGroup, AgentPresetPluginRow, PluginEntryId, PluginFiberPhase,
+  PluginInventoryEntry, PluginInventorySnapshot,
 } from '@deepseek-ai/dsh-host-plugin-inventory/types'
 export type {
   MessageFeedbackDeleteResult, MessageFeedbackListResult, MessageFeedbackPutResult,
   MessageFeedbackRating, MessageFeedbackVersion,
 } from '@deepseek-ai/dsh-message-feedback'
-/** Validate one TUI-owned settings namespace through the supported Host API. */
-export const settingsNamespace = hostSettingsNamespace
+const SETTINGS_NAMESPACE_PATTERN = /^[a-z][a-z0-9-]*$/
+
+/** Validate and brand one dynamic settings namespace before calling the Host owner. */
+export function settingsNamespace(value: string): import('@deepseek-ai/dsh-settings').SettingsNamespace {
+  if (!SETTINGS_NAMESPACE_PATTERN.test(value)) {
+    throw new TypeError(`settings namespace "${value}" must match ${String(SETTINGS_NAMESPACE_PATTERN)}`)
+  }
+  return brandString<import('@deepseek-ai/dsh-settings').SettingsNamespace>(value)
+}
+
+/** Hooks used while the TUI follows the optional settings owner. */
+export interface TuiSettingsSectionHooks<T> {
+  /** Replace the currently authoritative configuration source. */
+  setSource(current: () => T): void
+  /** Recompute TUI state derived from the active source. */
+  onChange(): void
+  /** Refuse a resolved settings section the TUI cannot apply. */
+  validate?: (value: T) => void
+}
+
+/** Install one TUI settings section through the alpha.2 owner method. */
+export function installSettingsSection<T>(
+  ctx: HostContext,
+  namespace: string,
+  schema: z<T>,
+  entry: T,
+  hooks: TuiSettingsSectionHooks<T>,
+): void {
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, namespace, schema, entry, hooks)
+  })
+}
 
 /** Resolve the shared Host settings owner through the reviewed adapter boundary. */
 export function hostSettings(ctx: HostContext): import('@deepseek-ai/dsh-settings').SettingsProvider {
@@ -109,6 +148,34 @@ export function hostSettings(ctx: HostContext): import('@deepseek-ai/dsh-setting
 }
 /** Validate one provider credential reference through the supported Host API. */
 export const credentialRef = hostCredentialRef
+
+function recordedSessionPreset(session: {
+  readonly header: SessionHeader
+  readonly events: readonly SessionEvent[]
+}): string | undefined {
+  for (let index = session.events.length - 1; index >= 0; index -= 1) {
+    const event = session.events[index]
+    if (event?.type === 'agent-preset/selected') return event.data.agentPreset
+  }
+  return session.header.agentPreset
+}
+
+/** Whether a detached or live Session still records the retired downstream PTC id. */
+export function sessionUsesLegacyCodePreset(session: {
+  readonly header: SessionHeader
+  readonly events: readonly SessionEvent[]
+}): boolean {
+  return recordedSessionPreset(session) === 'code'
+}
+
+/** Resolve the durable preset from a detached or live Session, newest selection winning. */
+export function resolveSessionPreset(session: {
+  readonly header: SessionHeader
+  readonly events: readonly SessionEvent[]
+}): string | undefined {
+  const recorded = recordedSessionPreset(session)
+  return recorded === 'code' ? 'ptc' : recorded
+}
 export type { CredentialInfo, CredentialProvider, CredentialRef } from '@deepseek-ai/dsh-credentials'
 export type {
   SubagentDescendantListEntry,
@@ -122,7 +189,10 @@ export type {
   ContextPressureProjection,
   TokenUsageProjection,
 } from '@deepseek-ai/dsh-token-meter'
+export { deriveTurnTokenUsage } from '@deepseek-ai/dsh-token-meter/client'
+export type { TurnTokenUsage, TurnTokenUsageRoute } from '@deepseek-ai/dsh-token-meter/client'
 export type { SessionStatsProjection } from '@deepseek-ai/dsh-session-stats'
+export type { ScheduleRecord } from '@deepseek-ai/dsh-schedule/client'
 export { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 export type { SubprocessHandle, SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 export type { ToolCallView, ToolDefinition, ToolResultView } from '@deepseek-ai/dsh-tools'
@@ -139,7 +209,9 @@ export type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 export type TuiAgentPresets = Pick<HostAgentPresets,
   'list' | 'resolve' | 'mount' | 'recompose' | 'composedPreset'
   | 'read' | 'copy' | 'remove' | 'defaultId' | 'authorable' | 'roots'> & {
-    /** Newer owner mutation; absent on the exact official rc.8 Host. */
+    /** Structured owner projection; absent only on an older compatible Host. */
+    compositionInventory?: HostAgentPresets['compositionInventory']
+    /** Newer owner mutation; absent on legacy Hosts. */
     setDefault?(id: string, expectedRevision: number): Promise<void>
     /** Settings revision paired with {@link setDefault}. */
     readonly defaultRevision?: number
@@ -412,6 +484,25 @@ interface AuthenticationCapableLlm {
   logout(provider: string): Promise<void>
 }
 
+type TuiAuthenticationHost = HostContext | LlmRuntime
+
+function authenticationContext(host: TuiAuthenticationHost): HostContext | undefined {
+  return typeof (host as HostContext).get === 'function'
+    ? host as HostContext
+    : undefined
+}
+
+function authenticationLlm(host: TuiAuthenticationHost): LlmRuntime {
+  return authenticationContext(host)?.llm ?? host as LlmRuntime
+}
+
+function authorizationEntry(host: HostContext, provider: string) {
+  const authorization = host.get('authorization')
+  if (authorization === undefined) return undefined
+  const matches = authorization.list().filter(entry => credentialKeyId(entry.key) === provider)
+  return matches.find(entry => credentialKeyScope(entry.key) === 'llm-openai-codex') ?? matches[0]
+}
+
 /**
  * Read provider authentication when the Host exposes that optional seam.
  * Older Hosts treat registered routes as already configured and offer no login action.
@@ -419,8 +510,20 @@ interface AuthenticationCapableLlm {
  * @param provider - registered provider route.
  * @returns provider authentication projection or the legacy configured fallback.
  */
-export function hostAuthentication(llm: LlmRuntime, provider: string): Promise<LlmAuthenticationInfo> {
-  const candidate = llm as LlmRuntime & Partial<AuthenticationCapableLlm>
+export async function hostAuthentication(host: TuiAuthenticationHost, provider: string): Promise<LlmAuthenticationInfo> {
+  const ctx = authenticationContext(host)
+  const entry = ctx === undefined ? undefined : authorizationEntry(ctx, provider)
+  const credentials = ctx?.get('credentials')
+  if (entry !== undefined && credentials !== undefined) {
+    const record = await credentials.describeRecord(entry.key)
+    return {
+      configured: record.configured,
+      ...record.kind === undefined ? {} : { source: record.kind },
+      methods: entry.methods.map(method => ({ id: method.id, name: method.label })),
+      canLogout: record.configured && record.writable,
+    }
+  }
+  const candidate = authenticationLlm(host) as LlmRuntime & Partial<AuthenticationCapableLlm>
   return typeof candidate.authentication === 'function'
     ? candidate.authentication(provider)
     : Promise.resolve({ configured: true, methods: [] })
@@ -434,12 +537,43 @@ export function hostAuthentication(llm: LlmRuntime, provider: string): Promise<L
  * @param interaction - borrowed TUI callbacks.
  */
 export function hostLogin(
-  llm: LlmRuntime,
+  host: TuiAuthenticationHost,
   provider: string,
   method: string,
   interaction: LlmAuthenticationInteraction,
-): Promise<void> {
-  const candidate = llm as LlmRuntime & Partial<AuthenticationCapableLlm>
+): Promise<void | 'authorized' | 'cancelled'> {
+  const ctx = authenticationContext(host)
+  const entry = ctx === undefined ? undefined : authorizationEntry(ctx, provider)
+  const authorization = ctx?.get('authorization')
+  if (entry !== undefined && authorization !== undefined) {
+    return authorization.begin({
+      key: entry.key,
+      method,
+      ...interaction.signal === undefined ? {} : { signal: interaction.signal },
+      interaction: {
+        notify(notice) {
+          if (notice.url !== undefined && notice.code !== undefined) {
+            interaction.notify({ type: 'device-code', verificationUri: notice.url, userCode: notice.code })
+          } else if (notice.url !== undefined) {
+            interaction.notify({ type: 'auth-url', url: notice.url, instructions: notice.message })
+          } else {
+            interaction.notify({ type: 'info', message: notice.message })
+          }
+        },
+        prompt(prompt) {
+          return interaction.prompt(prompt.kind === 'select'
+            ? { type: 'select', message: prompt.message, options: prompt.options, ...prompt.signal === undefined ? {} : { signal: prompt.signal } }
+            : {
+              type: prompt.kind,
+              message: prompt.message,
+              ...prompt.placeholder === undefined ? {} : { placeholder: prompt.placeholder },
+              ...prompt.signal === undefined ? {} : { signal: prompt.signal },
+            })
+        },
+      },
+    }).then(outcome => outcome.status)
+  }
+  const candidate = authenticationLlm(host) as LlmRuntime & Partial<AuthenticationCapableLlm>
   if (typeof candidate.login !== 'function') {
     return Promise.reject(new Error('This DeepSeek Harness version does not expose interactive provider authentication.'))
   }
@@ -452,8 +586,12 @@ export function hostLogin(
  * @param provider - registered provider route.
  * @returns promise settled after the provider-owned credential removal finishes.
  */
-export function hostLogout(llm: LlmRuntime, provider: string): Promise<void> {
-  const candidate = llm as LlmRuntime & Partial<AuthenticationCapableLlm>
+export function hostLogout(host: TuiAuthenticationHost, provider: string): Promise<void> {
+  const ctx = authenticationContext(host)
+  const entry = ctx === undefined ? undefined : authorizationEntry(ctx, provider)
+  const credentials = ctx?.get('credentials')
+  if (entry !== undefined && credentials !== undefined) return credentials.deleteRecord(entry.key)
+  const candidate = authenticationLlm(host) as LlmRuntime & Partial<AuthenticationCapableLlm>
   if (typeof candidate.logout !== 'function') {
     return Promise.reject(new Error('This DeepSeek Harness version does not expose provider logout.'))
   }

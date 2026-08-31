@@ -31,10 +31,10 @@ import {
   MessageId,
   resolveSessionForkAnchor,
   resolveSessionPreset,
+  sessionUsesLegacyCodePreset,
   SESSION_FORMAT_VERSION,
   SessionId,
   TuiHostCommandCatalog,
-  UserQuestionError,
   z,
   type Agent,
   type AgentPreset,
@@ -60,6 +60,7 @@ import {
   type SessionEvent,
   type SessionProjectionCache,
   type SessionRecord,
+  type ScheduleRecord,
   type SessionStatsProjection,
   type SubagentDescendantListEntry,
   type SubagentResult,
@@ -159,6 +160,7 @@ import {
   type TuiDiagnosticSnapshot,
   type TuiPluginHubDiagnostic,
   type TuiProviderDiagnostic,
+  type TuiSessionStorageDiagnostic,
 } from './diagnostics.ts'
 import {
   inspectTuiStartupProvider,
@@ -185,6 +187,10 @@ import {
   type TuiGoalPlanProjectionFrame,
 } from './goal-plan.ts'
 import { preflightAttachments, projectAttachmentRail, tuiAttachmentStoreErrorMessage } from './attachment-intake.ts'
+import { preflightTuiSessionStorage } from './storage-preflight.ts'
+import {
+  collectTuiSchedules, TUI_SCHEDULES_UNAVAILABLE, type TuiScheduleSnapshot,
+} from './schedules.ts'
 
 export const name = 'tui'
 
@@ -208,7 +214,7 @@ const DIAGNOSTIC_ERROR_NAMES = new Set([
   'AbortError', 'Error', 'RangeError', 'SyntaxError', 'TypeError', 'URIError',
 ])
 
-function diagnosticFailureLabel(error: unknown, owner: 'provider' | 'Plugin Hub'): string {
+function diagnosticFailureLabel(error: unknown, owner: 'provider' | 'Plugin Hub' | 'Session persistence'): string {
   if (error instanceof PluginHubError) return `${owner} check failed (${error.code}).`
   if (error instanceof Error && DIAGNOSTIC_ERROR_NAMES.has(error.name)) {
     return `${owner} check failed (${error.name}).`
@@ -262,6 +268,7 @@ interface RuntimeDisposers {
   workspaceCommand?: () => void
   sessionsCommand?: () => void
   presetsCommand?: () => void
+  schedulesCommand?: () => void
   hostPluginsCommand?: () => void
   trajectoryCommand?: () => void
   feedbackCommand?: () => void
@@ -292,6 +299,7 @@ interface PreparedTuiAgent {
   selection: ModelSelectionRef
   selectedModel: ModelSelection
   preset: AgentPreset
+  legacyPresetMigrated: boolean
 }
 
 function withAgentCreateSource<Options extends object>(
@@ -390,7 +398,10 @@ class TuiController {
   private readonly resumeDialog = new ValueStore<TuiResumeDialogSnapshot | undefined>(undefined)
   private readonly sessionManager = new ValueStore<TuiSessionManagerDialogSnapshot | undefined>(undefined)
   private readonly presetManagerStore = new ValueStore<TuiPresetManagerSnapshot | undefined>(undefined)
+  private readonly schedulesStore = new ValueStore<TuiScheduleSnapshot>(TUI_SCHEDULES_UNAVAILABLE)
+  private readonly scheduleDialogStore = new ValueStore<TuiScheduleSnapshot | undefined>(undefined)
   private readonly hostPluginCenterStore = new ValueStore<TuiHostPluginCenterSnapshot | undefined>(undefined)
+  private hostPluginCenterGeneration = 0
   private readonly trajectoryStore = new ValueStore<TuiTrajectorySnapshot | undefined>(undefined)
   private readonly trajectoryProjection = new TuiTrajectoryProjectionCache()
   private readonly messageFeedbackStore = new ValueStore<TuiMessageFeedbackSnapshot | undefined>(undefined)
@@ -523,7 +534,11 @@ class TuiController {
       this.terminal.assertInteractive()
       this.commandCatalog = new TuiHostCommandCatalog(this.ctx.commands)
       await this.ctx.get('loader')?.await()
-      if (this.ownerDisposed) return
+      if (this.isOwnerDisposed()) return
+      const persistence = this.ctx.get('sessionPersistence')
+      if (persistence === undefined) throw new Error('TUI Session persistence service is unavailable')
+      await preflightTuiSessionStorage(persistence)
+      if (this.isOwnerDisposed()) return
       const prepared = await this.prepareAgent(this.config.resume === undefined
         ? { kind: 'startup' }
         : { kind: 'resume', sessionId: SessionId(this.config.resume) })
@@ -538,6 +553,9 @@ class TuiController {
       this.selection = prepared.selection
       this.modelSelection.set(prepared.selectedModel)
       this.agentMode.set(prepared.preset)
+      if (prepared.legacyPresetMigrated) {
+        this.externalNotice.set(tuiMessage(this.locale, 'mode.legacy.migrated'))
+      }
       void this.refreshFeedback()
       this.scheduleStartupGuidanceRefresh(prepared.selectedModel)
       this.refreshAgentDerivedState(handle.agent)
@@ -652,6 +670,9 @@ class TuiController {
       presetManager: this.presetManagerStore,
       onClosePresetManager: () => { this.closePresetManager() },
       onRefreshPresetManager: () => this.refreshPresetManager(root),
+      schedules: this.schedulesStore,
+      scheduleDialog: this.scheduleDialogStore,
+      onCloseScheduleDialog: () => { this.closeScheduleDialog() },
       onCopyPreset: (sourceId, newId, displayName) => this.copyPreset(root, sourceId, newId, displayName),
       onDeletePreset: id => this.deletePreset(root, id),
       onSetDefaultPreset: (id, expectedRevision) => this.setDefaultPreset(root, id, expectedRevision),
@@ -1035,12 +1056,14 @@ class TuiController {
     }
     const selected: ModelSelectionRef = { current: defaultSelection, assembled: undefined }
     let mountedPreset: AgentPreset | undefined
+    const migration = { legacyPreset: false }
     const setup = async (agentCtx: Context): Promise<void> => {
       const session = agentCtx.agent?.session
       if (session === undefined) throw new Error('TUI Agent setup cannot resolve its unpublished Session')
       const presetId = request.kind === 'resume'
         ? this.assertResumeCompatible(session.header, session.events)
         : resolvedPreset?.id
+      migration.legacyPreset = request.kind === 'resume' && sessionUsesLegacyCodePreset(session)
       if (presetId === undefined) throw new Error('TUI Agent setup has no resolved Agent preset')
       const logged = session.requestHeader()?.config
       if (logged !== undefined) {
@@ -1088,7 +1111,16 @@ class TuiController {
       await handle.dispose().catch(() => undefined)
       throw new Error('TUI Agent was created without a mounted Agent preset')
     }
-    return { handle, selection: selected, selectedModel: selected.current ?? defaultSelection, preset: mountedPreset }
+    if (migration.legacyPreset) {
+      handle.agent.session.append('agent-preset/selected', { agentPreset: 'ptc' })
+    }
+    return {
+      handle,
+      selection: selected,
+      selectedModel: selected.current ?? defaultSelection,
+      preset: mountedPreset,
+      legacyPresetMigrated: migration.legacyPreset,
+    }
   }
 
   private assertResumeCompatible(
@@ -1127,6 +1159,9 @@ class TuiController {
     this.tokenUsage.set(values?.tokenUsage)
     this.contextBreakdown.set(values?.contextBreakdown)
     this.sessionStats.set(values?.sessionStats)
+    const schedules = collectTuiSchedules(values?.schedule)
+    this.schedulesStore.set(schedules)
+    if (this.scheduleDialogStore.getSnapshot() !== undefined) this.scheduleDialogStore.set(schedules)
     const frame = createTuiGoalPlanProjectionFrame(
       agent.session,
       snapshot?.asOfSeq ?? agent.session.seq,
@@ -1171,7 +1206,7 @@ class TuiController {
     const controller = new AbortController()
     const completion = (async (): Promise<void> => {
       const provider = await inspectTuiStartupProvider(registered, {
-        authentication: id => hostAuthentication(this.ctx.llm, id),
+        authentication: id => hostAuthentication(this.ctx, id),
         listModels: id => this.ctx.llm.listModels(id),
       }, controller.signal).catch((error: unknown) => {
         if (controller.signal.aborted) return undefined
@@ -1201,10 +1236,16 @@ class TuiController {
     this.disposers.hostPluginStatus = this.ctx.on('internal/status', () => {
       if (this.hostPluginCenterStore.getSnapshot() !== undefined) void this.refreshHostPluginCenter()
     })
-    this.disposers.credentialsUpdated = this.ctx.on('credentials/updated', () => {
+    const refreshProviderCredentials = (): void => {
       const root = this.handle?.agent
       if (root !== undefined && this.providerCenter.getSnapshot() !== undefined) void this.refreshProviderCenter(root)
-    })
+    }
+    const disposeCredentialRecord = this.ctx.on('credentials/record-updated', refreshProviderCredentials)
+    const disposeCredentialReference = this.ctx.on('credentials/reference-updated', refreshProviderCredentials)
+    this.disposers.credentialsUpdated = () => {
+      disposeCredentialRecord()
+      disposeCredentialReference()
+    }
     this.disposers.workspaceChanged = this.ctx.on('domain/changed', (change) => {
       if (change.domain !== 'workspace' || this.sessionManager.getSnapshot() === undefined) return
       if (this.sessionManagerRefreshTimer !== undefined) clearTimeout(this.sessionManagerRefreshTimer)
@@ -1225,6 +1266,11 @@ class TuiController {
           if (key === 'tokenUsage') this.tokenUsage.set(value as TokenUsageProjection)
           if (key === 'contextBreakdown') this.contextBreakdown.set(value as ContextBreakdownProjection)
           if (key === 'sessionStats') this.sessionStats.set(value as SessionStatsProjection)
+          if (key === 'schedule') {
+            const schedules = collectTuiSchedules(value as readonly ScheduleRecord[])
+            this.schedulesStore.set(schedules)
+            if (this.scheduleDialogStore.getSnapshot() !== undefined) this.scheduleDialogStore.set(schedules)
+          }
           if (key === 'goal' || key === 'plan') {
             const frame = this.goalPlanProjectionFrame
             if (frame !== undefined) {
@@ -1296,16 +1342,11 @@ class TuiController {
       }
       if (this.workCatalog.some(entry => entry.id === agent.id)) this.scheduleWorkCatalogRefresh(root)
     })
-    this.disposers.questionProvider = this.ctx.userQuestions.registerProvider({
-      ask: (request) => {
-        const root = this.handle?.agent
-        if (root === undefined || request.agent !== root) {
-          return Promise.reject(new UserQuestionError(
-            'TUI user interaction answers only its exact owned root Agent', 'CALLER_NOT_LIVE'))
-        }
-        this.showRootView(root)
-        return this.interactions.askQuestion(request)
-      },
+    this.disposers.questionProvider = this.ctx.on('user-questions/request', (request, next) => {
+      const root = this.handle?.agent
+      if (root === undefined || request.agent !== root) return next()
+      this.showRootView(root)
+      return this.interactions.askQuestion(request)
     })
     this.disposers.approval = this.ctx.on('approval/request', (request, next) => {
       if (request.agent !== this.handle?.agent) return next()
@@ -1439,6 +1480,14 @@ class TuiController {
         return { kind: 'success' }
       },
     })
+    this.disposers.schedulesCommand = this.commandCatalog.register({
+      name: 'schedules',
+      description: tuiMessage(this.locale, 'schedules.command'),
+      handler: (invocation) => {
+        this.openScheduleDialog(invocation.agent)
+        return { kind: 'success' }
+      },
+    })
     this.disposers.feedbackCommand = this.commandCatalog.register({
       name: 'message-feedback',
       description: tuiMessage(this.locale, 'feedback.command'),
@@ -1461,7 +1510,7 @@ class TuiController {
       name: 'host-plugins',
       description: tuiMessage(this.locale, 'hostPlugins.command'),
       handler: (_invocation) => {
-        this.openHostPluginCenter()
+        void this.openHostPluginCenter()
         return { kind: 'success' }
       },
     })
@@ -1597,6 +1646,13 @@ class TuiController {
       }
       liveAgents.set(entry.id, {
         status: child.status,
+        route: {
+          ...child.options.provider === undefined ? {} : { provider: child.options.provider },
+          ...child.options.model === undefined ? {} : { model: child.options.model },
+          ...child.options.reasoningEffort === undefined ? {} : { reasoningEffort: child.options.reasoningEffort },
+          ...child.options.maxTokens === undefined ? {} : { maxTokens: child.options.maxTokens },
+          source: 'live-agent',
+        },
         ...timing === undefined ? {} : { timing },
       })
     }
@@ -2270,7 +2326,7 @@ class TuiController {
       llm: {
         listProviders: () => this.ctx.llm.listProviders(),
         listConfigurableProviders: () => this.ctx.llm.listConfigurableProviders(),
-        authentication: provider => hostAuthentication(this.ctx.llm, provider),
+        authentication: provider => hostAuthentication(this.ctx, provider),
         listModels: provider => this.ctx.llm.listModels(provider),
       },
       ...(settings === undefined ? {} : { settings }),
@@ -2471,7 +2527,7 @@ class TuiController {
     if (this.handle?.agent !== root || this.providerCenter.getSnapshot() === undefined) return
     const row = this.providerCenter.getSnapshot()?.snapshot?.providers.find(candidate => candidate.id === provider)
     if (row === undefined || !row.active || !row.canLogout || row.authentication !== 'configured') return
-    await hostLogout(this.ctx.llm, provider)
+    await hostLogout(this.ctx, provider)
     if (this.providerCenter.getSnapshot() === undefined || !this.ownsAgent(root)) return
     this.externalNotice.set(tuiMessage(this.locale, 'provider.logout.complete'))
     await this.refreshProviderCenter(root)
@@ -2840,7 +2896,7 @@ class TuiController {
     ): Promise<TuiProviderDiagnostic> => {
       invocation.signal.throwIfAborted()
       try {
-        const authentication = await hostAuthentication(this.ctx.llm, provider.id)
+        const authentication = await hostAuthentication(this.ctx, provider.id)
         invocation.signal.throwIfAborted()
         const models = authentication.configured
           ? await this.ctx.llm.listModels(provider.id)
@@ -2892,6 +2948,30 @@ class TuiController {
     }
 
     invocation.signal.throwIfAborted()
+    const persistence = this.ctx.get('sessionPersistence')
+    let storageDiagnostic: TuiSessionStorageDiagnostic = { state: 'unavailable' }
+    if (persistence !== undefined) {
+      try {
+        const headers = await persistence.list(invocation.signal)
+        invocation.signal.throwIfAborted()
+        storageDiagnostic = Object.freeze({
+          state: 'available',
+          backend: persistence.name,
+          currentFormat: invocation.agent.session.header.version,
+          expectedFormat: SESSION_FORMAT_VERSION,
+          compatibleSessions: headers.filter(header => header.version === SESSION_FORMAT_VERSION).length,
+          incompatibleSessions: headers.filter(header => header.version !== SESSION_FORMAT_VERSION).length,
+          supportsRawArtifacts: persistence.supportsRawArtifacts,
+        })
+      } catch (error: unknown) {
+        invocation.signal.throwIfAborted()
+        storageDiagnostic = Object.freeze({
+          state: 'failed', error: diagnosticFailureLabel(error, 'Session persistence'),
+        })
+      }
+    }
+
+    invocation.signal.throwIfAborted()
     const startup: unknown = this.ctx.get('tuiStartup')
     const host = tuiHostDiagnosticsFromStartup(startup)
     this.diagnostics.set(projectTuiDiagnostics({
@@ -2900,6 +2980,7 @@ class TuiController {
       providers: providerDiagnostics,
       omittedProviders: Math.max(0, providers.length - inspectedProviders.length),
       pluginHub: pluginHubDiagnostic,
+      storage: storageDiagnostic,
       capabilities: {
         settings: this.ctx.get('settings') !== undefined,
         sessionProjection: this.ctx.get('sessionProjections') !== undefined,
@@ -3801,6 +3882,22 @@ class TuiController {
     await this.openPresetManager(agent)
   }
 
+  private scheduleSnapshot(agent: Agent): TuiScheduleSnapshot {
+    if (!this.ownsAgent(agent)) return TUI_SCHEDULES_UNAVAILABLE
+    const value = this.ctx.get('sessionProjections')?.snapshot(agent.session, ['schedule']).values.schedule
+    return collectTuiSchedules(value)
+  }
+
+  private openScheduleDialog(agent: Agent): void {
+    const snapshot = this.scheduleSnapshot(agent)
+    this.schedulesStore.set(snapshot)
+    this.scheduleDialogStore.set(snapshot)
+  }
+
+  private closeScheduleDialog(): void {
+    this.scheduleDialogStore.set(undefined)
+  }
+
   private async copyPreset(_agent: Agent, sourceId: string, newId: string, displayName?: string): Promise<void> {
     const presets = this.ctx.agentPresets as unknown as TuiAgentPresets | undefined
     if (presets === undefined) throw new Error('Agent presets unavailable')
@@ -3944,9 +4041,10 @@ class TuiController {
     this.openTrajectory()
   }
 
-  private openHostPluginCenter(): void {
+  private async openHostPluginCenter(): Promise<void> {
+    const generation = ++this.hostPluginCenterGeneration
     const inventory = this.ctx.get('pluginInventory') as {
-      list(): { entries: readonly import('@deepseek-ai/dsh-host-plugin-inventory/types').PluginInventoryEntry[] }
+      list(): Promise<import('@deepseek-ai/dsh-host-plugin-inventory/types').PluginInventorySnapshot>
     } | undefined
     const settings = this.ctx.get('settings') as {
       readonly writable: boolean
@@ -3956,25 +4054,25 @@ class TuiController {
       ...(inventory !== undefined ? { inventory } : {}),
       ...(settings !== undefined ? { settings } : {}),
     }
-    const snapshot = collectTuiHostPluginCenter(options, this.locale)
-    this.hostPluginCenterStore.set(snapshot)
+    const snapshot = await collectTuiHostPluginCenter(options, this.locale)
+    if (generation === this.hostPluginCenterGeneration) this.hostPluginCenterStore.set(snapshot)
   }
 
   private closeHostPluginCenter(): void {
+    this.hostPluginCenterGeneration += 1
     this.hostPluginCenterStore.set(undefined)
   }
 
-  private refreshHostPluginCenter(): Promise<void> {
+  private async refreshHostPluginCenter(): Promise<void> {
     if (this.hostPluginCenterStore.getSnapshot() === undefined) return Promise.resolve()
-    this.openHostPluginCenter()
-    return Promise.resolve()
+    await this.openHostPluginCenter()
   }
 
   private async mutateHostSettings(mutation: TuiHostSettingsMutation): Promise<void> {
     try {
       await hostSettings(this.ctx).mutate(mutation.ns, [...mutation.ops], mutation.expectedRevision)
     } finally {
-      if (this.hostPluginCenterStore.getSnapshot() !== undefined) this.openHostPluginCenter()
+      if (this.hostPluginCenterStore.getSnapshot() !== undefined) await this.openHostPluginCenter()
     }
   }
 
@@ -4422,7 +4520,12 @@ class TuiController {
     if (live !== undefined) return this.ctx.get('sessionProjections')?.snapshot(live).values.title
     const cached = cache.cachedSnapshot(record.header)
     if (cached !== undefined && 'title' in cached.values) return cached.values.title
-    return (await cache.coldSnapshot(record.header.id, signal)).values.title
+    const observation = await this.ctx.sessionQuery.observeSession(record.header.id, { signal })
+    try {
+      return observation.projections?.values.title
+    } finally {
+      observation[Symbol.dispose]()
+    }
   }
 
   private async activateResume(
@@ -4518,7 +4621,9 @@ class TuiController {
       retirementError ??= error
     }
     this.externalNotice.set(retirementError === undefined
-      ? `Resumed ${candidate.title}.`
+      ? prepared.legacyPresetMigrated
+        ? tuiMessage(this.locale, 'mode.legacy.resumed', { title: candidate.title })
+        : `Resumed ${candidate.title}.`
       : `Resumed ${candidate.title}; previous Session cleanup failed: ${errorChain(retirementError)}`)
     if (followup === 'rename') this.prefillComposer('/rename ')
   }
@@ -4725,7 +4830,7 @@ class TuiController {
       this.permissions.set(undefined)
       return
     }
-    const currentValue = service.current(agent.session.events)
+    const currentValue = service.current(agent.session)
     if (this.permissions.getSnapshot()?.currentValue === currentValue) return
     this.permissions.set({
       options: [
@@ -4744,6 +4849,10 @@ class TuiController {
     }
     if (itemId === 'mode') {
       await this.submit(agent, '/mode')
+      return
+    }
+    if (itemId === 'schedules') {
+      this.openScheduleDialog(agent)
       return
     }
     if (itemId !== 'permission') return
@@ -4777,7 +4886,7 @@ class TuiController {
     const answer = await this.askOne(agent, signal, {
       id: 'permission-selection',
       header: tuiMessage(this.locale, 'permissions.header'),
-      question: tuiMessage(this.locale, 'permissions.question', { current: service.current(agent.session.events) }),
+      question: tuiMessage(this.locale, 'permissions.question', { current: service.current(agent.session) }),
       options: choices.map(choice => ({
         label: choice.label,
         ...choice.description === undefined ? {} : { description: choice.description },
@@ -4866,8 +4975,12 @@ class TuiController {
       prompt: prompt => this.authPrompt(agent, signal, prompt),
       notify: (event) => { this.authNotify(event, signal) },
     }
-    await hostLogin(this.ctx.llm, provider, method, interaction)
+    const outcome = await hostLogin(this.ctx, provider, method, interaction)
     signal.throwIfAborted()
+    if (outcome === 'cancelled') {
+      this.externalNotice.set(tuiMessage(this.locale, 'models.signin.cancelled'))
+      return
+    }
     this.externalNotice.set(tuiMessage(this.locale, 'models.signin.complete'))
   }
 
@@ -4888,7 +5001,7 @@ class TuiController {
           login?: { provider: string; method: string }
         }> = []
         for (const provider of providers) {
-          const auth = await hostAuthentication(this.ctx.llm, provider.id)
+          const auth = await hostAuthentication(this.ctx, provider.id)
           invocation.signal.throwIfAborted()
           if (!auth.configured) {
             for (const method of auth.methods) {
@@ -5153,6 +5266,8 @@ class TuiController {
     this.startupGuidance.set(undefined)
     this.goalProjection.set(undefined)
     this.planProjection.set(undefined)
+    this.schedulesStore.set(TUI_SCHEDULES_UNAVAILABLE)
+    this.scheduleDialogStore.set(undefined)
     const activeCommand = this.activeCommand
     const startupGuidanceRefresh = this.startupGuidanceRefresh
     const activeSessionExport = this.activeSessionExport
@@ -5336,8 +5451,14 @@ export function apply(ctx: Context, config: Config): void {
 export type {
   TranscriptCompactionNode, TranscriptNode, TranscriptTextNode,
   TranscriptTodoNode, TranscriptToolActivityNode, TranscriptToolGroupNode, TranscriptToolNode,
+  TranscriptTurnUsageNode, TranscriptQuestionItem, TranscriptQuestionNode, TuiTranscriptTurnAnchor,
 } from './transcript.ts'
-export { foldTranscript, TuiTranscriptProjectionCache } from './transcript.ts'
+export {
+  foldTranscript, navigateTuiTranscriptTurn, tuiTranscriptTurnAnchors, TuiTranscriptProjectionCache,
+} from './transcript.ts'
+export { formatTuiTurnUsage, tuiTurnUsageDetailLines } from './turn-usage.ts'
+export { preflightTuiSessionStorage } from './storage-preflight.ts'
+export type { TuiSessionStoragePreflight } from './storage-preflight.ts'
 export {
   toolActivityActiveText, toolActivityHeadingText,
   tuiToolActivityCategory, tuiToolActivityRows, tuiToolActivitySummary,
@@ -5497,9 +5618,9 @@ export type { TuiAgentViewDescriptor } from './agent-view.ts'
 export { EMPTY_TUI_WORK_SNAPSHOT, projectTuiWork } from './work.ts'
 export type {
   TuiObservedSubagentRun, TuiWorkAgentSnapshot, TuiWorkItemState,
-  TuiWorkItemView, TuiWorkProjectionInput, TuiWorkSnapshot, TuiWorkSummary,
+  TuiWorkItemView, TuiWorkProjectionInput, TuiWorkRouteFacts, TuiWorkSnapshot, TuiWorkSummary,
 } from './work.ts'
-export { formatTuiWorkElapsed, formatTuiWorkOwner } from './work-panel.tsx'
+export { formatTuiWorkElapsed, formatTuiWorkOwner, formatTuiWorkRoute } from './work-panel.tsx'
 export {
   previousTranscriptPageAnchor, selectTranscriptPage, selectTranscriptWindow,
   terminalWrappedLines, tuiTranscriptWindowEntryRows, TuiTranscriptScrollController,
@@ -5529,7 +5650,7 @@ export {
   tuiAssistantOutputPointerRegions,
   tuiGoalPlanDialogPointerRegions, tuiGoalPlanPointerRegions,
   tuiPluginHubPointerRegions, tuiProviderPointerRegions, tuiQuestionPointerRegions, tuiQueuePointerRegions,
-  tuiResumePointerRegions, tuiSessionManagerPointerRegions, tuiSuggestionPointerRegions,
+  tuiResumePointerRegions, tuiSchedulePointerRegions, tuiSessionManagerPointerRegions, tuiSuggestionPointerRegions,
   tuiWorkPointerRegions,
 } from './pointer.ts'
 export {
@@ -5548,12 +5669,14 @@ export type {
   TuiPresetCopyResult, TuiPresetCompositionPreview,
   TuiPresetManagerRow, TuiPresetManagerSnapshot,
 } from './preset-manager.ts'
+export { collectTuiSchedules, TUI_SCHEDULES_UNAVAILABLE } from './schedules.ts'
+export type { TuiScheduleRow, TuiScheduleSnapshot } from './schedules.ts'
 export {
   collectTuiHostPluginCenter, filterTuiHostPlugins, planTuiHostSettingsMutation,
   tuiHostSettingsErrorMessage,
 } from './host-plugin-center.ts'
 export type {
-  TuiHostPluginRow, TuiHostSettingsField, TuiHostSettingsMutation, TuiHostSettingsRow,
+  TuiHostPluginRow, TuiHostPresetPluginGroup, TuiHostSettingsField, TuiHostSettingsMutation, TuiHostSettingsRow,
   TuiHostPluginCenterSnapshot, TuiHostPluginCenterCollectOptions,
   TuiHostPluginFilter,
 } from './host-plugin-center.ts'
@@ -5571,6 +5694,7 @@ export type {
   TuiTrajectoryPointerOptions,
   TuiPluginHubPointerOptions, TuiPointerAction, TuiPointerHit, TuiPointerPoint,
   TuiPointerRect, TuiPointerRegion, TuiPresetManagerPointerOptions,
+  TuiSchedulePointerOptions,
   TuiProviderPointerOptions, TuiQuestionPointerOptions, TuiQueuePointerOptions,
   TuiResumePointerOptions, TuiSessionManagerPointerOptions,
   TuiSuggestionPointerOptions, TuiModalClosePointerOptions,
@@ -5586,6 +5710,7 @@ export type {
   TuiDiagnosticInput, TuiDiagnosticPanelLine, TuiDiagnosticRow, TuiDiagnosticSeverity,
   TuiDiagnosticSnapshot, TuiHostDiagnosticSnapshot, TuiHostPackageDiagnostic,
   TuiPluginHubDiagnostic, TuiProviderDiagnostic, TuiRuntimeCapabilityDiagnostics,
+  TuiSessionStorageDiagnostic,
 } from './diagnostics.ts'
 export { inspectTuiStartupProvider, projectTuiStartupGuidance } from './startup-guidance.ts'
 export type {

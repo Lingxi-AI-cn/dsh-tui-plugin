@@ -1,6 +1,6 @@
 /** Packed-manifest Host compatibility checks that run before terminal mutation. */
 
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
 import { createRequire } from 'node:module'
@@ -12,7 +12,7 @@ import type {
 const PACKAGE_MANIFEST = new URL('../package.json', import.meta.url)
 const PROFILE_NAME = 'tui'
 const OFFICIAL_DSH_PACKAGE = '@deepseek-ai/dsh'
-const SHIPPED_AGENT_PRESET_IDS = Object.freeze(['standard', 'code', 'minimal', 'cordis'])
+const OFFICIAL_AGENT_PRESET_IDS = Object.freeze(['standard', 'ptc', 'minimal', 'cordis'])
 
 interface PackageManifest {
   readonly name?: unknown
@@ -28,10 +28,9 @@ export type TuiHostPackageResolution = TuiHostPackageDiagnostic
 /** Complete result retained by startup diagnostics and tests. */
 export type TuiHostCompatibilityReport = TuiHostDiagnosticSnapshot
 
-/** Validated installation facts needed by Loader expressions but not ordinary diagnostics. */
+/** Validated installation facts published to the TUI startup layer. */
 export interface TuiHostInstallation {
   readonly diagnostics: TuiHostCompatibilityReport
-  readonly presetRoot: string
 }
 
 /** Typed startup failure whose message is safe before terminal entry. */
@@ -149,41 +148,6 @@ function hostPackageManifestIndex(officialDshManifest: string): ReadonlyMap<stri
   return byName
 }
 
-function checkedPresetRoot(
-  officialDsh: TuiHostPackageResolution,
-  supportedDsh: string,
-  activeProfileRoot: string,
-): string {
-  if (officialDsh.version !== supportedDsh) {
-    throw new TuiHostCompatibilityError(
-      `Official DSH package is ${officialDsh.version}; expected exactly ${supportedDsh}.`,
-    )
-  }
-  if (isInside(activeProfileRoot, officialDsh.manifestPath)) {
-    throw new TuiHostCompatibilityError(
-      'Official DSH package resolves from the TUI profile instead of the DSH installation.',
-    )
-  }
-  const candidate = join(officialDsh.manifestPath, '..', 'config', 'agent-presets')
-  let root: string
-  try {
-    root = realpathSync(candidate)
-  } catch (error) {
-    throw new TuiHostCompatibilityError(
-      `Official DSH Agent preset root is unavailable: ${String(error)}`,
-    )
-  }
-  for (const id of SHIPPED_AGENT_PRESET_IDS) {
-    for (const file of ['agent.cordis.yml', 'preset.yml']) {
-      const path = join(root, id, file)
-      if (!existsSync(path) || !statSync(path).isFile()) {
-        throw new TuiHostCompatibilityError(`Official DSH Agent preset ${id} is missing ${file}.`)
-      }
-    }
-  }
-  return root
-}
-
 function compatibilityMessage(
   installed: string,
   supported: string,
@@ -202,8 +166,10 @@ function compatibilityMessage(
 
 /**
  * Validate already-resolved packages against one packed TUI manifest.
- * `workspace:*` is accepted only for the source checkout; `pnpm pack` replaces
- * it with an exact version before any user can install the package.
+ * The `@deepseek-ai/dsh-app-boot` `workspace:*` marker makes the checked-out
+ * workspace graph authoritative during source development. `pnpm pack`
+ * replaces that marker with an exact version, after which every peer must
+ * match the independently installed official graph exactly.
  * @param tuiManifest - source or packed top-level manifest.
  * @param packages - resolved official package facts.
  * @param activeProfileRoot - profile directory whose packages cannot own Host peers.
@@ -221,6 +187,7 @@ export function validateTuiHostCompatibility(
   const installedDsh = appBoot?.version ?? 'unknown'
   const supportedDsh = peerDependencies['@deepseek-ai/dsh-app-boot']
   const supportedDshText = requiredString(supportedDsh, '@deepseek-ai/dsh-app-boot peer version')
+  const sourceCheckout = supportedDshText.startsWith('workspace:')
 
   for (const [name, rawExpected] of Object.entries(peerDependencies)) {
     const expected = requiredString(rawExpected, `${name} peer version`)
@@ -233,7 +200,7 @@ export function validateTuiHostCompatibility(
         `Required Host package ${name} is missing.`,
       ))
     }
-    if (!expected.startsWith('workspace:') && actual.version !== expected) {
+    if (!sourceCheckout && actual.version !== expected) {
       throw new TuiHostCompatibilityError(compatibilityMessage(
         installedDsh,
         supportedDshText,
@@ -261,7 +228,7 @@ export function validateTuiHostCompatibility(
     platform: process.platform,
     architecture: process.arch,
     packages: Object.freeze(packages.map(entry => Object.freeze({ ...entry }))),
-    agentPresetIds: SHIPPED_AGENT_PRESET_IDS,
+    agentPresetIds: OFFICIAL_AGENT_PRESET_IDS,
     recoveryCommand: `dsh plugin --profile ${PROFILE_NAME} add --save-exact @lingxi-ai-cn/dsh-tui@${tuiVersion}`,
   })
 }
@@ -288,8 +255,7 @@ function inspectTuiHostInstallation(): TuiHostInstallation {
     [...packages, officialDsh],
     activeProfileRoot,
   )
-  const presetRoot = checkedPresetRoot(officialDsh, diagnostics.dshVersion, activeProfileRoot)
-  return Object.freeze({ diagnostics, presetRoot })
+  return Object.freeze({ diagnostics })
 }
 
 /** Fail startup before command parsing or terminal negotiation on an unsupported Host. */
@@ -297,7 +263,7 @@ export function assertTuiHostCompatibility(): TuiHostCompatibilityReport {
   return inspectTuiHostInstallation().diagnostics
 }
 
-/** Resolve the verified official preset root alongside the bounded Host diagnostics. */
+/** Resolve bounded diagnostics for the verified official Host installation. */
 export function assertTuiHostInstallation(): TuiHostInstallation {
   return inspectTuiHostInstallation()
 }

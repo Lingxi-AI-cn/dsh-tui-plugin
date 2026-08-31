@@ -1,9 +1,24 @@
+---
+description: "供受信任 Consumer 使用的 Host 侧 profile 检查、detached package plan、精确本地修改、加锁和校验。"
+kind: "package-reference"
+---
+
 # `@lingxi-ai-cn/dsh-profile-plugin-manager`
 
 [English](README.md) | 中文
 
+## 概述
+
 这是供命令行和受信任本地 Consumer 共享的 Host 侧 profile 插件管理包。`ProfilePluginManager` 接收显式 profile 目录和共享 lock 路径；它不从 TUI 输入选择 profile，不获取 Registry 数据、不验证 descriptor、不渲染 UI，也不激活 generation。
 
+## 目录
+
+- [操作](#operations)
+- [模型体验](#model-experience)
+- [已知限制与暂缓事项](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
+
+<a id="operations"></a>
 ## 操作
 
 - `inspectInstalled()` 从 `package.json.dependencies`、有序的 `dsh.profile.bundles`、已解析的 package manifest、`pnpm-lock.yaml` 和可选本地 Hub receipt 推导本地事实。远程 Catalog 状态绝不是 installed truth。
@@ -17,6 +32,7 @@
 
 每次 typed mutation 都会在 lock 内重新检查 detached plan revision。profile 已变化时返回 `PROFILE_CHANGED`，plan 过期时返回 `PLAN_EXPIRED`，本地 artifact 缺失或变化时返回 `INVALID_ARTIFACT`。pnpm failure 分别保留 exit、signal、timeout、cancellation 和 output truncation 事实；build policy 诊断映射为 `BUILD_NOT_ALLOWED`，且不会修改 `pnpm-workspace.yaml`。
 
+<a id="model-experience"></a>
 ## 模型体验
 
 无，因为 profile 检查和 package manager 执行不注册 prompt、tool、message 或 provider request。
@@ -25,8 +41,14 @@
 
 无；本包绝不组装模型输入。
 
+<a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与暂缓事项
 
 - **不做 Registry 信任决策** - 受信任调用方必须先验证 descriptor identity、compatibility、artifact size 和 digest，再构造 `ProfilePluginArtifact`；manager 只复查所提供的本地文件事实。
 - **没有 activation transaction** - materialization 会写入独立目录，但 generation journal、active profile swap、maintenance helper、ready marker、recovery 和 rollback 不属于本 package stage。
 - **Windows 需要无 shell 的 pnpm 入口** - `.cmd` shim 不会通过 command shell 执行；Windows Consumer 必须提供可直接执行的 pnpm command，例如 Node 加 pnpm 的 JavaScript entry。
+
+<a id="dev-note"></a>
+### 开发备注
+
+无。

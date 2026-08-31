@@ -210,7 +210,7 @@ class LocalRegistryProvider implements PluginHubProvider {
       profileDir: config.profileDir ?? resolveProfileDir(config.profile ?? 'tui', home),
       dataDir: config.dataDir ?? join(home, 'plugin-hub'),
       installAnchor: INSTALL_ANCHOR,
-      initialBundles: PROFILE_TEMPLATES.tui ?? ['@deepseek-ai/dsh-base', '@lingxi-ai-cn/dsh-tui'],
+      initialBundles: PROFILE_TEMPLATES.tui?.bundles ?? ['@deepseek-ai/dsh-base', '@lingxi-ai-cn/dsh-tui'],
       dshVersion: DSH_VERSION,
       trustedKeys: config.trustedKeys ?? [],
       maxArtifactBytes: config.maxArtifactBytes ?? DEFAULT_MAX_ARTIFACT_BYTES,

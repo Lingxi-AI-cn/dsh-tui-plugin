@@ -186,6 +186,13 @@ export type TuiPointerAction =
       | 'presetManager.view' | 'presetManager.openFile' | 'presetManager.open' | 'presetManager.close'
   }
   | {
+    readonly id: 'schedules.accept'
+    readonly index?: number | undefined
+  }
+  | {
+    readonly id: 'schedules.close' | 'schedules.refresh'
+  }
+  | {
     readonly id: 'hostPlugins.accept'
     readonly index?: number | undefined
   }
@@ -201,7 +208,7 @@ export type TuiPointerAction =
   | {
     readonly id: 'hostPlugins.tab'
     /** Omitted only by the footer shortcut, whose established behavior is to toggle. */
-    readonly tab?: 'plugins' | 'settings' | undefined
+    readonly tab?: 'plugins' | 'presets' | 'settings' | undefined
   }
   | {
     readonly id: 'trajectory.accept'
@@ -504,7 +511,7 @@ export function tuiWorkPointerRegions(
   },
 ): readonly TuiPointerRegion[] {
   const count = Math.max(0, Math.floor(itemCount))
-  const capacity = Math.max(1, Math.floor(maxRows) - 4)
+  const capacity = Math.max(1, Math.floor(maxRows) - 5)
   const visible = Math.min(count, capacity)
   const selected = count === 0 ? 0 : Math.min(Math.max(0, Math.floor(selectedIndex)), count - 1)
   const start = Math.max(0, Math.min(selected - Math.floor(capacity / 2), count - capacity))
@@ -1477,6 +1484,50 @@ export function tuiPresetManagerPointerRegions(
   return Object.freeze(regions.map(region => Object.freeze(region)))
 }
 
+/** Inputs needed to map active Schedule rows and their footer actions. */
+export interface TuiSchedulePointerOptions {
+  readonly columns: number
+  readonly rows: number
+  readonly listVisible: boolean
+  readonly visibleStart: number
+  readonly visibleCount: number
+  readonly rowHeight: number
+  readonly listTop?: number | undefined
+  readonly footerActions: readonly TuiPointerFooterAction[]
+  readonly footerLine?: string | undefined
+  readonly context: Extract<TuiInteractionContext, 'Dialog'>
+}
+
+/**
+ * Build physical Schedule hit regions from the full-screen read-only panel.
+ * @param options - committed Schedule layout and footer actions.
+ * @returns immutable pointer regions for the visible Schedule frame.
+ */
+export function tuiSchedulePointerRegions(
+  options: TuiSchedulePointerOptions,
+): readonly TuiPointerRegion[] {
+  const columns = Math.max(1, Math.floor(options.columns))
+  const rows = Math.max(1, Math.floor(options.rows))
+  const regions: TuiPointerRegion[] = []
+  if (options.listVisible) {
+    for (let offset = 0; offset < Math.max(0, options.visibleCount); offset += 1) {
+      const top = (options.listTop ?? 7) + offset * options.rowHeight
+      regions.push({
+        id: `schedules:${options.visibleStart + offset}`,
+        rect: { left: 2, top, right: Math.max(2, columns - 1), bottom: top + options.rowHeight - 1 },
+        context: options.context,
+        priority: 35,
+        action: { id: 'schedules.accept', index: options.visibleStart + offset },
+      })
+    }
+  }
+  const actions = options.footerActions.length === 0
+    ? [{ id: 'schedules.close' as const }]
+    : options.footerActions
+  appendFooterPointerRegions(regions, 'schedules', actions, columns, rows, options.context, options.footerLine)
+  return Object.freeze(regions.map(region => Object.freeze(region)))
+}
+
 /** Inputs needed to map the Trajectory ledger rows and visible footer actions. */
 export interface TuiTrajectoryPointerOptions {
   readonly columns: number
@@ -1556,11 +1607,11 @@ export interface TuiHostPluginCenterPointerOptions {
   readonly rowHeight: number
   /** First physical row occupied by the list; defaults to the legacy fixed layout. */
   readonly listTop?: number | undefined
-  /** Exact geometry of the always-visible Loaded/Settings labels. */
+  /** Exact geometry of the always-visible Loaded/Presets/Settings labels. */
   readonly tabs?: {
     readonly row: number
     readonly left: number
-    readonly labels: Readonly<Record<'plugins' | 'settings', string>>
+    readonly labels: Readonly<Record<'plugins' | 'presets' | 'settings', string>>
   } | undefined
   /** Visible editable field rows in a Settings detail panel. */
   readonly settingsFields?: {
@@ -1581,7 +1632,7 @@ export function tuiHostPluginCenterPointerRegions(
   const rows = Math.max(1, Math.floor(options.rows))
   const regions: TuiPointerRegion[] = []
   if (options.tabs !== undefined) {
-    const tabs = ['plugins', 'settings'] as const
+    const tabs = ['plugins', 'presets', 'settings'] as const
     let left = Math.max(1, Math.floor(options.tabs.left))
     for (const tab of tabs) {
       const width = stringWidth(options.tabs.labels[tab])

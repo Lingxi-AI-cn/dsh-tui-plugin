@@ -5,6 +5,8 @@ import { terminalMarkdownText } from './markdown.ts'
 import { terminalSafe } from './sanitize.ts'
 import { toolDetailLines, toolStateMark } from './tool-card.tsx'
 import { terminalWrappedLines } from './viewport.ts'
+import { tuiTurnUsageDetailLines } from './turn-usage.ts'
+import { tuiMessage, type TuiLocale } from './locale.ts'
 
 interface DetailCacheEntry {
   readonly target: TranscriptNode | TranscriptToolNode
@@ -16,7 +18,12 @@ function detailTitle(tool: TranscriptToolNode): string {
   return tool.resultView?.title ?? tool.callView.title
 }
 
-function logicalDetailLines(node: TranscriptNode, child?: TranscriptToolNode, width?: number): readonly string[] {
+function logicalDetailLines(
+  node: TranscriptNode,
+  child?: TranscriptToolNode,
+  width?: number,
+  locale: TuiLocale = 'en',
+): readonly string[] {
   if (child !== undefined) return toolDetailLines(child, { width })
   if (node.kind === 'tool') return toolDetailLines(node, { width })
   if (node.kind === 'text') {
@@ -38,6 +45,21 @@ function logicalDetailLines(node: TranscriptNode, child?: TranscriptToolNode, wi
     ...node.items.map((item, index) => `${index + 1}. ${item.operation} · ${item.path}`),
     ...(node.omitted === 0 ? [] : [`+${node.omitted}`]),
   ]
+  if (node.kind === 'turn-usage') return tuiTurnUsageDetailLines(node.usage, locale)
+  if (node.kind === 'question') return [
+    tuiMessage(locale, 'question.history.detail.status', {
+      status: tuiMessage(locale, `question.history.status.${node.status}`),
+    }),
+    ...node.questions.flatMap((question, index) => [
+      `${index + 1}. ${question.header ?? question.id}: ${question.question}`,
+      tuiMessage(locale, 'question.history.detail.answer', {
+        answer: question.secret
+          ? tuiMessage(locale, 'question.history.detail.hidden')
+          : question.answer ?? tuiMessage(locale, 'question.history.status.unsubmitted'),
+      }),
+    ]),
+    ...(node.omitted === 0 ? [] : [tuiMessage(locale, 'question.history.detail.omitted', { count: node.omitted })]),
+  ]
   return node.tools.map(tool => `${toolStateMark(tool)} ${detailTitle(tool)}`)
 }
 
@@ -45,10 +67,15 @@ function logicalDetailLines(node: TranscriptNode, child?: TranscriptToolNode, wi
  * Project complete unwrapped transcript detail for clipboard transfer.
  * @param node - current semantic parent block.
  * @param child - focused retained tool child, when applicable.
+ * @param locale - active TUI message catalog locale.
  * @returns terminal-safe logical rows joined without viewport-introduced wrapping.
  */
-export function tuiTranscriptDetailText(node: TranscriptNode, child?: TranscriptToolNode): string {
-  return logicalDetailLines(node, child).join('\n')
+export function tuiTranscriptDetailText(
+  node: TranscriptNode,
+  child?: TranscriptToolNode,
+  locale: TuiLocale = 'en',
+): string {
+  return logicalDetailLines(node, child, undefined, locale).join('\n')
 }
 
 /** Process-local detail projection keyed by stable block identity and current node reference. */
@@ -65,10 +92,17 @@ export class TuiTranscriptDetailCache {
    * @param node - current semantic parent block.
    * @param width - available terminal cells.
    * @param child - focused retained tool child, when applicable.
+   * @param locale - active TUI message catalog locale.
    * @returns immutable physical detail rows.
    */
-  lines(node: TranscriptNode, width: number, child?: TranscriptToolNode): readonly string[] {
-    const key = child === undefined ? node.key : `${node.key}:${child.callId}`
+  lines(
+    node: TranscriptNode,
+    width: number,
+    child?: TranscriptToolNode,
+    locale: TuiLocale = 'en',
+  ): readonly string[] {
+    const targetKey = child === undefined ? node.key : `${node.key}:${child.callId}`
+    const key = `${targetKey}:${locale}`
     const target = child ?? node
     let entry = this.entries.get(key)
     if (entry?.target !== target) {
@@ -80,7 +114,8 @@ export class TuiTranscriptDetailCache {
       this.entries.set(key, entry)
     }
     const columns = Math.max(1, width)
-    const logical = entry.logicalLines.get(columns) ?? Object.freeze([...logicalDetailLines(node, child, columns)])
+    const logical = entry.logicalLines.get(columns)
+      ?? Object.freeze([...logicalDetailLines(node, child, columns, locale)])
     entry.logicalLines.set(columns, logical)
     const cached = entry.physicalLines.get(columns)
     if (cached !== undefined) return cached

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import stringWidth from 'string-width'
-import { CallId, createAssistantMessage, createToolResultMessage } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, createAssistantMessage, createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   formatTuiDeliverableDetailLines, formatTuiDeliverablesRow,
@@ -94,7 +94,7 @@ describe('TUI deliverables projection', () => {
   })
 
   it('appends successful mutation facts after the closing assistant node', () => {
-    const callId = CallId('write-1')
+    const callId = ToolCallId('write-1')
     const events = [
       { type: 'tool/call', seq: 1, time: 10, data: { turn: 1, step: 1, callId, name: 'write', arguments: '{}' } },
       {

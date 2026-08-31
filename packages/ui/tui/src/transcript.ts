@@ -2,6 +2,7 @@
 
 import {
   isAppendSurfaceEvent,
+  deriveTurnTokenUsage,
   type ContentBlock,
   type SessionEvent,
   type StreamChunk,
@@ -9,6 +10,7 @@ import {
   type ToolCallView,
   type ToolDefinition,
   type ToolResultView,
+  type TurnTokenUsage,
 } from './host.ts'
 import { terminalSafe } from './sanitize.ts'
 import { TuiAppendOnlySessionWindow } from './session-window.ts'
@@ -154,6 +156,38 @@ export interface TranscriptDeliverablesNode {
   omitted: number
 }
 
+/** Exact provider-reported accounting for one completed durable Turn. */
+export interface TranscriptTurnUsageNode {
+  /** Node discriminant. */
+  kind: 'turn-usage'
+  /** Stable identity derived from the scheduler Turn. */
+  key: string
+  /** Scheduler Turn whose complete attempt lifecycle was folded. */
+  turn: number
+  /** Exact aggregate; the node is absent when the owner cannot prove completeness. */
+  usage: TurnTokenUsage
+}
+
+/** One safe question/answer summary retained by a settled question-history card. */
+export interface TranscriptQuestionItem {
+  readonly id: string
+  readonly header?: string | undefined
+  readonly question: string
+  readonly answer?: string | undefined
+  readonly secret: boolean
+}
+
+/** Settled durable `ask_user_question` lifecycle projected outside tool activity. */
+export interface TranscriptQuestionNode {
+  kind: 'question'
+  key: string
+  callId: string
+  turn?: number | undefined
+  status: 'answered' | 'cancelled' | 'declined' | 'interrupted' | 'unsubmitted' | 'error'
+  questions: readonly TranscriptQuestionItem[]
+  omitted: number
+}
+
 /** One semantic exploration run or authoritative scheduler group. */
 export interface TranscriptToolGroupNode {
   /** Node discriminant. */
@@ -191,6 +225,73 @@ export type TranscriptNode =
   | TranscriptToolActivityNode
   | TranscriptCompactionNode
   | TranscriptDeliverablesNode
+  | TranscriptTurnUsageNode
+  | TranscriptQuestionNode
+
+/** Stable semantic anchor for one completed scheduler Turn. */
+export interface TuiTranscriptTurnAnchor {
+  readonly turn: number
+  readonly key: string
+  readonly index: number
+}
+
+function transcriptNodeTurn(node: TranscriptNode): number | undefined {
+  if (node.kind === 'text' || node.kind === 'tool' || node.kind === 'tool-activity'
+    || node.kind === 'deliverables' || node.kind === 'turn-usage' || node.kind === 'question') return node.turn
+  if (node.kind === 'tool-group') return node.tools.find(tool => tool.turn !== undefined)?.turn
+  return undefined
+}
+
+/**
+ * Build first-visible-node anchors only for Turns proven complete by their projected end facts.
+ * @param nodes - complete folded transcript projection.
+ * @returns immutable ordered completed-Turn anchors.
+ */
+export function tuiTranscriptTurnAnchors(nodes: readonly TranscriptNode[]): readonly TuiTranscriptTurnAnchor[] {
+  const complete = new Set<number>()
+  for (const node of nodes) {
+    if (node.kind === 'text' && node.closing === true && node.turn !== undefined) complete.add(node.turn)
+    else if (node.kind === 'turn-usage' || node.kind === 'deliverables') complete.add(node.turn)
+    else if (node.kind === 'text' && node.turn !== undefined && (node.tone === 'error' || node.label === 'Turn')) {
+      complete.add(node.turn)
+    }
+  }
+  const anchored = new Set<number>()
+  const anchors: TuiTranscriptTurnAnchor[] = []
+  nodes.forEach((node, index) => {
+    const turn = transcriptNodeTurn(node)
+    if (turn === undefined || !complete.has(turn) || anchored.has(turn)) return
+    anchored.add(turn)
+    anchors.push(Object.freeze({ turn, key: node.key, index }))
+  })
+  return Object.freeze(anchors)
+}
+
+/**
+ * Resolve a completed-Turn anchor independently from physical transcript paging.
+ * @param anchors - ordered completed-Turn anchors.
+ * @param startIndex - current semantic transcript node index.
+ * @param direction - relative Turn direction.
+ * @param followingTail - whether the viewport currently follows the live tail.
+ * @returns destination anchor, or undefined when no completed Turn exists.
+ */
+export function navigateTuiTranscriptTurn(
+  anchors: readonly TuiTranscriptTurnAnchor[],
+  startIndex: number,
+  direction: 'previous' | 'next',
+  followingTail: boolean,
+): TuiTranscriptTurnAnchor | undefined {
+  if (anchors.length === 0) return undefined
+  if (direction === 'previous') {
+    if (followingTail) return anchors.at(-1)
+    const atOrBefore = anchors.findLast(anchor => anchor.index <= startIndex)
+    if (atOrBefore === undefined) return anchors[0]
+    if (atOrBefore.index < startIndex) return atOrBefore
+    return anchors[Math.max(0, anchors.indexOf(atOrBefore) - 1)]
+  }
+  const later = anchors.find(anchor => anchor.index > startIndex)
+  return later
+}
 
 interface OptionalTranscriptEventMap {
   'tool/execution-group': {
@@ -280,6 +381,82 @@ function parseArguments(raw: string): unknown {
     // Model-produced arguments are a durable external boundary; malformed JSON remains inspectable.
     return raw
   }
+}
+
+const QUESTION_HISTORY_LIMIT = 16
+
+function questionAnswerMap(output: string | undefined): Map<string, { selected: string[]; custom?: string }> {
+  if (output === undefined) return new Map()
+  try {
+    const parsed = JSON.parse(output) as { answers?: unknown }
+    if (!Array.isArray(parsed.answers)) return new Map()
+    return new Map(parsed.answers.flatMap((value): [string, { selected: string[]; custom?: string }][] => {
+      if (typeof value !== 'object' || value === null) return []
+      const record = value as Record<string, unknown>
+      if (typeof record['id'] !== 'string' || !Array.isArray(record['selected'])
+        || !record['selected'].every(item => typeof item === 'string')) return []
+      return [[record['id'], {
+        selected: record['selected'],
+        ...typeof record['custom'] === 'string' ? { custom: record['custom'] } : {},
+      }]]
+    }))
+  } catch {
+    return new Map()
+  }
+}
+
+function questionHistoryNode(tool: TranscriptToolNode): TranscriptQuestionNode | undefined {
+  if (tool.name !== 'ask_user_question' || tool.state === 'queued' || tool.state === 'running') return undefined
+  const input = typeof tool.args === 'object' && tool.args !== null ? tool.args as Record<string, unknown> : undefined
+  const rawQuestions = Array.isArray(input?.['questions']) ? input['questions'] : []
+  const answers = questionAnswerMap(tool.output)
+  const questions = rawQuestions.slice(0, QUESTION_HISTORY_LIMIT).flatMap((value): TranscriptQuestionItem[] => {
+    if (typeof value !== 'object' || value === null) return []
+    const record = value as Record<string, unknown>
+    if (typeof record['id'] !== 'string' || typeof record['question'] !== 'string') return []
+    const answer = answers.get(record['id'])
+    const secret = record['secret'] === true
+    const summary = secret || answer === undefined ? undefined : [...answer.selected, answer.custom].filter(
+      (item): item is string => typeof item === 'string' && item.length > 0,
+    ).join(', ')
+    return [{
+      id: terminalSafe(record['id']),
+      question: terminalSafe(record['question']),
+      ...typeof record['header'] === 'string' ? { header: terminalSafe(record['header']) } : {},
+      ...summary === undefined || summary === '' ? {} : { answer: terminalSafe(summary) },
+      secret,
+    }]
+  })
+  const failure = `${tool.errorCode ?? ''} ${tool.output ?? ''}`.toLocaleLowerCase()
+  const status: TranscriptQuestionNode['status'] = tool.state === 'cancelled' || failure.includes('abort')
+    ? 'interrupted'
+    : tool.state === 'error' && failure.includes('cancel') ? 'cancelled'
+      : tool.state === 'error' && failure.includes('declin') ? 'declined'
+        : tool.state === 'error' ? 'error'
+          : questions.length > 0 && questions.every(question => question.answer === undefined && !question.secret)
+            ? 'unsubmitted'
+            : 'answered'
+  return Object.freeze({
+    kind: 'question', key: `question:${tool.callId}`, callId: tool.callId,
+    ...tool.turn === undefined ? {} : { turn: tool.turn },
+    status,
+    questions: Object.freeze(questions),
+    omitted: Math.max(0, rawQuestions.length - questions.length),
+  })
+}
+
+function projectQuestionHistory(nodes: readonly TranscriptNode[]): TranscriptNode[] {
+  return nodes.flatMap((node): TranscriptNode[] => {
+    if (node.kind === 'tool') return [questionHistoryNode(node) ?? node]
+    if (node.kind !== 'tool-group') return [node]
+    const questions = node.tools.flatMap((tool) => {
+      const history = questionHistoryNode(tool)
+      return history === undefined ? [] : [history]
+    })
+    if (questions.length === 0) return [node]
+    const tools = node.tools.filter(tool => questionHistoryNode(tool) === undefined)
+    return [...tools.length === 0 ? [] : [{ ...node, tools }], ...questions]
+  })
 }
 
 function presentCall(name: string, args: unknown, resolveTool?: ToolDefinitionResolver): ToolCallView {
@@ -483,6 +660,8 @@ class TranscriptFoldState {
   private readonly compactionBySummarySeq = new Map<number, TranscriptCompactionNode>()
   private explorationGroups = new Map<string, TranscriptToolGroupNode>()
   private toolActivities = new Map<string, TranscriptToolActivityNode>()
+  private activeTurnEvents: SessionEvent[] | undefined
+  private currentTurn: number | undefined
   private projected: readonly TranscriptNode[] = Object.freeze([])
   private dirty = false
 
@@ -589,11 +768,14 @@ class TranscriptFoldState {
   append(event: TuiTranscriptEvent): void {
     this.dirty = true
     if (event.type === 'turn/start') {
+      this.activeTurnEvents = [event]
+      this.currentTurn = event.data.turn
       if (this.todoNode !== undefined) this.removeRaw(this.todoNode)
       this.todoNode = undefined
       this.latestTodoCallId = undefined
       return
     }
+    if (this.activeTurnEvents !== undefined) this.activeTurnEvents.push(event as SessionEvent)
     if (event.type === 'compaction/start') {
       const node = this.compactionNode(String(event.data.compactionId))
       this.replaceCompaction(node, {}, event.data.sourceCommandId)
@@ -654,8 +836,8 @@ class TranscriptFoldState {
         type: 'user/message', seq: event.seq, text: '',
       })
       this.pushRaw(rendered === undefined
-        ? { kind: 'text', key: `event:${event.seq}`, tone: 'user', label: 'You', text: contentText(event.data.content) }
-        : { kind: 'text', key: `event:${event.seq}`, ...rendered })
+        ? { kind: 'text', key: `event:${event.seq}`, tone: 'user', label: 'You', text: contentText(event.data.content), turn: this.currentTurn }
+        : { kind: 'text', key: `event:${event.seq}`, ...rendered, turn: this.currentTurn })
       return
     }
     if (event.type === 'assistant/chunk') {
@@ -839,6 +1021,11 @@ class TranscriptFoldState {
           items: deliverables.items, omitted: deliverables.omitted,
         })
       }
+      const usage = this.activeTurnEvents === undefined ? undefined : deriveTurnTokenUsage(this.activeTurnEvents)
+      this.activeTurnEvents = undefined
+      if (usage !== undefined) {
+        this.pushRaw({ kind: 'turn-usage', key: `turn-usage:${event.data.turn}`, turn: event.data.turn, usage })
+      }
       const reason = event.data.reason
       if (reason.kind === 'error') {
         for (const tool of [...this.toolNodes.values()]) {
@@ -848,11 +1035,15 @@ class TranscriptFoldState {
         }
         this.pushRaw({
           kind: 'text', key: `event:${event.seq}`, tone: 'error', label: 'Error',
-          text: terminalSafe(`${reason.error.code}: ${reason.error.message}`),
+          text: terminalSafe(`${reason.error.code}: ${reason.error.message}`), turn: event.data.turn,
         })
       } else if (reason.kind !== 'completed') {
-        this.pushRaw({ kind: 'text', key: `event:${event.seq}`, tone: 'status', label: 'Turn', text: terminalSafe(reason.kind) })
+        this.pushRaw({
+          kind: 'text', key: `event:${event.seq}`, tone: 'status', label: 'Turn',
+          text: terminalSafe(reason.kind), turn: event.data.turn,
+        })
       }
+      this.currentTurn = undefined
       return
     }
     if (event.type === 'command/done') {
@@ -872,7 +1063,7 @@ class TranscriptFoldState {
     const nonEmpty = this.nodes.filter(node => node.kind !== 'text' || node.text !== '')
     const retained = new Map<string, TranscriptToolGroupNode>()
     const exploration = groupExploration(
-      suppressCompletedTodoCalls(nonEmpty, this.todoCallsWithSnapshots),
+      projectQuestionHistory(suppressCompletedTodoCalls(nonEmpty, this.todoCallsWithSnapshots)),
       this.explorationGroups,
       retained,
     )
