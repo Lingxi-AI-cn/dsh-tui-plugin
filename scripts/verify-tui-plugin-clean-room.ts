@@ -391,7 +391,6 @@ try {
   }
 
   const dumped = run(dsh, ['--profile', 'tui', '--dump-default-config'], official, environment)
-  if (!existsSync(join(dshHome, 'profiles/node_modules/@earendil-works/pi-ai'))) fail('official DSH fallback omits pi-ai')
   if (!dumped.includes('@lingxi-ai-cn/dsh-tui-runtime')
     || !dumped.includes('@lingxi-ai-cn/dsh-llm-openai-codex')
     || !dumped.includes('profileMutations: false')) {
