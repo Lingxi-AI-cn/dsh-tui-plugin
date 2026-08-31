@@ -17,6 +17,16 @@ const packageDirectories = [
   'packages/bundle/tui-app',
 ]
 
+// Release archives must never inherit declarations or bundles left behind by
+// an earlier source layout.  A regular incremental build can consider its
+// tsbuildinfo current even after an obsolete file remains in lib/, so clear the
+// exported package outputs and force TypeScript to emit them again before pack.
+for (const directory of packageDirectories) {
+  rmSync(join(root, directory, 'lib'), { recursive: true, force: true })
+}
+execFileSync('pnpm', ['exec', 'tsc', '-b', '--force'], { cwd: root, stdio: 'inherit' })
+execFileSync('pnpm', ['exec', 'tsdown'], { cwd: root, stdio: 'inherit' })
+
 rmSync(artifacts, { recursive: true, force: true })
 mkdirSync(artifacts, { recursive: true })
 const releases = []
