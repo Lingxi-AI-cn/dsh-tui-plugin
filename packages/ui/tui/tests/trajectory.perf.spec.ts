@@ -2,7 +2,7 @@
 
 import { performance } from 'node:perf_hooks'
 import { describe, expect, it } from 'vitest'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   projectTuiTrajectory, reconcileTuiTrajectorySelection,
   TuiTrajectoryProjectionCache, visibleTuiTrajectoryEntries,
@@ -11,7 +11,7 @@ import {
 function turnEvents(count: number): readonly SessionEvent[] {
   return Array.from({ length: count }, (_, index) => ({
     type: 'turn/start' as const,
-    seq: index + 1,
+    seq: SessionSeq(index + 1),
     time: index,
     data: { turn: index + 1 },
   }))
@@ -48,7 +48,7 @@ describe('native TUI trajectory large-ledger budget', () => {
 
     const appendedEvent = {
       type: 'turn/start' as const,
-      seq: 100_001,
+      seq: SessionSeq(100_001),
       time: 100_000,
       data: { turn: 100_001 },
     } as SessionEvent

@@ -31,9 +31,11 @@ import {
   MessageId,
   resolveSessionForkAnchor,
   resolveSessionPreset,
+  queueHostSubagentPrompt,
   sessionUsesLegacyCodePreset,
   SESSION_FORMAT_VERSION,
   SessionId,
+  SessionLogOffset,
   TuiHostCommandCatalog,
   z,
   type Agent,
@@ -548,7 +550,7 @@ class TuiController {
         return
       }
       this.handle = handle
-      this.events = new SessionEventStore(handle.agent.session.events)
+      this.events = new SessionEventStore(handle.agent.session.snapshotEvents())
       this.status = new AgentStatusStore(handle.agent.status)
       this.selection = prepared.selection
       this.modelSelection.set(prepared.selectedModel)
@@ -1061,9 +1063,12 @@ class TuiController {
       const session = agentCtx.agent?.session
       if (session === undefined) throw new Error('TUI Agent setup cannot resolve its unpublished Session')
       const presetId = request.kind === 'resume'
-        ? this.assertResumeCompatible(session.header, session.events)
+        ? this.assertResumeCompatible(session.header, session.snapshotEvents())
         : resolvedPreset?.id
-      migration.legacyPreset = request.kind === 'resume' && sessionUsesLegacyCodePreset(session)
+      migration.legacyPreset = request.kind === 'resume' && sessionUsesLegacyCodePreset({
+        header: session.header,
+        events: session.snapshotEvents(),
+      })
       if (presetId === undefined) throw new Error('TUI Agent setup has no resolved Agent preset')
       const logged = session.requestHeader()?.config
       if (logged !== undefined) {
@@ -1073,7 +1078,7 @@ class TuiController {
           ...logged.reasoningEffort === undefined ? {} : { reasoningEffort: logged.reasoningEffort },
         }
       } else if (request.kind === 'resume') {
-        const route = resumeRoute(session.events)
+        const route = resumeRoute(session.snapshotEvents())
         if (route !== undefined) selected.current = route
       }
       installModelSelection(agentCtx, selected)
@@ -1099,9 +1104,11 @@ class TuiController {
               cwd: request.cwd,
               agentPreset: resolvedPreset.id,
               parentSession: request.parentSession,
-              seedLength: request.seed.length,
+              isSeeded: true,
             },
-        ...request.kind === 'rewind' ? { seed: request.seed } : {},
+        ...request.kind === 'rewind'
+          ? { seed: request.seed, inheritedEventCount: SessionLogOffset(request.seed.length) }
+          : {},
         agentOptions: { provider: defaultSelection.provider, model: defaultSelection.model },
         setup,
         ...signal === undefined ? {} : { signal },
@@ -1723,7 +1730,7 @@ class TuiController {
           acceptsInput: true,
         }),
         agent: child,
-        events: new SessionEventStore(child.session.events),
+        events: new SessionEventStore(child.session.snapshotEvents()),
         status: new AgentStatusStore(child.status),
       }
       try {
@@ -3071,7 +3078,10 @@ class TuiController {
       return { kind: 'error', text: tuiMessage(this.locale, 'plugin.command.dialog') }
     }
     const presets = hostAgentPresets(this.ctx)
-    const currentId = resolveSessionPreset(invocation.agent.session)
+    const currentId = resolveSessionPreset({
+      header: invocation.agent.session.header,
+      events: invocation.agent.session.snapshotEvents(),
+    })
       ?? presets.composedPreset(invocation.agent.ctx)
     if (currentId === undefined) throw new Error('The active TUI Agent has no composed preset')
     const roster = tuiAgentModeOptions(await presets.list(), currentId, this.locale)
@@ -3098,7 +3108,7 @@ class TuiController {
     if (selected.preset.id === currentId) {
       return { kind: 'success', text: tuiMessage(this.locale, 'mode.same', { mode: selected.name }) }
     }
-    if (invocation.agent.session.events.some(event => event.type === 'turn/start')) {
+    if (invocation.agent.session.snapshotEvents().some(event => event.type === 'turn/start')) {
       const cwd = invocation.agent.session.header.cwd
       if (cwd === undefined) return { kind: 'error', text: tuiMessage(this.locale, 'session.error.workspace') }
       this.freshSessionDialog.set({
@@ -3467,7 +3477,7 @@ class TuiController {
     this.rewindDialog.set({
       ...dialog,
       phase: 'browsing',
-      candidates: tuiRewindCandidates(agent.session.events),
+      candidates: tuiRewindCandidates(agent.session.snapshotEvents()),
     })
   }
 
@@ -3496,10 +3506,13 @@ class TuiController {
     const detached = this.detachedRewindSource?.id === dialog.currentSessionId
       ? this.detachedRewindSource : undefined
     const sourceId = detached?.id ?? agent.session.id
-    const sourceEvents = detached?.events ?? agent.session.events
+    const sourceEvents = detached?.events ?? agent.session.snapshotEvents()
     const cwd = detached?.cwd ?? agent.session.header.cwd
     const selectedModel = detached?.selection ?? this.selection?.current ?? this.modelSelection.getSnapshot()
-    const preset = detached?.preset ?? resolveSessionPreset(agent.session)
+    const preset = detached?.preset ?? resolveSessionPreset({
+      header: agent.session.header,
+      events: agent.session.snapshotEvents(),
+    })
     if (cwd === undefined || selectedModel === undefined) {
       this.rewindDialog.set({ ...dialog, error: cwd === undefined
         ? tuiMessage(this.locale, 'session.error.workspace')
@@ -4024,7 +4037,7 @@ class TuiController {
   private openTrajectory(): void {
     const root = this.handle?.agent
     if (root === undefined) return
-    const events = root.session.events
+    const events = root.session.snapshotEvents()
     const snapshot = this.trajectoryProjection.update(events, this.trajectoryLimit)
     this.trajectoryStore.set(snapshot)
   }
@@ -4207,7 +4220,7 @@ class TuiController {
     const live = this.ctx.sessions.get(id)
     const source = live === undefined
       ? await this.ctx.sessionQuery.readSession(id)
-      : { session: live.header, events: live.events }
+      : { session: live.header, events: live.snapshotEvents() }
     if (source.session.version !== SESSION_FORMAT_VERSION) throw new Error('the source Session format is incompatible')
     if (source.session.origin === 'subagent') throw new Error('subagent-owned Sessions cannot be forked here')
     const cwd = source.session.cwd
@@ -4349,7 +4362,7 @@ class TuiController {
           const live = this.ctx.sessions.get(record.header.id)
           const session = live === undefined
             ? await this.ctx.sessionQuery.readSession(record.header.id)
-            : { session: live.header, events: live.events }
+            : { session: live.header, events: live.snapshotEvents() }
           signal.throwIfAborted()
           const id = resolveSessionPreset({ header: session.session, events: session.events })
           if (id === undefined) {
@@ -4446,7 +4459,7 @@ class TuiController {
   private async resumeActivityTime(record: SessionRecord, signal: AbortSignal): Promise<number | undefined> {
     signal.throwIfAborted()
     const live = this.ctx.sessions.get(record.header.id)
-    if (live !== undefined) return live.events.at(-1)?.time
+    if (live !== undefined) return live.snapshotEvents().at(-1)?.time
     const location = this.ctx.get('sessionPersistence')?.locate(record.header)
     if (location === undefined) return undefined
     try {
@@ -4518,7 +4531,9 @@ class TuiController {
   ): Promise<string | null | undefined> {
     const live = this.ctx.sessions.get(record.header.id)
     if (live !== undefined) return this.ctx.get('sessionProjections')?.snapshot(live).values.title
-    const cached = cache.cachedSnapshot(record.header)
+    const cached = record.header.isSeeded
+      ? undefined
+      : cache.cachedSnapshot(record.header, SessionLogOffset(0), ['title'])
     if (cached !== undefined && 'title' in cached.values) return cached.values.title
     const observation = await this.ctx.sessionQuery.observeSession(record.header.id, { signal })
     try {
@@ -4701,7 +4716,10 @@ class TuiController {
     if (!this.ownsAgent(oldAgent)) throw new Error('the active TUI Session changed')
     const initialStatus = this.agentStatus(oldAgent)
     if (initialStatus !== 'idle') throw new Error(`current Agent is ${initialStatus}`)
-    const preset = targetPreset?.id ?? resolveSessionPreset(oldAgent.session)
+    const preset = targetPreset?.id ?? resolveSessionPreset({
+      header: oldAgent.session.header,
+      events: oldAgent.session.snapshotEvents(),
+    })
     if (preset === undefined) throw new Error('the current Session has no Agent preset to inherit')
     const prepared = await this.prepareAgent({
       kind: 'fresh', source: 'clear', cwd, selection: selectedModel, preset,
@@ -4768,7 +4786,7 @@ class TuiController {
     if (oldHandle?.agent !== oldAgent || oldEvents === undefined || oldStatus === undefined || this.instance === undefined) {
       throw new Error('TUI Agent switch lost its current owner')
     }
-    const nextEvents = new SessionEventStore(prepared.handle.agent.session.events)
+    const nextEvents = new SessionEventStore(prepared.handle.agent.session.snapshotEvents())
     const nextStatus = new AgentStatusStore(prepared.handle.agent.status)
     this.handle = prepared.handle
     this.events = nextEvents
@@ -5210,11 +5228,13 @@ class TuiController {
       }
     }
     const controller = new AbortController()
-    const completion = this.ctx.subagents.followup(
+    const completion = queueHostSubagentPrompt(
+      this.ctx.subagents,
       parent,
       view.agent.id,
       [{ type: 'text', text }, ...imageBlocks],
-      { source: { kind: 'user' }, signal: controller.signal },
+      { kind: 'user' },
+      controller.signal,
     )
     const operation = { controller, completion }
     this.activeCommand = operation

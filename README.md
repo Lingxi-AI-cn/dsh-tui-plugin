@@ -61,7 +61,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 
 - `/models` discovers configured providers and models, supports provider-owned authentication flows, and selects the exact reasoning effort when available.
 - `/provider` provides a redacted, capability-gated Provider Center for API keys, endpoints, custom providers, model refresh, and provider-owned logout.
-- The bundled OpenAI Codex adapter offers **Sign in with ChatGPT**, stores refreshable OAuth credentials under `$DSH_HOME/oauth/openai-codex.json`, and discovers the signed-in account's current model catalog dynamically.
+- The bundled OpenAI Codex adapter offers **Sign in with ChatGPT**, stores refreshable OAuth grants through the current Host's scoped Credentials owner, and discovers the signed-in account's current model catalog dynamically. `$DSH_HOME/oauth/openai-codex.json` remains only the direct-construction and older-Host fallback.
 - Image prompts use the Host-owned durable attachment service, so dropped screenshots remain available to the Codex request without embedding private filesystem paths in provider state.
 - Approval requests and structured user questions are presented as bounded native dialogs instead of leaking into ordinary transcript state, and their input remains isolated from steer/follow-up delivery while an Agent is running.
 - The actionable footer opens mode, model, permission, work, context, workspace, and transcript details without leaving the current Session.
@@ -109,19 +109,19 @@ The current public TUI release is deliberately pinned to the matching official H
 
 | DSH TUI | DeepSeek Harness | Node.js | Platforms |
 | --- | --- | --- | --- |
-| `0.1.7-alpha.2` | exactly `0.1.2-alpha.2` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
+| `0.1.8-rc.1` | exactly `0.1.2-rc.1` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
 
 Support for a newer Harness version is added only after exact-package clean-room installation, profile composition, PTY startup/exit, and terminal-restoration verification.
 
-The TUI core version advances independently (`0.1.7` here), while the final prerelease suffix (`alpha.2`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
+The TUI core version advances independently (`0.1.8` here), while the final prerelease suffix (`rc.1`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
 
 ## Install
 
 Install the exact supported official Harness, then add DSH TUI to a dedicated `tui` profile:
 
 ```sh
-npm install --global @deepseek-ai/dsh@0.1.2-alpha.2
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.7-alpha.2
+npm install --global @deepseek-ai/dsh@0.1.2-rc.1
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.8-rc.1
 dsh --profile tui
 ```
 
@@ -144,7 +144,7 @@ The canonical profile contains exactly `@deepseek-ai/dsh-base` followed by `@lin
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.7-alpha.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.8-rc.1
 ```
 
 Sessions and credentials live outside the profile directory. Reapply only reviewed custom patches; do not copy the old profile back wholesale.
@@ -164,7 +164,7 @@ Sessions and credentials live outside the profile directory. Reapply only review
 Install the exact TUI version that declares compatibility with the installed official Harness version:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.7-alpha.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.8-rc.1
 ```
 
 Release tags and npm versions are immutable. Do not mix package versions from different release candidates.

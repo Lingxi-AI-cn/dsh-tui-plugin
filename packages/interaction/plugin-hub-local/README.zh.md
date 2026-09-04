@@ -17,7 +17,7 @@ kind: "package-reference"
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 - [开发备注](#dev-note)
 
-`profileMutations` 默认为 `false`。在这种适用于后装插件的安全模式中，Registry 浏览和 active-profile `installed()` 事实仍然可用，修改方法以 `CONTRACT_UNSUPPORTED` 失败，启动 ready 操作则为空操作。已发布 TUI bundle 使用该模式，因为官方 DSH `0.1.2-alpha.2` 在 profile composition 之前没有通用 recovery hook；用户通过 `dsh plugin --profile tui ...` 执行修改。设置 `profileMutations: true` 会启用下文所述的下游 maintenance lifecycle，只供安装了配套 pre-composition recovery hook 的 composition 使用。
+`profileMutations` 默认为 `false`。在这种适用于后装插件的安全模式中，Registry 浏览和 active-profile `installed()` 事实仍然可用，修改方法以 `CONTRACT_UNSUPPORTED` 失败，启动 ready 操作则为空操作。已发布 TUI bundle 使用该模式，因为官方 DSH `0.1.2-rc.1` 在 profile composition 之前没有通用 recovery hook；用户通过 `dsh plugin --profile tui ...` 执行修改。设置 `profileMutations: true` 会启用下文所述的 downstream maintenance lifecycle，只供安装了配套 pre-composition recovery hook 的 composition 使用。
 
 目录 search 会把 provider-neutral 的 `relevance`、`stars`、`updated` 或 `newest` ordering 传给 Registry，将 ordering 纳入 request cache key，并让 signed snapshot fallback 使用相同 ordering 和 cursor binding。Registry 返回 `INVALID_CURSOR` 时会保留为 typed provider error，不会静默从第一页重启。
 

@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-profile-plugin-manager",
   "description": "Host-side profile plugin locks, installed truth, detached plans, and exact local mutations",
-  "version": "0.1.7-alpha.2",
+  "version": "0.1.8-rc.1",
   "publishConfig": {
     "access": "public"
   },
@@ -34,11 +34,11 @@
     "js-yaml": "^4.2.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-app-boot": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-atomic-write": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-invariants": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-native-command": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-output-retention": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-app-boot": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-atomic-write": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-invariants": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-native-command": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-output-retention": "0.1.2-rc.1",
     "@deepseek-ai/cordis": "4.0.2"
   },
   "peerDependenciesMeta": {
@@ -62,11 +62,11 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-app-boot": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-atomic-write": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-invariants": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-native-command": "0.1.2-alpha.2",
-    "@deepseek-ai/dsh-output-retention": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-app-boot": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-atomic-write": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-invariants": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-native-command": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-output-retention": "0.1.2-rc.1",
     "@types/js-yaml": "^4.0.9",
     "@deepseek-ai/cordis": "4.0.2"
   }

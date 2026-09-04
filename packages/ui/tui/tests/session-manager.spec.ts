@@ -15,6 +15,7 @@ function candidate(id: string, cwd: string | undefined, title: string, current =
       version: 0,
       id: SessionId(id),
       createdAt: 100,
+      isSeeded: false,
       ...(cwd === undefined ? {} : { cwd }),
     },
     live: current,

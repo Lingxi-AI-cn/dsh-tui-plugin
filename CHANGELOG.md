@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.8-rc.1
+
+- Aligns the post-install TUI with exact official DeepSeek Harness `0.1.2-rc.1` and its published Host graph.
+- Adopts rc.1 Session snapshots, distinct sequence and log-offset identities, seeded-rewind metadata, and projection-cache inherited-event cuts without restoring mutable Session access.
+- Routes native human prompts to continuable child Agents through the official Host-only queue with durable user provenance, while preserving model-authored Agent messaging on its separate owner.
+- Uses the official rc.1 PTC/Ralph and web-tool composition, and pins the bundled Codex adapter to the compatible `pi-ai@0.84.4` closure.
+- Verifies the exact seven-package payload, official-DSH clean-room composition, PTY startup and exit, and terminal restoration before publication.
+
 ## 0.1.7-alpha.2
 
 - Aligns the post-install TUI with exact official DeepSeek Harness `0.1.2-alpha.2`, including its Authorization, Credentials, settings, projection, preset-composition, Schedule, Session export, Todo, and subagent owners.

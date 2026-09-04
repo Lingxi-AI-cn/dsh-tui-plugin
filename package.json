@@ -1,6 +1,6 @@
 {
   "name": "@lingxi-ai-cn/dsh-tui-plugin-workspace",
-  "version": "0.1.7-alpha.2",
+  "version": "0.1.8-rc.1",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -23,7 +23,7 @@
     "verify": "pnpm run verify:source && pnpm run verify:source-manifest && pnpm run verify:release-payload && pnpm run test && pnpm run build && pnpm run verify:pack"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-base": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-base": "0.1.2-rc.1",
     "@lingxi-ai-cn/dsh-tui": "workspace:*",
     "@types/node": "^22.20.0",
     "tsdown": "^0.22.2",

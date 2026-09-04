@@ -3,8 +3,8 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const tuiVersion = '0.1.7-alpha.2'
-const dshVersion = '0.1.2-alpha.2'
+const tuiVersion = '0.1.8-rc.1'
+const dshVersion = '0.1.2-rc.1'
 const repository = 'git+https://github.com/Lingxi-AI-cn/dsh-tui-plugin.git'
 const packages = [
   'packages/boot/profile-plugin-manager',

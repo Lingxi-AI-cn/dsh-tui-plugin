@@ -9,7 +9,9 @@ import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { createMessage, createToolResultMessage, createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { strFromU8, unzipSync } from 'fflate'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+import {
+  SessionLogOffset, SessionSeq, type SessionEvent, type SessionHeader, type SessionId,
+} from '@deepseek-ai/dsh-session'
 import type { SessionLineageNode } from '@deepseek-ai/dsh-session-query'
 import type { SessionInspection, SessionRawArtifact } from '@deepseek-ai/dsh-session-persistence'
 import SessionLogExporter, {
@@ -32,13 +34,16 @@ function header(id: string, parentSession?: SessionId): SessionHeader {
     id: sid(id),
     createdAt: 1,
     cwd: '/workspace',
+    isSeeded: false,
     delegationDepth: parentSession === undefined ? 0 : 1,
     ...parentSession === undefined ? {} : { parentSession },
   }
 }
 
 function artifact(id: string, content = `${id}\n`, parentSession?: SessionId): SessionRawArtifact {
-  return { meta: header(id, parentSession), filename: 'session.jsonl', content }
+  return {
+    meta: header(id, parentSession), inheritedEventCount: SessionLogOffset(0), filename: 'session.jsonl', content,
+  }
 }
 
 function lineageNode(id: string): SessionLineageNode {
@@ -74,7 +79,9 @@ function contextWithServices(services: Services = {}): Context {
     readRaw: services.readRaw ?? (async (id: SessionId) => id === sid('root')
       ? services.root ?? artifact('root')
       : undefined),
-    inspect: services.inspect ?? (async (id: SessionId) => ({ meta: header(String(id)), events: [] })),
+    inspect: services.inspect ?? (async (id: SessionId) => ({
+      meta: header(String(id)), inheritedEventCount: SessionLogOffset(0), events: [],
+    })),
   } as never)
   ctx.provide('sessionQuery', {
     traceSession: services.traceSession ?? (async () => ({
@@ -106,7 +113,7 @@ function markdownEvents(id: string): SessionEvent[] {
   const callId = ToolCallId(`${id}-call`)
   return [
     {
-      type: 'user/message', seq: 0, time: 100,
+      type: 'user/message', seq: SessionSeq(0), time: 100,
       data: createUserMessage({
         content: [
           { type: 'text', text: 'Please inspect the workspace.' },
@@ -117,7 +124,7 @@ function markdownEvents(id: string): SessionEvent[] {
       surfaceOp: 'append',
     },
     {
-      type: 'assistant/message', seq: 1, time: 110,
+      type: 'assistant/message', seq: SessionSeq(1), time: 110,
       data: {
         turn: 1, step: 1,
         message: createMessage({
@@ -129,11 +136,11 @@ function markdownEvents(id: string): SessionEvent[] {
       surfaceOp: 'append',
     },
     {
-      type: 'tool/call', seq: 2, time: 120,
+      type: 'tool/call', seq: SessionSeq(2), time: 120,
       data: { turn: 1, step: 1, callId, name: 'read_file', arguments: '{"path":"/private/secret.txt","token":"DO_NOT_EXPORT"}' },
     },
     {
-      type: 'tool/result', seq: 3, time: 130,
+      type: 'tool/result', seq: SessionSeq(3), time: 130,
       data: {
         turn: 1, step: 1,
         message: createToolResultMessage({
@@ -305,7 +312,9 @@ describe('SessionLogExporter.writeToDirectory', () => {
 describe('Session Markdown export', () => {
   it('renders human-visible messages and tool summaries without arguments or attachment bytes', async () => {
     const ctx = contextWithServices({
-      inspect: async id => ({ meta: header(String(id)), events: markdownEvents(String(id)) }),
+      inspect: async id => ({
+        meta: header(String(id)), inheritedEventCount: SessionLogOffset(0), events: markdownEvents(String(id)),
+      }),
     })
     const markdown = await renderSessionMarkdown(
       sessionMarkdownExportDeps(ctx),
@@ -330,7 +339,11 @@ describe('Session Markdown export', () => {
     await writeFile(join(directory, 'dsh-session-root.md'), 'existing')
     const childId = sid('child')
     const ctx = contextWithServices({
-      inspect: async id => ({ meta: header(String(id), id === childId ? sid('root') : undefined), events: markdownEvents(String(id)) }),
+      inspect: async id => ({
+        meta: header(String(id), id === childId ? sid('root') : undefined),
+        inheritedEventCount: SessionLogOffset(0),
+        events: markdownEvents(String(id)),
+      }),
       traceSession: async () => ({
         target: { header: header('root'), live: true, persisted: true },
         ancestors: [], complete: true,

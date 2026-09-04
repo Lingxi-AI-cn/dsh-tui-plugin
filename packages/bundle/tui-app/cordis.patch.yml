@@ -1,7 +1,8 @@
 # The post-install native terminal surface over dsh-base. Model-visible rows
 # move behind the official Agent preset roster; Host registries, persistence,
-# providers, and terminal interaction remain process-wide. No HTTP/browser
-# rows are mounted.
+# Web providers, and terminal interaction remain process-wide. No browser
+# Client rows are mounted, and each preset decides whether `tool-web` is
+# model-visible.
 
 - id: system-prompt
   config:
@@ -182,7 +183,7 @@
       name: '@lingxi-ai-cn/dsh-plugin-hub-local'
       config:
         profile: tui
-        # Official alpha.2 has no generic pre-composition recovery hook. Keep the
+        # Official rc.1 has no generic pre-composition recovery hook. Keep the
         # published post-install bundle catalog-only and use `dsh plugin` for
         # profile changes.
         profileMutations: false

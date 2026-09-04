@@ -12,8 +12,8 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.7-alpha.2'
-const DSH_VERSION = '0.1.2-alpha.2'
+const TUI_VERSION = '0.1.8-rc.1'
+const DSH_VERSION = '0.1.2-rc.1'
 const TOP_PACKAGE = '@lingxi-ai-cn/dsh-tui'
 const PACKAGE_DIRS = Object.freeze([
   'packages/boot/profile-plugin-manager',

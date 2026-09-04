@@ -87,12 +87,14 @@ export {
 export {
   SESSION_FORMAT_VERSION,
   SessionId,
+  SessionLogOffset,
 } from '@deepseek-ai/dsh-session'
 export type { SessionEvent, SessionHeader, SessionId as SessionIdType, TurnEndReason } from '@deepseek-ai/dsh-session'
 export type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 export type { TodoItem } from '@deepseek-ai/dsh-tool-todo'
 export type { SessionProjectionCache } from '@deepseek-ai/dsh-session-projection-cache'
 export type { SessionRecord } from '@deepseek-ai/dsh-session-query'
+export { queueHostSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 export type {
   SettingsDescriptor, SettingsNamespace, SettingsPathOp, SettingsProvider,
 } from '@deepseek-ai/dsh-settings'
@@ -127,7 +129,7 @@ export interface TuiSettingsSectionHooks<T> {
   validate?: (value: T) => void
 }
 
-/** Install one TUI settings section through the alpha.2 owner method. */
+/** Install one TUI settings section through the rc.1 owner method. */
 export function installSettingsSection<T>(
   ctx: HostContext,
   namespace: string,

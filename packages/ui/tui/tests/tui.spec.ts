@@ -14,7 +14,7 @@ import { FsError } from '@deepseek-ai/dsh-fs'
 import {
   ToolCallId, createAssistantMessage, createToolResultMessage, createUserMessage, ReasoningEffortId,
 } from '@deepseek-ai/dsh-llm'
-import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { SessionId, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionRecord } from '@deepseek-ai/dsh-session-query'
 import { SubagentRunId } from '@deepseek-ai/dsh-subagent'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
@@ -87,7 +87,7 @@ function event<T extends SessionEvent['type']>(
   const surfaceOp = type === 'user/message' || type === 'assistant/message' || type === 'tool/result'
     ? { surfaceOp: 'append' as const }
     : {}
-  return { seq, time: seq, type, data, ...surfaceOp } as Extract<SessionEvent, { type: T }>
+  return { seq: SessionSeq(seq), time: seq, type, data, ...surfaceOp } as Extract<SessionEvent, { type: T }>
 }
 
 describe('terminalSafe', () => {
@@ -477,8 +477,8 @@ describe('foldTranscript', () => {
           source: { provider: 'p', model: 'm' },
         }),
       }),
-      surfaceOp: { op: 'replace' as const, start: 0, end: 0 },
-      sourceEventSeqs: [0],
+      surfaceOp: { op: 'replace' as const, start: SessionSeq(0), end: SessionSeq(0) },
+      sourceEventSeqs: [SessionSeq(0)],
     }
     expect(foldTranscript([replacement])).toEqual([])
   })
@@ -494,8 +494,8 @@ describe('foldTranscript', () => {
         content: [{ type: 'text', text: 'Model-only checkpoint' }],
         source: compactCheckpointSource(compactionId, commandId),
       })),
-      surfaceOp: { op: 'replace' as const, start: 0, end: 0 },
-      sourceEventSeqs: [0, 1, 2],
+      surfaceOp: { op: 'replace' as const, start: SessionSeq(0), end: SessionSeq(0) },
+      sourceEventSeqs: [SessionSeq(0), SessionSeq(1), SessionSeq(2)],
     }
     const nodes = foldTranscript([
       original,
@@ -503,13 +503,14 @@ describe('foldTranscript', () => {
       event(2, 'compaction/summary', {
         compactionId, sourceCommandId: commandId,
         summary: [{ type: 'text', text: 'Durable compact summary' }],
-        shadowedRange: { start: 0, end: 0 }, shadowedSeqs: [0], shadowedTokenCount: 240,
+        shadowedRange: { start: SessionSeq(0), end: SessionSeq(0) },
+        shadowedSeqs: [SessionSeq(0)], shadowedTokenCount: 240,
         provider: 'p', model: 'm',
       }),
       checkpoint,
       event(4, 'compaction/end', { compactionId, sourceCommandId: commandId, turn: null }),
       event(5, 'command/done', {
-        commandId, kind: 'success', text: 'Compacted 1 history item.', sourceEventSeq: 2,
+        commandId, kind: 'success', text: 'Compacted 1 history item.', sourceEventSeq: SessionSeq(2),
       }),
     ])
     expect(nodes).toEqual([
@@ -535,7 +536,8 @@ describe('foldTranscript', () => {
       event(1, 'compaction/summary', {
         compactionId: runningId,
         summary: [{ type: 'text', text: 'Summary awaiting close' }],
-        shadowedRange: { start: 4, end: 4 }, shadowedSeqs: [4], shadowedTokenCount: 120,
+        shadowedRange: { start: SessionSeq(4), end: SessionSeq(4) },
+        shadowedSeqs: [SessionSeq(4)], shadowedTokenCount: 120,
         provider: 'p', model: 'm',
       }),
     ])).toEqual([expect.objectContaining({
@@ -2616,8 +2618,8 @@ describe('TUI Session rewind boundaries', () => {
       ...event(3, 'user/message', createUserMessage({
         content: [{ type: 'text', text: 'model-only summary' }], source: { kind: 'user' },
       })),
-      surfaceOp: { op: 'replace' as const, start: 1, end: 1 },
-      sourceEventSeqs: [1],
+      surfaceOp: { op: 'replace' as const, start: SessionSeq(1), end: SessionSeq(1) },
+      sourceEventSeqs: [SessionSeq(1)],
     }
     const plugin = createUserMessage({
       content: [{ type: 'text', text: 'plugin context' }], source: { kind: 'plugin', plugin: 'test' },
@@ -2671,6 +2673,7 @@ describe('TUI Session resume picker', () => {
         delegationDepth: 0,
         ...omitCwd === true ? {} : { cwd: '/workspace/current' },
         ...header,
+        isSeeded: header.isSeeded ?? false,
       },
       live,
       persisted,

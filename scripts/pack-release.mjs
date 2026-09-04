@@ -52,7 +52,7 @@ for (const directory of packageDirectories) {
 }
 writeFileSync(join(artifacts, 'release-manifest.json'), `${JSON.stringify({
   format: 1,
-  deepSeekHarness: '0.1.2-alpha.2',
+  deepSeekHarness: '0.1.2-rc.1',
   packages: releases,
 }, null, 2)}\n`)
 writeFileSync(join(artifacts, 'SHA512SUMS'), `${releases.map(entry => `${entry.sha512}  ${entry.file}`).join('\n')}\n`)
