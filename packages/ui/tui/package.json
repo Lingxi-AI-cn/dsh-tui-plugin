@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-tui-runtime",
   "description": "Native terminal UI for one in-process DeepSeek Harness Agent and Session",
-  "version": "0.1.8-rc.1",
+  "version": "0.1.9-rc.1",
   "publishConfig": {
     "access": "public"
   },
@@ -273,6 +273,7 @@
     "@deepseek-ai/dsh-workspace": "0.1.2-rc.1",
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/schemastery": "3.18.2",
-    "@types/react": "~18.3.1"
+    "@types/react": "~18.3.1",
+    "@deepseek-ai/dsh-settings-file": "0.1.2-rc.1"
   }
 }

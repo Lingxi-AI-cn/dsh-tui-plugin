@@ -24,7 +24,7 @@ The post-install native terminal bundle over the official [`dsh-base`](../base/R
 Install the exact TUI release into a profile owned by an already installed matching DSH release, then launch that profile through the existing `dsh` binary:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.8-rc.1
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.9-rc.1
 dsh --profile tui
 ```
 
@@ -33,7 +33,7 @@ This install contract assumes that official DSH initializes a fresh `tui` profil
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.8-rc.1
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.9-rc.1
 ```
 
 Sessions and credentials are stored outside the profile directory and are not removed by this migration. Review and reapply any user-authored profile patch instead of copying the old profile directory back wholesale.

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/llm/llm-openai-codex/README.md
-README.md: b9b3b97f11154034227d00d62de76225b4ed1d84
-README.zh.md: 78a6eb090371c04f4bb7a4a3f4afdd6e1123e73f
+README.md: 06c58906db1cd8c6d76e4049cf644d7e61741acb
+README.zh.md: aa070c0083f5a7f4d6f33c1a85523b133a8f3cdc

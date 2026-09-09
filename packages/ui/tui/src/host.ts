@@ -73,7 +73,7 @@ export type {
 export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { JobId } from '@deepseek-ai/dsh-jobs'
 export type { JobSnapshot, JobStatus } from '@deepseek-ai/dsh-jobs'
-export { createUserMessage, errorChain, freezeMessage, normalizeApiKey } from '@deepseek-ai/dsh-llm'
+export { createUserMessage, errorChain, freezeMessage, normalizeApiKey, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 export type {
   ContentBlock, LlmConfigurableProvider, LlmDiscoveredModel, LlmModelDiscoveryRequest,
   StreamChunk, TokenUsage, UserMessage,
@@ -501,8 +501,10 @@ function authenticationLlm(host: TuiAuthenticationHost): LlmRuntime {
 function authorizationEntry(host: HostContext, provider: string) {
   const authorization = host.get('authorization')
   if (authorization === undefined) return undefined
-  const matches = authorization.list().filter(entry => credentialKeyId(entry.key) === provider)
-  return matches.find(entry => credentialKeyScope(entry.key) === 'llm-openai-codex') ?? matches[0]
+  // The enhanced route retains its legacy scoped credential address.
+  return authorization.list().find(entry => provider === 'lingxi-openai-codex'
+    ? credentialKeyScope(entry.key) === 'llm-openai-codex' && credentialKeyId(entry.key) === 'openai-codex'
+    : credentialKeyScope(entry.key) !== 'llm-openai-codex' && credentialKeyId(entry.key) === provider)
 }
 
 /**

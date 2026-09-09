@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-profile-plugin-manager",
   "description": "Host-side profile plugin locks, installed truth, detached plans, and exact local mutations",
-  "version": "0.1.8-rc.1",
+  "version": "0.1.9-rc.1",
   "publishConfig": {
     "access": "public"
   },

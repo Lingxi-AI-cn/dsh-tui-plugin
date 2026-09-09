@@ -81,14 +81,14 @@ describe('optional Host compatibility', () => {
       },
     } as never
 
-    await expect(hostAuthentication(host, 'openai-codex')).resolves.toEqual({
+    await expect(hostAuthentication(host, 'lingxi-openai-codex')).resolves.toEqual({
       configured: true,
       source: 'grant',
       methods: [{ id: 'oauth', name: 'Sign in with ChatGPT' }],
       canLogout: true,
     })
     expect(describeRecord).toHaveBeenCalledWith(privateKey)
-    await expect(hostLogin(host, 'openai-codex', 'oauth', { prompt, notify })).resolves.toBe('authorized')
+    await expect(hostLogin(host, 'lingxi-openai-codex', 'oauth', { prompt, notify })).resolves.toBe('authorized')
     expect(begin).toHaveBeenCalledWith(expect.objectContaining({ key: privateKey, method: 'oauth' }))
     expect(notify).toHaveBeenCalledWith({
       type: 'device-code', verificationUri: 'https://example.test/device', userCode: 'ABCD',
@@ -96,8 +96,15 @@ describe('optional Host compatibility', () => {
     expect(prompt).toHaveBeenCalledWith({
       type: 'select', message: 'Choose', options: [{ id: 'browser', label: 'Browser' }],
     })
-    await hostLogout(host, 'openai-codex')
+    await hostLogout(host, 'lingxi-openai-codex')
     expect(deleteRecord).toHaveBeenCalledWith(privateKey)
+    await expect(hostAuthentication(host, 'openai-codex')).resolves.toMatchObject({
+      configured: false, methods: [{ id: 'oauth', name: 'Upstream OAuth' }],
+    })
+    await hostLogin(host, 'openai-codex', 'oauth', { prompt, notify })
+    expect(begin).toHaveBeenLastCalledWith(expect.objectContaining({ key: upstreamKey }))
+    await hostLogout(host, 'openai-codex')
+    expect(deleteRecord).toHaveBeenLastCalledWith(upstreamKey)
   })
 
   it('normalizes official rc.8 Session reference timestamps and treats preflight as optional', async () => {

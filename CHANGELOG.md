@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.9-rc.1
+
+- Keeps exact compatibility with official DeepSeek Harness `0.1.2-rc.1` across all seven packages.
+- Registers the enhanced ChatGPT adapter as `lingxi-openai-codex` so it can coexist with the official `openai-codex` route; existing enhanced OAuth grants remain under their original credential scope.
+- Stores new TUI model selections in `tui.defaultModel`, leaving the shared Agent default unchanged. Existing defaults and Session selections are not migrated automatically; see the upgrade instructions.
+- Isolates concurrent Codex WebSocket cache entries and releases adapter-owned streams and connections on disposal.
+- Restores the terminal and requests application exit before asynchronous TUI cleanup; startup catalog cancellation and Agent cleanup no longer wait on unrelated background reads.
+- The plugin does not replace the official CLI shutdown controller. A remaining remote-socket close-handshake delay on official DSH is outside this package release.
+
 ## 0.1.8-rc.1
 
 - Aligns the post-install TUI with exact official DeepSeek Harness `0.1.2-rc.1` and its published Host graph.

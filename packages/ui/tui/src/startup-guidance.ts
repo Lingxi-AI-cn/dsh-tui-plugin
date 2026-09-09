@@ -41,11 +41,27 @@ export interface TuiStartupProviderInspector {
   listModels(provider: string): Promise<readonly unknown[]>
 }
 
+/** Stop waiting for a Host read even when that Host has no cancellation parameter. */
+async function cancellableRead<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted()
+  if (signal === undefined) return read()
+  let abort: () => void = () => {}
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => { reject(signal.reason instanceof Error ? signal.reason : new Error('Startup guidance cancelled', { cause: signal.reason })) }
+    signal.addEventListener('abort', abort, { once: true })
+  })
+  try {
+    return await Promise.race([read(), cancelled])
+  } finally {
+    signal.removeEventListener('abort', abort)
+  }
+}
+
 /**
  * Inspect one selected provider without retaining credentials or raw failures.
  * @param provider - registered provider identity and display name.
  * @param inspector - public authentication and model-catalog reads.
- * @param signal - cancellation checked between provider-owned asynchronous reads.
+ * @param signal - cancellation stops waiting for provider-owned asynchronous reads.
  * @returns configured, unconfigured, or contained-failure state.
  */
 export async function inspectTuiStartupProvider(
@@ -54,7 +70,7 @@ export async function inspectTuiStartupProvider(
   signal?: AbortSignal,
 ): Promise<TuiStartupProviderState> {
   try {
-    const authentication = await inspector.authentication(provider.id)
+    const authentication = await cancellableRead(() => inspector.authentication(provider.id), signal)
     signal?.throwIfAborted()
     if (!authentication.configured) return Object.freeze({
       state: 'unconfigured',
@@ -64,7 +80,7 @@ export async function inspectTuiStartupProvider(
         ? {}
         : { method: authentication.methods[0].name }),
     })
-    const models = await inspector.listModels(provider.id)
+    const models = await cancellableRead(() => inspector.listModels(provider.id), signal)
     signal?.throwIfAborted()
     return Object.freeze({
       state: 'configured', id: provider.id, name: provider.name, modelCount: models.length,

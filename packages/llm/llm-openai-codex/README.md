@@ -1,5 +1,5 @@
 ---
-description: "Provider-owned ChatGPT OAuth, dynamic account model discovery, and streaming for the openai-codex route."
+description: "Provider-owned ChatGPT OAuth, dynamic account model discovery, and streaming for the lingxi-openai-codex route."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Provider-owned ChatGPT OAuth and dynamic account model discovery for the `openai-codex` LLM route. The package reuses pi-ai's OpenAI Codex login, refresh, auth conversion, and streaming implementation while keeping credentials, catalog caching, and the provider-neutral interactive-auth seam owned by DeepSeek Harness.
+Provider-owned ChatGPT OAuth and dynamic account model discovery for the `lingxi-openai-codex` LLM route. The package reuses pi-ai's OpenAI Codex login, refresh, auth conversion, and streaming implementation while keeping credentials, catalog caching, and the provider-neutral interactive-auth seam owned by DeepSeek Harness.
 
 ## Table of Contents
 
@@ -42,9 +42,13 @@ The public TUI bundle mounts this route without signing a user in. On current Ho
 
 ## Dynamic model catalog
 
-Each authenticated `listModels('openai-codex')` call queries `https://chatgpt.com/backend-api/codex/models` with the account access token, account id, and compatibility headers, retains rows whose `visibility` is `list`, sorts by account priority, and maps advertised context, input modalities, and supported reasoning levels into the LLM seam. An unknown model resolution also refreshes once before returning `UNKNOWN_MODEL`.
+Each authenticated `listModels('lingxi-openai-codex')` call queries `https://chatgpt.com/backend-api/codex/models` with the account access token, account id, and compatibility headers, retains rows whose `visibility` is `list`, sorts by account priority, and maps advertised context, input modalities, and supported reasoning levels into the LLM seam. An unknown model resolution also refreshes once before returning `UNKNOWN_MODEL`.
 
 This URL and response shape are implementation compatibility facts observed in the current Codex clients and the referenced `pa_mac` implementation; they are **not** a public OpenAI API contract. OpenAI's public product documentation confirms ChatGPT sign-in and interactive model selection, but does not document this catalog endpoint. The adapter therefore validates an untrusted bounded response, retries exactly once after a 401 credential refresh, writes only validated data, and retains its last-good cache or pi-ai baseline on discovery failure.
+
+The public route is `lingxi-openai-codex`, displayed as **ChatGPT Codex（Lingxi 增强）**. It can coexist with the official `openai-codex` route. pi-ai calls retain the internal `openai-codex` identity; the enhanced grant remains at `llm-openai-codex/openai-codex` and never aliases the official `llm-pi-ai/openai-codex` grant. Persisted Session selections are not rewritten; choose the enhanced route explicitly for new calls.
+
+Concurrent requests in one Session reserve distinct adapter-owned WebSocket cache keys; serial requests reuse an idle key. Adapter disposal aborts active streams, awaits their completion, and closes only its own cached connections.
 
 ## Credential safety
 

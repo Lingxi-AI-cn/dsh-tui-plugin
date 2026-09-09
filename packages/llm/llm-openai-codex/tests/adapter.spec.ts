@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DynamicCodexProvider } from '../src/catalog.ts'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import {
@@ -14,6 +15,7 @@ import {
 const roots: string[] = []
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
@@ -50,22 +52,22 @@ describe('OpenAICodexAdapter', () => {
     }] }), { status: 200 })))
     const adapter = new OpenAICodexAdapter(spec, fetchImpl)
 
-    expect(await adapter.authentication('openai-codex')).toEqual({
+    expect(await adapter.authentication('lingxi-openai-codex')).toEqual({
       configured: true,
       source: 'OAuth',
       methods: [{ id: 'oauth', name: 'Sign in with ChatGPT' }],
       canLogout: true,
     })
-    expect(await adapter.listModels('openai-codex')).toEqual([{
-      provider: 'openai-codex', id: 'gpt-account', name: 'GPT Account',
+    expect(await adapter.listModels('lingxi-openai-codex')).toEqual([{
+      provider: 'lingxi-openai-codex', id: 'gpt-account', name: 'GPT Account',
       inputModalities: ['text'], description: 'Account-visible model',
     }])
-    expect(await adapter.resolveModel('openai-codex', 'gpt-account')).toMatchObject({
-      provider: 'openai-codex', id: 'gpt-account', context: { contextWindow: 123_456 },
+    expect(await adapter.resolveModel('lingxi-openai-codex', 'gpt-account')).toMatchObject({
+      provider: 'lingxi-openai-codex', id: 'gpt-account', context: { contextWindow: 123_456 },
     })
     expect(fetchImpl).toHaveBeenCalled()
-    await adapter.logout('openai-codex')
-    expect(await adapter.authentication('openai-codex')).toMatchObject({ configured: false })
+    await adapter.logout('lingxi-openai-codex')
+    expect(await adapter.authentication('lingxi-openai-codex')).toMatchObject({ configured: false })
   })
 
   it('resolves durable image attachments at request time', async () => {
@@ -83,7 +85,7 @@ describe('OpenAICodexAdapter', () => {
     const adapter = new OpenAICodexAdapter(spec, fetchImpl, undefined, resolveAttachments)
     const drain = async (): Promise<void> => {
       for await (const _chunk of adapter.stream({
-        provider: 'openai-codex',
+        provider: 'lingxi-openai-codex',
         model: 'gpt-image',
         messages: [createUserMessage({
           content: [{
@@ -105,6 +107,31 @@ describe('OpenAICodexAdapter', () => {
     expect(resolveAttachments).toHaveBeenCalledOnce()
   })
 
+  it('maps direct and prepared streams to pi-ai without accepting the official route', async () => {
+    const spec = resolveSpec({ dshHome: await home() })
+    const credentials = new FileCredentialStore(spec.credentialsPath)
+    await credentials.modify('openai-codex', async () => ({
+      type: 'oauth', access: 'access', refresh: 'refresh', expires: Date.now() + 3600_000, accountId: 'acct',
+    }))
+    const adapter = new OpenAICodexAdapter(spec, async () => new Response(JSON.stringify({ models: [{
+      slug: 'gpt-account', visibility: 'list',
+    }] })))
+    const reached = new Error('mock provider transport')
+    const transport = vi.spyOn(DynamicCodexProvider.prototype, 'streamSimple').mockImplementation(() => { throw reached })
+    const options = { provider: 'lingxi-openai-codex', model: 'gpt-account', messages: [] }
+    const drain = async (stream: AsyncIterable<unknown>) => { for await (const _chunk of stream) { /* drain */ } }
+    await drain(adapter.stream(options))
+    const prepared = await adapter.prepareCall(options.provider, options.model)
+    expect(prepared.model.provider).toBe('lingxi-openai-codex')
+    await drain(prepared.stream(options))
+    expect(transport).toHaveBeenCalledTimes(2)
+    for (const [model] of transport.mock.calls) expect(model).toMatchObject({ provider: 'openai-codex', id: 'gpt-account' })
+    await expect(adapter.listModels('openai-codex')).rejects.toMatchObject({ code: 'NO_ADAPTER' })
+    await expect(adapter.prepareCall('openai-codex', 'gpt-account')).rejects.toMatchObject({ code: 'NO_ADAPTER' })
+    await expect(adapter.logout('openai-codex')).rejects.toMatchObject({ code: 'AUTH_UNSUPPORTED' })
+    expect(await credentials.read('openai-codex')).toBeDefined()
+  })
+
   it('bridges authentication on official rc8 without overriding a newer Host', async () => {
     const adapter = new OpenAICodexAdapter(resolveSpec({ dshHome: await home() }))
     const legacyHost: {
@@ -114,7 +141,7 @@ describe('OpenAICodexAdapter', () => {
     } = {}
     const dispose = installOpenAICodexRc8AuthenticationBridge(legacyHost, adapter)
 
-    await expect(legacyHost.authentication?.('openai-codex')).resolves.toMatchObject({
+    await expect(legacyHost.authentication?.('lingxi-openai-codex')).resolves.toMatchObject({
       configured: false,
       methods: [{ id: 'oauth', name: 'Sign in with ChatGPT' }],
       canLogout: true,

@@ -1,5 +1,5 @@
 ---
-description: "为 openai-codex 路由提供 provider-owned ChatGPT OAuth、动态账户模型发现与流式调用。"
+description: "为 lingxi-openai-codex 路由提供 provider-owned ChatGPT OAuth、动态账户模型发现与流式调用。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-为 `openai-codex` LLM 路由提供由提供方拥有的 ChatGPT OAuth 与动态账户模型发现。本包复用 pi-ai 的 OpenAI Codex 登录、刷新、认证转换和流式实现，同时让 DeepSeek Harness 继续拥有凭据、目录缓存与 provider-neutral 交互认证 seam。
+为 `lingxi-openai-codex` LLM 路由提供由提供方拥有的 ChatGPT OAuth 与动态账户模型发现。本包复用 pi-ai 的 OpenAI Codex 登录、刷新、认证转换和流式实现，同时让 DeepSeek Harness 继续拥有凭据、目录缓存与 provider-neutral 交互认证 seam。
 
 ## 目录
 
@@ -44,9 +44,13 @@ kind: "package-reference"
 <a id="dynamic-model-catalog"></a>
 ## 动态模型目录
 
-每次已认证的 `listModels('openai-codex')` 调用都会带账户 access token、account id 与兼容性 header 查询 `https://chatgpt.com/backend-api/codex/models`，保留 `visibility` 为 `list` 的行，按账户优先级排序，再把目录公布的 context、输入模态与推理级别映射到 LLM seam。解析未知模型时，也会在返回 `UNKNOWN_MODEL` 前刷新一次。
+每次已认证的 `listModels('lingxi-openai-codex')` 调用都会带账户 access token、account id 与兼容性 header 查询 `https://chatgpt.com/backend-api/codex/models`，保留 `visibility` 为 `list` 的行，按账户优先级排序，再把目录公布的 context、输入模态与推理级别映射到 LLM seam。解析未知模型时，也会在返回 `UNKNOWN_MODEL` 前刷新一次。
 
 该 URL 与响应形状是从当前 Codex client 及所参考 `pa_mac` 实现中观察到的**实现兼容性事实**，并非 OpenAI 公共 API 契约。OpenAI 的公开产品文档确认 ChatGPT 登录与交互式模型选择，但没有记录这个目录端点。因此适配器会验证有大小上限的不受信任响应；遇到 401 时只刷新一次凭据并重试；只写入验证后的数据；发现失败时保留 last-good 缓存或 pi-ai baseline。
+
+公开路由为 `lingxi-openai-codex`，显示名称为 **ChatGPT Codex（Lingxi 增强）**，可与官方 `openai-codex` 路由共存。pi-ai 调用保留内部 `openai-codex` 身份；增强版 grant 仍位于 `llm-openai-codex/openai-codex`，不会映射到官方的 `llm-pi-ai/openai-codex` grant。已持久化的 Session 选择不会被重写；新调用需显式选择增强路由。
+
+同一 Session 的并发请求会保留不同的 adapter 自有 WebSocket 缓存键；串行请求复用空闲键。adapter 处置会取消活动 stream、等待其完成，并只关闭自身缓存的连接。
 
 <a id="credential-safety"></a>
 ## 凭据安全

@@ -12,6 +12,7 @@ import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-code
 import type {
   GenerateOptions,
   LlmModelInfo,
+  PreparedAdapterCall,
   LlmResolvedModelInfo,
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
@@ -25,6 +26,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { access } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { CodexCatalog, DynamicCodexProvider, OPENAI_CODEX_PROVIDER } from './catalog.ts'
@@ -33,6 +35,16 @@ import {
 } from './credential-store.ts'
 
 export const name = 'llm-openai-codex'
+
+/** Public Harness route; pi-ai and persisted credentials retain their original identity. */
+export const LINGXI_OPENAI_CODEX_PROVIDER = 'lingxi-openai-codex'
+
+function internalProvider(provider: string): string {
+  if (provider !== LINGXI_OPENAI_CODEX_PROVIDER) {
+    throw new LlmError(`Codex adapter does not own provider "${provider}"`, 'NO_ADAPTER')
+  }
+  return OPENAI_CODEX_PROVIDER
+}
 export const inject = ['llm', 'credentials']
 
 /** Default idle interval while one Codex stream read is outstanding. */
@@ -244,7 +256,7 @@ export class OpenAICodexAdapter extends PiAiAdapter {
     collection.setProvider(provider)
     const profile: ResolvedPiAiProviderProfile = Object.freeze({
       provider: OPENAI_CODEX_PROVIDER,
-      displayName: OPENAI_CODEX_PROVIDER,
+      displayName: 'ChatGPT Codex（Lingxi 增强）',
       streamIdleTimeoutMs: spec.streamIdleTimeoutMs,
       maxRequestImageBytes: spec.maxRequestImageBytes,
       requestImagePixelBudget: DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET,
@@ -277,8 +289,8 @@ export class OpenAICodexAdapter extends PiAiAdapter {
   }
 
   async authentication(provider: string): Promise<OpenAICodexAuthenticationInfo> {
-    if (provider !== OPENAI_CODEX_PROVIDER) return { configured: true, methods: [] }
-    const check = await this.collection.checkAuth(provider)
+    if (provider !== LINGXI_OPENAI_CODEX_PROVIDER) return { configured: true, methods: [] }
+    const check = await this.collection.checkAuth(OPENAI_CODEX_PROVIDER)
     return {
       configured: check !== undefined,
       ...check?.source === undefined ? {} : { source: check.source },
@@ -288,10 +300,10 @@ export class OpenAICodexAdapter extends PiAiAdapter {
   }
 
   async login(provider: string, method: string, interaction: OpenAICodexAuthenticationInteraction): Promise<void> {
-    if (provider !== OPENAI_CODEX_PROVIDER || method !== 'oauth') {
+    if (provider !== LINGXI_OPENAI_CODEX_PROVIDER || method !== 'oauth') {
       throw new LlmError(`provider "${provider}" offers no authentication method "${method}"`, 'AUTH_UNSUPPORTED')
     }
-    await this.collection.login(provider, 'oauth', piInteraction(interaction))
+    await this.collection.login(OPENAI_CODEX_PROVIDER, 'oauth', piInteraction(interaction))
     await this.catalog.refresh(true, interaction.signal)
   }
 
@@ -300,7 +312,7 @@ export class OpenAICodexAdapter extends PiAiAdapter {
    * @param session - Host-owned prompt, notice, method, and cancellation session.
    */
   async authorize(session: AuthorizationSession): Promise<void> {
-    await this.login(OPENAI_CODEX_PROVIDER, session.method, {
+    await this.login(LINGXI_OPENAI_CODEX_PROVIDER, session.method, {
       signal: session.signal,
       prompt: prompt => session.prompt(authorizationPrompt(prompt)),
       notify: (event) => { session.notify(authorizationNotice(event)) },
@@ -308,20 +320,20 @@ export class OpenAICodexAdapter extends PiAiAdapter {
   }
 
   async logout(provider: string): Promise<void> {
-    if (provider !== OPENAI_CODEX_PROVIDER) {
+    if (provider !== LINGXI_OPENAI_CODEX_PROVIDER) {
       throw new LlmError(`provider "${provider}" offers no persisted authentication`, 'AUTH_UNSUPPORTED')
     }
-    await this.collection.logout(provider)
+    await this.collection.logout(OPENAI_CODEX_PROVIDER)
   }
 
   override async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
-    if (provider !== OPENAI_CODEX_PROVIDER) return super.listModels(provider)
-    if (await this.collection.checkAuth(provider) === undefined) return []
+    internalProvider(provider)
+    if (await this.collection.checkAuth(OPENAI_CODEX_PROVIDER) === undefined) return []
     await this.catalog.refresh(false)
-    const models = await super.listModels(provider)
+    const models = await super.listModels(internalProvider(provider))
     return models.map((model) => {
       const description = this.catalog.description(model.id)
-      return { ...model, ...description === undefined ? {} : { description } }
+      return { ...model, provider, ...description === undefined ? {} : { description } }
     })
   }
 
@@ -330,19 +342,92 @@ export class OpenAICodexAdapter extends PiAiAdapter {
     model: string,
     signal?: AbortSignal,
   ): Promise<LlmResolvedModelInfo> {
-    if (provider !== OPENAI_CODEX_PROVIDER) return super.resolveModel(provider, model, signal)
+    internalProvider(provider)
     try {
-      return await super.resolveModel(provider, model, signal)
+      return { ...await super.resolveModel(internalProvider(provider), model, signal), provider }
     } catch (error: unknown) {
       if (!(error instanceof LlmError) || error.code !== 'UNKNOWN_MODEL') throw error
       await this.catalog.refresh(true, signal)
-      return super.resolveModel(provider, model, signal)
+      return { ...await super.resolveModel(internalProvider(provider), model, signal), provider }
     }
   }
 
-  override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    if (options.provider === OPENAI_CODEX_PROVIDER) await this.catalog.refresh(false, options.signal)
-    yield* super.stream(options)
+  private readonly transportSlots = new Map<string, string[]>()
+  private readonly busyTransports = new Set<string>()
+  private readonly transportSessions = new Set<string>()
+  private readonly transportAbort = new AbortController()
+  private readonly activeStreams = new Set<Promise<void>>()
+
+  /** Stop owned streams and release only this adapter's cached pi-ai transports. */
+  async dispose(): Promise<void> {
+    this.transportAbort.abort(new Error('Codex adapter disposed'))
+    await Promise.allSettled([...this.activeStreams])
+    if (this.transportSessions.size === 0) return
+    const { closeOpenAICodexWebSocketSessions } = await import('@earendil-works/pi-ai/api/openai-codex-responses')
+    try {
+      for (const sessionId of this.transportSessions) closeOpenAICodexWebSocketSessions(sessionId)
+    } finally {
+      this.transportSessions.clear()
+      this.transportSlots.clear()
+    }
+  }
+
+  private async * streamOwned(
+    options: GenerateOptions,
+    stream: (options: GenerateOptions) => AsyncIterable<StreamChunk>,
+  ): AsyncIterable<StreamChunk> {
+    this.transportAbort.signal.throwIfAborted()
+    const provider = internalProvider(options.provider)
+    const signal = options.signal === undefined ? this.transportAbort.signal
+      : AbortSignal.any([options.signal, this.transportAbort.signal])
+    let sessionId: string | undefined
+    if (options.sessionId !== undefined) {
+      const slots = this.transportSlots.get(options.sessionId) ?? []
+      // pi-ai's cache cannot safely acquire the same not-yet-connected socket
+      // twice. Title generation and the Agent turn may start concurrently.
+      sessionId = slots.find(slot => !this.busyTransports.has(slot))
+      if (sessionId === undefined) {
+        sessionId = `lingxi-codex:${randomUUID()}`
+        slots.push(sessionId)
+        this.transportSlots.set(options.sessionId, slots)
+        this.transportSessions.add(sessionId)
+      }
+      this.busyTransports.add(sessionId)
+    }
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => { finish = resolve })
+    this.activeStreams.add(pending)
+    try {
+      await this.catalog.refresh(false, signal)
+      yield* stream({ ...options, provider, signal,
+        ...sessionId === undefined ? {} : { sessionId: sessionId as NonNullable<GenerateOptions['sessionId']> },
+      })
+    } finally {
+      if (sessionId !== undefined) this.busyTransports.delete(sessionId)
+      this.activeStreams.delete(pending)
+      finish()
+    }
+  }
+
+  override stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    return this.streamOwned(options, mapped => super.stream(mapped))
+  }
+
+  override providerInfo(provider: string) {
+    return { ...super.providerInfo(internalProvider(provider)), id: provider }
+  }
+
+  override providerRetryPolicy(provider: string) {
+    return super.providerRetryPolicy(internalProvider(provider))
+  }
+
+  override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+    await this.resolveModel(provider, model, signal)
+    const prepared = await super.prepareCall(internalProvider(provider), model, signal)
+    return {
+      model: { ...prepared.model, provider },
+      stream: options => this.streamOwned(options, mapped => prepared.stream(mapped)),
+    }
   }
 }
 
@@ -366,7 +451,7 @@ export function installOpenAICodexRc8AuthenticationBridge(
   if (typeof host.authentication === 'function' || typeof host.login === 'function'
     || typeof host.logout === 'function') return undefined
 
-  const authentication = (provider: string): Promise<OpenAICodexAuthenticationInfo> => provider === OPENAI_CODEX_PROVIDER
+  const authentication = (provider: string): Promise<OpenAICodexAuthenticationInfo> => provider === LINGXI_OPENAI_CODEX_PROVIDER
     ? adapter.authentication(provider)
     : Promise.resolve({ configured: true, methods: [] })
   const login = (
@@ -374,7 +459,7 @@ export function installOpenAICodexRc8AuthenticationBridge(
     method: string,
     interaction: OpenAICodexAuthenticationInteraction,
   ): Promise<void> => {
-    if (provider !== OPENAI_CODEX_PROVIDER) {
+    if (provider !== LINGXI_OPENAI_CODEX_PROVIDER) {
       return Promise.reject(new LlmError(
         `provider "${provider}" offers no interactive authentication`,
         'AUTH_UNSUPPORTED',
@@ -383,7 +468,7 @@ export function installOpenAICodexRc8AuthenticationBridge(
     return adapter.login(provider, method, interaction)
   }
   const logout = (provider: string): Promise<void> => {
-    if (provider !== OPENAI_CODEX_PROVIDER) {
+    if (provider !== LINGXI_OPENAI_CODEX_PROVIDER) {
       return Promise.reject(new LlmError(
         `provider "${provider}" offers no persisted authentication`,
         'AUTH_UNSUPPORTED',
@@ -411,11 +496,12 @@ export function apply(ctx: Context, config: Config): void {
     ctx.logger.warn(message)
     if (error !== undefined) ctx.logger.warn(error)
   }, () => ctx.get('attachments'), auth)
-  ctx.llm.registerAdapter([OPENAI_CODEX_PROVIDER], adapter)
+  ctx.llm.registerAdapter([LINGXI_OPENAI_CODEX_PROVIDER], adapter)
+  ctx.effect(() => () => adapter.dispose(), 'llm-openai-codex: owned session transports')
   ctx.inject(['authorization'], (authorized) => {
     authorized.authorization.registerFlow({
       key: openAICodexCredentialKey(OPENAI_CODEX_PROVIDER),
-      label: 'ChatGPT (Codex)',
+      label: 'ChatGPT Codex（Lingxi 增强）',
       methods: [{ id: 'oauth', label: 'Sign in with ChatGPT' }],
       run: session => adapter.authorize(session),
     })

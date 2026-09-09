@@ -109,11 +109,11 @@ The current public TUI release is deliberately pinned to the matching official H
 
 | DSH TUI | DeepSeek Harness | Node.js | Platforms |
 | --- | --- | --- | --- |
-| `0.1.8-rc.1` | exactly `0.1.2-rc.1` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
+| `0.1.9-rc.1` | exactly `0.1.2-rc.1` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
 
 Support for a newer Harness version is added only after exact-package clean-room installation, profile composition, PTY startup/exit, and terminal-restoration verification.
 
-The TUI core version advances independently (`0.1.8` here), while the final prerelease suffix (`rc.1`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
+The TUI core version advances independently (`0.1.9` here), while the final prerelease suffix (`rc.1`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
 
 ## Install
 
@@ -121,7 +121,7 @@ Install the exact supported official Harness, then add DSH TUI to a dedicated `t
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.2-rc.1
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.8-rc.1
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.9-rc.1
 dsh --profile tui
 ```
 
@@ -144,7 +144,7 @@ The canonical profile contains exactly `@deepseek-ai/dsh-base` followed by `@lin
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.8-rc.1
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.9-rc.1
 ```
 
 Sessions and credentials live outside the profile directory. Reapply only reviewed custom patches; do not copy the old profile back wholesale.
@@ -164,10 +164,25 @@ Sessions and credentials live outside the profile directory. Reapply only review
 Install the exact TUI version that declares compatibility with the installed official Harness version:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.8-rc.1
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.9-rc.1
 ```
 
 Release tags and npm versions are immutable. Do not mix package versions from different release candidates.
+
+### Codex route and TUI model defaults
+
+The enhanced account-catalog provider appears as **ChatGPT Codex（Lingxi 增强）** with route `lingxi-openai-codex`. Its existing credentials remain at `llm-openai-codex/openai-codex`, separate from the official route's `llm-pi-ai/openai-codex` grant. Installation does not move or combine these records.
+
+For an upgrade from `0.1.8-rc.1`, use `/models` to choose the enhanced route if the TUI starts normally. If the saved shared default is `openai-codex` and that official route is not enabled, merge the following into `$DSH_HOME/settings.yaml` before launch. Replace the example model with your existing Codex model id, preserve other `tui` settings, and leave `agent-default-model` and credentials unchanged:
+
+```yaml
+tui:
+  defaultModel:
+    provider: lingxi-openai-codex
+    model: gpt-5.6-terra
+```
+
+The package releases its owned connections and restores terminal modes on exit. It does not replace the official DSH CLI; a remote WebSocket close handshake can still delay that CLI's natural process termination after application cleanup.
 
 ## Uninstall
 

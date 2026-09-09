@@ -3,6 +3,7 @@
  * in-process Agent and its durable Session log.
  */
 
+import { requestTuiExit } from './exit.ts'
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { basename, dirname, extname, resolve } from 'node:path'
@@ -585,14 +586,16 @@ class TuiController {
       const pluginHub = this.ctx.get('pluginHub')
       if (pluginHub !== undefined && pluginHub.hasProvider()) await pluginHub.markMaintenanceReady()
       await this.instance.waitUntilExit()
+      this.requestExit(this.requestedExit)
       await this.shutdown()
       if (!this.isOwnerDisposed()) this.ctx.get('appExit')?.(this.requestedExit)
     } catch (error: unknown) {
-      await this.shutdown()
       if (!this.ownerDisposed) {
+        this.terminal.restore()
         terminalInternals.stderr.write(`dsh --profile tui: ${error instanceof Error ? error.message : String(error)}\n`)
-        this.ctx.get('appExit')?.(1)
       }
+      this.requestExit(1)
+      await this.shutdown()
     }
   }
 
@@ -1049,7 +1052,7 @@ class TuiController {
     const resolvedPreset = request.kind === 'resume' ? undefined : await presets.resolve(requestedPreset)
     const configuredSelection = request.kind === 'fresh' || request.kind === 'rewind'
       ? request.selection
-      : defaultModel.currentSelection()
+      : this.settingsSource().defaultModel ?? defaultModel.currentSelection()
     const resolvedDefault = await this.ctx.llm.resolveCallConfig(configuredSelection, signal)
     const defaultSelection: ModelSelection = {
       provider: resolvedDefault.provider,
@@ -5088,7 +5091,7 @@ class TuiController {
           ...resolved.reasoningEffort === undefined ? {} : { reasoningEffort: resolved.reasoningEffort },
         }
         if (this.selection === undefined) throw new Error('TUI model selection is unavailable before Agent setup')
-        await this.ctx.agentDefaultModel.saveSelection(selected)
+        await this.ctx.get('settings')?.update(TUI_SETTINGS_NAMESPACE, { defaultModel: selected })
         invocation.signal.throwIfAborted()
         this.selection.current = selected
         this.modelSelection.set(selected)
@@ -5249,7 +5252,10 @@ class TuiController {
   private requestExit(code: number): void {
     this.requestedExit = Math.max(this.requestedExit, code)
     this.terminal.setInputCursor(undefined)
-    this.instance?.unmount()
+    requestTuiExit(() => {
+      this.instance?.unmount()
+      this.terminal.restore()
+    }, this.ownerDisposed ? undefined : () => { this.ctx.get('appExit')?.(this.requestedExit) })
   }
 
   private isOwnerDisposed(): boolean {
@@ -5380,7 +5386,22 @@ class TuiController {
     this.disposers.sessionEvents?.()
     this.disposers.questionProvider?.()
     this.terminal.restore()
+    const releaseAgent = async (): Promise<void> => {
+      // A cancelled switch still owns any staged/replaced handle until it settles.
+      await activeAgentSwitch?.completion.catch(() => undefined)
+      const handle = this.handle
+      this.handle = undefined
+      this.events = undefined
+      this.status = undefined
+      if (handle !== undefined) {
+        if (handle.agent.status === 'running') handle.agent.cancel({ kind: 'disposed' })
+        await handle.agent.whenIdle().catch(() => undefined)
+        await this.ctx.get('sessions')?.flush(handle.agent.session).catch(() => undefined)
+        await handle.dispose().catch(() => undefined)
+      }
+    }
     await Promise.all([
+      releaseAgent(),
       activeCommand?.completion.catch(() => undefined),
       startupGuidanceRefresh?.completion.catch(() => undefined),
       activeSessionExport?.completion.catch(() => undefined),
@@ -5395,16 +5416,6 @@ class TuiController {
       updateCheck?.completion.catch(() => undefined),
       themeLoad?.completion.catch(() => undefined),
     ])
-    const handle = this.handle
-    this.handle = undefined
-    this.events = undefined
-    this.status = undefined
-    if (handle !== undefined) {
-      if (handle.agent.status === 'running') handle.agent.cancel({ kind: 'disposed' })
-      await handle.agent.whenIdle().catch(() => undefined)
-      await this.ctx.get('sessions')?.flush(handle.agent.session).catch(() => undefined)
-      await handle.dispose().catch(() => undefined)
-    }
   }
 }
 

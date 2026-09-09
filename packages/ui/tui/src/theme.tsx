@@ -1,7 +1,7 @@
 /** Semantic terminal colors and user settings for the native TUI. */
 
 import React, { createContext, type ReactNode, useContext } from 'react'
-import { settingsNamespace, z } from './host.ts'
+import { settingsNamespace, z, ReasoningEffortId, type ModelSelection } from './host.ts'
 import {
   TUI_KEYBINDING_OVERRIDES_SCHEMA, validateTuiKeybindingOverrides, type TuiKeybindingOverrides,
 } from './keybindings.ts'
@@ -45,6 +45,8 @@ export const TUI_PROVIDER_ONBOARDING_VERSION = 1 as const
 
 /** User settings consumed live by the native TUI. */
 export interface TuiSettings {
+  /** Default for new TUI Agents; never changes the shared Web model selection. */
+  defaultModel?: ModelSelection
   /** Built-in semantic terminal theme. */
   theme: TuiThemePreference
   /** Optional JSON file name under the Harness home `themes` directory. */
@@ -74,6 +76,11 @@ export const DEFAULT_TUI_SETTINGS: TuiSettings = Object.freeze({
 })
 
 const TUI_SETTINGS_FIELDS = z.object({
+  defaultModel: z.union([z.const(undefined), z.object({
+    provider: z.string().required(),
+    model: z.string().required(),
+    reasoningEffort: z.string(),
+  })]),
   theme: z.union([...TUI_THEME_PREFERENCES]).default(DEFAULT_TUI_SETTINGS.theme),
   themeFile: z.string(),
   locale: z.union([...TUI_LOCALES]).default(DEFAULT_TUI_SETTINGS.locale),
@@ -99,6 +106,13 @@ export const TUI_SETTINGS_SCHEMA = z.transform(TUI_SETTINGS_FIELDS, (settings) =
     throw new Error('TUI themeFile must be one JSON file name under the Harness themes directory')
   }
   return {
+    ...settings.defaultModel == null ? {} : { defaultModel: {
+      provider: settings.defaultModel.provider,
+      model: settings.defaultModel.model,
+      ...settings.defaultModel.reasoningEffort == null ? {} : {
+        reasoningEffort: ReasoningEffortId(settings.defaultModel.reasoningEffort),
+      },
+    } },
     theme: settings.theme ?? DEFAULT_TUI_SETTINGS.theme,
     ...themeFile === undefined || themeFile === '' ? {} : { themeFile },
     locale: settings.locale ?? DEFAULT_TUI_SETTINGS.locale,

@@ -9,7 +9,7 @@ import type {
 import { attributionHeaders, LlmError } from '@deepseek-ai/dsh-llm'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 
-/** Stable Harness route id for the ChatGPT-account Codex provider. */
+/** Stable pi-ai identity and legacy credential id; not the public Harness route. */
 export const OPENAI_CODEX_PROVIDER = 'openai-codex'
 const MODELS_URL = 'https://chatgpt.com/backend-api/codex/models'
 const MAX_CATALOG_BYTES = 2 * 1024 * 1024

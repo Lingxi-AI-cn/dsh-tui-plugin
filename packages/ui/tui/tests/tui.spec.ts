@@ -170,6 +170,13 @@ describe('semantic terminal themes', () => {
     expect(TUI_SETTINGS_SCHEMA({ providerOnboardingVersion: 1 } as never)).toMatchObject({
       providerOnboardingVersion: 1,
     })
+    expect(TUI_SETTINGS_SCHEMA({ defaultModel: {
+      provider: 'lingxi-openai-codex', model: 'gpt-account', reasoningEffort: 'xhigh',
+    } } as never)).toMatchObject({ defaultModel: {
+      provider: 'lingxi-openai-codex', model: 'gpt-account', reasoningEffort: 'xhigh',
+    } })
+    expect(TUI_SETTINGS_SCHEMA({ defaultModel: null } as never).defaultModel).toBeUndefined()
+    expect(() => TUI_SETTINGS_SCHEMA({ defaultModel: { provider: 'lingxi-openai-codex' } } as never)).toThrow()
     expect(() => TUI_SETTINGS_SCHEMA({ providerOnboardingVersion: 0 } as never)).toThrow()
     expect(() => TUI_SETTINGS_SCHEMA({ themeFile: '../nord.json' } as never)).toThrow()
     expect(() => TUI_SETTINGS_SCHEMA({ activity: 'spin' } as never)).toThrow()

@@ -20,7 +20,7 @@ const entries = Object.fromEntries(files(packageRoot).sort().map((path) => {
 }))
 const manifest = `${JSON.stringify({
   format: 1,
-  release: '0.1.8-rc.1',
+  release: '0.1.9-rc.1',
   compatibleDeepSeekHarness: '0.1.2-rc.1',
   files: entries,
 }, null, 2)}\n`

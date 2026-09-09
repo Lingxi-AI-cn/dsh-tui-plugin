@@ -110,3 +110,20 @@ describe('native TUI first-run guidance', () => {
     expect(lines.every(line => stringWidth(line.text) <= 24)).toBe(true)
   })
 })
+
+it.each(['authentication', 'listModels'] as const)('cancels a stuck %s read without waiting for the provider', async (stage) => {
+  const controller = new AbortController()
+  let started!: () => void
+  const entered = new Promise<void>((resolve) => { started = resolve })
+  let rejectRead!: (error: Error) => void
+  const stuck = () => { started(); return new Promise<never>((_resolve, reject) => { rejectRead = reject }) }
+  const pending = inspectTuiStartupProvider({ id: 'p', name: 'Provider' }, {
+    authentication: stage === 'authentication' ? stuck : async () => ({ configured: true, methods: [] }),
+    listModels: stage === 'listModels' ? stuck : async () => [],
+  }, controller.signal)
+  await entered
+  controller.abort(new Error('quit'))
+  await expect(pending).rejects.toThrow('quit')
+  // A late transport rejection must still be observed after cancellation wins.
+  rejectRead(new Error('late network failure'))
+})

@@ -9,7 +9,7 @@ import {
 } from '../src/compatibility.ts'
 
 const manifest = {
-  version: '0.1.8-rc.1',
+  version: '0.1.9-rc.1',
   peerDependencies: {
     '@deepseek-ai/dsh-app-boot': '0.1.2-rc.1',
     '@deepseek-ai/dsh-session': '0.1.2-rc.1',
@@ -29,13 +29,13 @@ describe('post-install TUI Host compatibility', () => {
       compatibility: 'compatible',
       dshVersion: '0.1.2-rc.1',
       supportedDshVersion: '0.1.2-rc.1',
-      tuiVersion: '0.1.8-rc.1',
+      tuiVersion: '0.1.9-rc.1',
       profile: 'tui',
       nodeVersion: process.versions.node,
       platform: process.platform,
       architecture: process.arch,
       agentPresetIds: ['standard', 'ptc', 'minimal', 'cordis'],
-      recoveryCommand: 'dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.8-rc.1',
+      recoveryCommand: 'dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.9-rc.1',
     })
   })
 
@@ -47,7 +47,7 @@ describe('post-install TUI Host compatibility', () => {
     expect(() => validateTuiHostCompatibility(manifest, [
       host('@deepseek-ai/dsh-app-boot', '0.1.0-rc.7'),
       host('@deepseek-ai/dsh-session'),
-    ], '/dsh-home/profiles/tui')).toThrow('dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.8-rc.1')
+    ], '/dsh-home/profiles/tui')).toThrow('dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.9-rc.1')
   })
 
   it('rejects a Host peer materialized inside the active profile', () => {
@@ -63,7 +63,7 @@ describe('post-install TUI Host compatibility', () => {
 
   it('allows workspace protocols only in the source checkout', () => {
     expect(validateTuiHostCompatibility({
-      version: '0.1.8-rc.1',
+      version: '0.1.9-rc.1',
       peerDependencies: {
         '@deepseek-ai/dsh-app-boot': 'workspace:*',
         '@earendil-works/pi-ai': '0.84.4',
@@ -76,7 +76,7 @@ describe('post-install TUI Host compatibility', () => {
 
   it('pins a transitive Host library to the official registry installation', () => {
     const registryManifest = {
-      version: '0.1.8-rc.1',
+      version: '0.1.9-rc.1',
       peerDependencies: {
         '@deepseek-ai/dsh-app-boot': '0.1.2-rc.1',
         '@earendil-works/pi-ai': '0.84.4',
