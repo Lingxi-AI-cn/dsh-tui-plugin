@@ -12,7 +12,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.10-rc.2'
+const TUI_VERSION = '0.1.11-rc.2'
 const DSH_VERSION = '0.1.5-rc.2'
 const TOP_PACKAGE = '@lingxi-ai-cn/dsh-tui'
 const PACKAGE_DIRS = Object.freeze([

@@ -209,3 +209,5 @@ Changing provider or model selects a different provider cache domain for the nex
 ### Dev Note
 
 None.
+
+Session activity reads isolate storage and migration failures per row. Unreadable Sessions retain their metadata and failure reason with resume disabled; healthy rows remain available. Cancelling a scan still stops the operation. This does not add historical-format migrations.

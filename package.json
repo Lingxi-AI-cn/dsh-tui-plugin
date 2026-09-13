@@ -1,6 +1,6 @@
 {
   "name": "@lingxi-ai-cn/dsh-tui-plugin-workspace",
-  "version": "0.1.10-rc.2",
+  "version": "0.1.11-rc.2",
   "private": true,
   "type": "module",
   "license": "MIT",

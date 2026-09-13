@@ -53,6 +53,17 @@ function workspace(overrides: Partial<TuiWorkspace> = {}): TuiWorkspace {
 }
 
 describe('native TUI Session Manager projection', () => {
+  it('keeps an incompatible row and its disabled reason beside a resumable Session', () => {
+    const reason = 'subagent/descriptor 0 uses unsupported descriptor version 2'
+    const projected = projectTuiSessionManager([
+      candidate('healthy', '/repo/a', 'Healthy'),
+      { ...candidate('legacy', '/repo/a', 'Historical'), disabledReason: reason },
+    ], [], [], { archive: 'all' })
+    expect(projected.sessions).toHaveLength(2)
+    expect(projected.sessions[0]?.candidate.disabledReason).toBeUndefined()
+    expect(projected.sessions[1]?.candidate).toMatchObject({ title: 'Historical', disabledReason: reason })
+  })
+
   it('retains duplicate display names while joining by stable Workspace id membership', async () => {
     const roster = await collectTuiWorkspaceRows([
       workspace(),

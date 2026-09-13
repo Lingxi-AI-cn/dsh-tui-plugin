@@ -3,6 +3,7 @@
  * in-process Agent and its durable Session log.
  */
 
+import { collectTuiResumeActivity } from './resume-activity.ts'
 import { requestTuiExit } from './exit.ts'
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
@@ -4328,7 +4329,10 @@ class TuiController {
     signal.throwIfAborted()
     const [titles, activity, previews, presetResolutions] = await Promise.all([
       this.resolveResumeTitles(records, signal),
-      this.resolveResumeActivity(records, signal),
+      collectTuiResumeActivity(
+        records, record => this.resumeActivityTime(record, signal), signal,
+        this.config.resumeScanConcurrency ?? 4,
+      ),
       options.includePreviews === false
         ? Promise.resolve<ResumePreviewResolution[]>(records.map(() => ({ lines: [], truncated: false })))
         : this.resolveResumePreviews(records, signal),
@@ -4342,7 +4346,7 @@ class TuiController {
       const candidate = summarizeTuiResumeCandidate(
         record,
         resolution.title,
-        activity[index],
+        activity[index]?.time,
         agent.session.id,
         agent.session.header.cwd,
         previewResolution?.lines,
@@ -4351,12 +4355,13 @@ class TuiController {
         presetResolution?.summary,
         presetResolution?.disabledReason,
       )
-      if (resolution.failure === undefined) return candidate
+      const failure = resolution.failure ?? activity[index]?.failure
+      if (failure === undefined) return candidate
       return {
         ...candidate,
-        title: tuiMessage(this.locale, 'resume.preview.unreadable'),
+        ...(resolution.failure === undefined ? {} : { title: tuiMessage(this.locale, 'resume.preview.unreadable') }),
         disabledReason: tuiMessage(this.locale, 'resume.preview.readFailed', {
-          error: errorChain(resolution.failure),
+          error: errorChain(failure),
         }),
       }
     })
@@ -4460,27 +4465,6 @@ class TuiController {
     await Promise.all(Array.from({ length: concurrency }, () => worker()))
     signal.throwIfAborted()
     return previews
-  }
-
-  private async resolveResumeActivity(
-    records: readonly SessionRecord[],
-    signal: AbortSignal,
-  ): Promise<Array<number | undefined>> {
-    const activity = new Array<number | undefined>(records.length)
-    let cursor = 0
-    const worker = async (): Promise<void> => {
-      for (;;) {
-        signal.throwIfAborted()
-        const index = cursor
-        if (index >= records.length) return
-        cursor += 1
-        activity[index] = await this.resumeActivityTime(records[index] as SessionRecord, signal)
-      }
-    }
-    const concurrency = Math.min(this.config.resumeScanConcurrency ?? 4, records.length)
-    await Promise.all(Array.from({ length: concurrency }, () => worker()))
-    signal.throwIfAborted()
-    return activity
   }
 
   private async resumeActivityTime(record: SessionRecord, signal: AbortSignal): Promise<number | undefined> {

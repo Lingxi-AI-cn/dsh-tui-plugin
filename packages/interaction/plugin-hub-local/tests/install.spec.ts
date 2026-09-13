@@ -140,7 +140,7 @@ describe('trusted Plugin Hub installation planning', () => {
     ['expired', { expiresAt: '2026-08-18T11:59:59.000Z' }, 'DESCRIPTOR_EXPIRED'],
     ['wrong surface', { surfaces: ['headless'] }, 'SURFACE_INCOMPATIBLE'],
     ['incompatible DSH', { dsh: '>=9.0.0' }, 'DSH_INCOMPATIBLE'],
-    ['TUI version is not the Host version', { dsh: '=0.1.10-rc.2' }, 'DSH_INCOMPATIBLE'],
+    ['TUI version is not the Host version', { dsh: '=0.1.11-rc.2' }, 'DSH_INCOMPATIBLE'],
   ] as const)('rejects a %s descriptor before profile mutation', async (_label, overrides, code) => {
     const fixture = await createFixture({ descriptorOverrides: overrides })
     const ctx = await createContext(fixture)

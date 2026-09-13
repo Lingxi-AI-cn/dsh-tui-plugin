@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.11-rc.2
+
+- Keeps exact compatibility with official DeepSeek Harness `0.1.5-rc.2`.
+- Keeps healthy Sessions visible when another Session fails an activity read or historical-format migration.
+- Shows unavailable reasons in the Session Manager list and detail and refuses resume for unreadable records.
+- Preserves scan cancellation and stored Session data. This release does not add migration support for historical descriptor version 2.
+
 ## 0.1.10-rc.2
 
 - Supports exactly official DeepSeek Harness `0.1.5-rc.2` across all seven packages, with pi-ai `0.85.1`.

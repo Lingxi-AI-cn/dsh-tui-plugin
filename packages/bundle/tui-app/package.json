@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-tui",
   "description": "Post-install native terminal UI bundle for DeepSeek Harness",
-  "version": "0.1.10-rc.2",
+  "version": "0.1.11-rc.2",
   "publishConfig": {
     "access": "public"
   },

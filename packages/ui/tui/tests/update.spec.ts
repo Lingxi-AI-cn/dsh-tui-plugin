@@ -14,10 +14,10 @@ describe('native TUI passive update discovery', () => {
   })
 
   it('recommends an exact external command and never crosses compatibility lines', () => {
-    expect(TUI_RUNTIME_VERSION).toBe('0.1.10-rc.2')
-    const compatible = tuiUpdateStatus('0.1.11-rc.2')
+    expect(TUI_RUNTIME_VERSION).toBe('0.1.11-rc.2')
+    const compatible = tuiUpdateStatus('0.1.12-rc.2')
     expect(compatible).toMatchObject({ compatible: true, updateAvailable: true })
-    expect(compatible.command).toContain('@lingxi-ai-cn/dsh-tui@0.1.11-rc.2')
+    expect(compatible.command).toContain('@lingxi-ai-cn/dsh-tui@0.1.12-rc.2')
 
     const incompatible = tuiUpdateStatus('0.2.0-alpha.1')
     expect(incompatible).toMatchObject({ compatible: false, updateAvailable: false })

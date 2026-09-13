@@ -109,11 +109,11 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 
 | DSH TUI | DeepSeek Harness | Node.js | 平台 |
 | --- | --- | --- | --- |
-| `0.1.10-rc.2` | 精确匹配 `0.1.5-rc.2` | `^22.19.0` 或 `>=24` | macOS 14 与 Ubuntu 24.04 CI |
+| `0.1.11-rc.2` | 精确匹配 `0.1.5-rc.2` | `^22.19.0` 或 `>=24` | macOS 14 与 Ubuntu 24.04 CI |
 
 只有在精确官方包 clean-room 安装、profile 组合、PTY 启动/退出和终端恢复验证完成后，才会增加对新 Harness 版本的支持。
 
-TUI 核心版本独立递增（这里是 `0.1.10`），最后的预发布后缀（`rc.2`）则始终表示兼容的官方 Harness 预发布版本。这样不会让用户把一次 TUI 迭代误认为上游 DSH 已升级。
+TUI 核心版本独立递增（这里是 `0.1.11`），最后的预发布后缀（`rc.2`）则始终表示兼容的官方 Harness 预发布版本。这样不会让用户把一次 TUI 迭代误认为上游 DSH 已升级。
 
 ## 安装
 
@@ -121,7 +121,7 @@ TUI 核心版本独立递增（这里是 `0.1.10`），最后的预发布后缀�
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.5-rc.2
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.10-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.11-rc.2
 dsh --profile tui
 ```
 
@@ -144,7 +144,7 @@ dsh --profile tui
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.10-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.11-rc.2
 ```
 
 Session 和凭据位于 profile 目录之外。只重新应用经过审查的自定义 patch，不要把旧 profile 整体复制回来。
@@ -164,7 +164,7 @@ Session 和凭据位于 profile 目录之外。只重新应用经过审查的自
 安装声明兼容当前官方 Harness 版本的精确 TUI 版本：
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.10-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.11-rc.2
 ```
 
 Release tag 和 npm 版本不可覆盖或移动。不要混用不同 release candidate 的 package。

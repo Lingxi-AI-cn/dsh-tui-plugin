@@ -8864,6 +8864,12 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                           ? tuiMessage(locale, 'sessions.archive.archived')
                           : tuiMessage(locale, 'sessions.archive.active'),
                     })}</Text>
+                    {selectedManagedSession.candidate.disabledReason === undefined ? undefined
+                      : <Text {...tuiTextStyle(theme.tokens.warning)} wrap="wrap">
+                        {tuiMessage(locale, 'resume.status.unavailable', {
+                          reason: terminalSafe(selectedManagedSession.candidate.disabledReason),
+                        })}
+                      </Text>}
                     {selectedManagedSession.candidate.preview.length === 0
                       ? <TuiHintLine>{tuiMessage(locale, 'resume.preview.empty')}</TuiHintLine>
                       : selectedManagedSession.candidate.preview.map(line => <Text key={`${line.seq}:${line.kind}`} wrap="wrap">
@@ -8904,7 +8910,11 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                             : `  ${row.candidate.title}`
                           : row.candidate.title)}
                         description={`${terminalSafe(row.workspaceTitle)} · ${formatTuiRelativeTime(row.candidate.updatedAt, Date.now())}`}
-                        detail={`${status} · ${row.candidate.record.header.id}`}
+                        detail={row.candidate.disabledReason === undefined
+                          ? `${status} · ${row.candidate.record.header.id}`
+                          : tuiMessage(locale, 'resume.status.unavailable', {
+                            reason: terminalSafe(row.candidate.disabledReason),
+                          })}
                       />
                     })
                     : (visibleSessionManagerItems as readonly TuiWorkspaceManagerRow[]).map((row, visibleIndex) => {

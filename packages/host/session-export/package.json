@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-session-export",
   "description": "Native atomic path writer over the official Session ZIP producer",
-  "version": "0.1.10-rc.2",
+  "version": "0.1.11-rc.2",
   "publishConfig": {
     "access": "public"
   },
