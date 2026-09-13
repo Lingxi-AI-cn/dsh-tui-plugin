@@ -10,13 +10,12 @@ describe('TUI live feedback', () => {
   it('marks open-stream speed as approximate and keeps a fixed trend', () => {
     const sample = projectTuiLatestSpeed(events([
       { type: 'step/start', seq: 0, time: 1_000, data: { turn: 1, step: 1 } },
-      { type: 'assistant/chunk', seq: 1, time: 1_100, data: {
-        turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'abcdefgh' },
-      } },
-      { type: 'assistant/chunk', seq: 2, time: 1_600, data: {
-        turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'ijklmnop' },
-      } },
-    ]), 2_100)
+    ]), 2_100, {
+      attemptId: 'speed', revision: 1, turn: 1, step: 1, chunks: [
+        { time: 1_100, chunk: { type: 'text-delta', index: 0, text: 'abcdefgh' } },
+        { time: 1_600, chunk: { type: 'text-delta', index: 0, text: 'ijklmnop' } },
+      ],
+    })
     expect(sample).toMatchObject({ approximate: true, tokens: 4, elapsedMs: 1_000, tokensPerSecond: 4 })
     expect(sample?.trend).toHaveLength(6)
   })
@@ -24,11 +23,8 @@ describe('TUI live feedback', () => {
   it('uses provider output tokens when the latest message settles', () => {
     const sample = projectTuiLatestSpeed(events([
       { type: 'step/start', seq: 0, time: 1_000, data: { turn: 2, step: 3 } },
-      { type: 'assistant/chunk', seq: 1, time: 1_200, data: {
-        turn: 2, step: 3, chunk: { type: 'text-delta', index: 0, text: 'short' },
-      } },
       { type: 'assistant/message', seq: 2, time: 2_200, data: {
-        turn: 2, step: 3, message: {}, usage: { inputTokens: 10, outputTokens: 25 },
+        turn: 2, step: 3, stream: [{ type: 'text-chunks', time0: 1_200, index: 0, dt: [], texts: ['short'] }], message: {}, usage: { inputTokens: 10, outputTokens: 25 },
       } },
     ]), 9_000)
     expect(sample).toMatchObject({ approximate: false, tokens: 25, elapsedMs: 1_000, tokensPerSecond: 25 })

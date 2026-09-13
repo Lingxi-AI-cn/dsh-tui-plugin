@@ -1,7 +1,7 @@
 /** Pure session-resume candidate projection and picker helpers for the native TUI. */
 
 import {
-  SESSION_FORMAT_VERSION, type SessionIdType as SessionId, type SessionPreviewLine, type SessionRecord,
+  type SessionIdType as SessionId, type SessionPreviewLine, type SessionRecord,
 } from './host.ts'
 
 /** One detached row shown by the native TUI Session picker. */
@@ -85,7 +85,6 @@ export function summarizeTuiResumeCandidate(
   if (record.header.id === currentId) disabledReason = 'current session'
   else if (record.live) disabledReason = 'session is already live in this runtime'
   else if (!record.persisted) disabledReason = 'session is not persisted'
-  else if (record.header.version !== SESSION_FORMAT_VERSION) disabledReason = 'session format is incompatible'
   else if (record.header.origin === 'subagent') disabledReason = 'subagent-owned session'
   else if (presetDisabledReason !== undefined) disabledReason = presetDisabledReason
   else if (agentPreset === undefined) disabledReason = 'legacy rosterless session'

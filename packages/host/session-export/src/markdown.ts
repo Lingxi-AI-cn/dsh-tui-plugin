@@ -147,11 +147,16 @@ async function loadMarkdownSource(
     if (live !== undefined) await deps.sessions.flush(live)
   }
   signal.throwIfAborted()
-  const loaded = await deps.sessionPersistence.inspect(sessionId, signal)
-  signal.throwIfAborted()
-  return {
-    header: structuredClone(loaded.meta),
-    events: loaded.events.map(event => structuredClone(event)),
+  const handle = await deps.sessionPersistence.open(sessionId, 'read', { signal })
+  try {
+    const loaded = await handle.read(0, undefined, { signal })
+    signal.throwIfAborted()
+    return {
+      header: structuredClone(handle.header),
+      events: loaded.events.map(event => structuredClone(event)),
+    }
+  } finally {
+    await handle.close()
   }
 }
 

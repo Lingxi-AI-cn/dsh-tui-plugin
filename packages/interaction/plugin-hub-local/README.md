@@ -9,7 +9,13 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Trusted local Plugin Hub provider. A deployment explicitly supplies an HTTPS `registryUrl` and locally pinned Ed25519 keys; absent configuration leaves the optional provider unmounted. Catalog responses are runtime-parsed, API-version checked, redirected at most three times within the configured Registry origin, bounded by bytes, cancelled by caller signal, and retained as an in-memory last-good view when the Registry is temporarily unavailable. An HTTP 304 response validates the matching ETag entry and returns its cached value without marking the catalog stale; other Registry failures may use the last-good fallback. Registry detail responses normalize `validationMatrix` rows (`manifest`, `install`, and `tui-boot`) and strictly project quarantine, repository archive, operating-system, curation, and structured advisory facts into provider-neutral DTOs; malformed detail metadata fails closed.
+Trusted local Plugin Hub provider. A deployment explicitly supplies an HTTPS `registryUrl` and locally pinned Ed25519 keys; absent configuration leaves the optional provider unmounted.
+
+## Registry behavior
+
+Installation validation resolves in-box bundles from the running official DSH launcher, and compatibility uses that Host version. Embedded Hosts fall back to the official app-boot owner; the independently versioned TUI package is never the DSH compatibility target.
+
+Catalog responses are runtime-parsed, API-version checked, redirected at most three times within the configured Registry origin, bounded by bytes, cancelled by caller signal, and retained as an in-memory last-good view when the Registry is temporarily unavailable. An HTTP 304 response validates the matching ETag entry and returns its cached value without marking the catalog stale; other Registry failures may use the last-good fallback. Registry detail responses normalize `validationMatrix` rows (`manifest`, `install`, and `tui-boot`) and strictly project quarantine, repository archive, operating-system, curation, and structured advisory facts into provider-neutral DTOs; malformed detail metadata fails closed.
 
 ## Table of Contents
 
@@ -17,7 +23,7 @@ Trusted local Plugin Hub provider. A deployment explicitly supplies an HTTPS `re
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 - [Dev Note](#dev-note)
 
-`profileMutations` defaults to `false`. In that post-install-safe mode, Registry browsing and active-profile `installed()` truth remain available, mutation methods fail with `CONTRACT_UNSUPPORTED`, and startup readiness is a no-op. The published TUI bundle uses this mode because official DSH `0.1.2-rc.1` has no generic recovery hook before profile composition; users make changes with `dsh plugin --profile tui ...`. Setting `profileMutations: true` enables the downstream maintenance lifecycle described below and is reserved for compositions that install its matching pre-composition recovery hook.
+`profileMutations` defaults to `false`. In that post-install-safe mode, Registry browsing and active-profile `installed()` truth remain available, mutation methods fail with `CONTRACT_UNSUPPORTED`, and startup readiness is a no-op. The published TUI bundle uses this mode because official DSH `0.1.5-rc.2` has no generic recovery hook before profile composition; users make changes with `dsh plugin --profile tui ...`. Setting `profileMutations: true` enables the downstream maintenance lifecycle described below and is reserved for compositions that install its matching pre-composition recovery hook.
 
 Catalog search forwards provider-neutral `relevance`, `stars`, `updated`, or `newest` ordering to the Registry, includes the ordering in its request cache key, and applies the same ordering and cursor binding to signed snapshot fallback. A Registry `INVALID_CURSOR` response remains a typed provider error rather than being silently restarted.
 

@@ -205,8 +205,12 @@ describe('typed profile mutations', () => {
     }, undefined, 2) + '\n')
     await writeFile(join(packageDir, 'cordis.patch.yml'), '[]\n')
     execFileSync('pnpm', ['pack', '--pack-destination', root], { cwd: packageDir, stdio: 'pipe' })
-    const tarball = join(root, 'real-profile-bundle-1.0.0.tgz')
-    const bytes = await readFile(tarball)
+    const packed = join(root, 'real-profile-bundle-1.0.0.tgz')
+    const bytes = await readFile(packed)
+    const cache = join(root, 'artifacts', 'sha512')
+    await mkdir(cache, { recursive: true })
+    const tarball = join(cache, `${createHash('sha512').update(bytes).digest('hex')}.tgz`)
+    await writeFile(tarball, bytes)
     const profileManager = manager(root, {
       pnpmCommand: ['pnpm'],
       processTimeoutMs: 30_000,

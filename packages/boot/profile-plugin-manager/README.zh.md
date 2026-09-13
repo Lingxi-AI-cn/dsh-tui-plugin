@@ -24,6 +24,7 @@ kind: "package-reference"
 - `inspectInstalled()` 从 `package.json.dependencies`、有序的 `dsh.profile.bundles`、已解析的 package manifest、`pnpm-lock.yaml` 和可选本地 Hub receipt 推导本地事实。远程 Catalog 状态绝不是 installed truth。
 - `plan()` 返回有有效期且 detached 的 install、update 或 remove plan，其中包含精确 profile revision、before 状态、预期 bundle 顺序、重启要求和 lifecycle script 风险。生成 plan 不修改 profile。
 - `installExact()` 和 `updateExact()` 只接受绝对本地 artifact 路径及精确 package identity。在把路径交给 pnpm 之前，会立即检查可选 SHA-512 digest 和字节大小；这些 API 不接受 mutable package spec。
+- 类型化安装在 profile 的 `.dsh-artifacts/` 目录保存经过摘要复核的 tarball，并使用短相对依赖路径。切换 generation 后该路径仍然有效，也避免外部缓存长路径触发 pnpm 存储文件名限制。保留的 tarball 随 profile 一同复制。
 - `removePackage()` 接受一个经过校验的 package name。每次 mutation 成功后都会通过与 CLI passthrough 相同的 installed-state 算法协调 bundle list。
 - `materializeProfile()` 在不跟随 symlink 的情况下复制完整 profile；`validateProfile()` 检查 dependency、lockfile 事实、bundle entry、bundle patch 和 profile patch 层。
 - `runPnpm()` 保留高级 `dsh plugin` passthrough 约定（包括可选继承 stdin），同时使用异步、无 shell 的 argv spawn、取消、wall-clock timeout 和有界 stdout/stderr retention。

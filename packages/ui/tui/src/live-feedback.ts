@@ -1,6 +1,8 @@
 /** Pure compact feedback projections derived from durable Session events. */
 
-import type { SessionEvent, SessionStatsProjection } from './host.ts'
+import { expandAssistantStream, type SessionEvent, type SessionStatsProjection, type TimedStreamChunk } from './host.ts'
+
+import type { TuiAssistantStream } from './assistant-stream.ts'
 
 const TREND_CELLS = '▁▂▃▄▅▆▇█'
 const TREND_BUCKETS = 6
@@ -20,9 +22,8 @@ export interface TuiSpeedProjection {
   readonly elapsedMs: number
 }
 
-function deltaCharacters(event: SessionEvent): number {
-  if (event.type !== 'assistant/chunk') return 0
-  const chunk = event.data.chunk
+function deltaCharacters(event: TimedStreamChunk): number {
+  const chunk = event.chunk
   if (chunk.type === 'text-delta' || chunk.type === 'reasoning-delta') return chunk.text.length
   if (chunk.type === 'tool-call-delta') {
     return chunk.argumentsDelta.length + (chunk.name?.length ?? 0)
@@ -30,7 +31,7 @@ function deltaCharacters(event: SessionEvent): number {
   return 0
 }
 
-function speedTrend(chunks: readonly SessionEvent[], start: number, end: number): string {
+function speedTrend(chunks: readonly TimedStreamChunk[], start: number, end: number): string {
   const duration = Math.max(1, end - start)
   const buckets = Array.from({ length: TREND_BUCKETS }, () => 0)
   for (const event of chunks) {
@@ -54,23 +55,26 @@ function speedTrend(chunks: readonly SessionEvent[], start: number, end: number)
  * four-characters-per-token heuristic as the Host meter and is marked approximate.
  * @param events - complete durable Session events in sequence order.
  * @param now - current timestamp used for an open stream.
+ * @param live - optional process-local active attempt.
  * @returns latest-step speed, or `undefined` before output arrives.
  */
 export function projectTuiLatestSpeed(
   events: readonly SessionEvent[],
   now: number = Date.now(),
+  live?: TuiAssistantStream,
 ): TuiSpeedProjection | undefined {
   const stepIndex = events.findLastIndex(event => event.type === 'step/start')
   const stepStart = events[stepIndex]
   if (stepStart?.type !== 'step/start') return undefined
   const { turn, step } = stepStart.data
   const following = events.slice(stepIndex + 1)
-  const chunks = following.filter(event => event.type === 'assistant/chunk'
-    && event.data.turn === turn && event.data.step === step && deltaCharacters(event) > 0)
-  const first = chunks[0]
-  if (first === undefined) return undefined
   const completed = following.find(event => event.type === 'assistant/message'
     && event.data.turn === turn && event.data.step === step)
+  const chunks = (live?.turn === turn && live.step === step ? live.chunks
+    : completed?.type === 'assistant/message' ? expandAssistantStream(completed.data.stream) : [])
+    .filter(event => deltaCharacters(event) > 0)
+  const first = chunks[0]
+  if (first === undefined) return undefined
   const end = completed?.time ?? Math.max(first.time, now)
   const elapsedMs = Math.max(250, end - first.time)
   const exactTokens = completed?.type === 'assistant/message'

@@ -35,6 +35,7 @@ import {
   queueHostSubagentPrompt,
   sessionUsesLegacyCodePreset,
   SESSION_FORMAT_VERSION,
+  Session,
   SessionId,
   SessionLogOffset,
   TuiHostCommandCatalog,
@@ -77,6 +78,7 @@ import {
 import { SessionLogExportError } from '@lingxi-ai-cn/dsh-session-export'
 import { PluginHubError, type PluginCatalogSort, type PluginCategory, type PluginChangePlan, type PluginId } from '@lingxi-ai-cn/dsh-plugin-hub'
 import type {} from '@lingxi-ai-cn/dsh-plugin-hub'
+import { updateTuiAssistantStream, type TuiAssistantStream } from './assistant-stream.ts'
 import { TuiApp } from './app.tsx'
 import type { TuiSubmitMode } from './delivery.ts'
 import type { TuiComposerImageAttachment } from './composer.ts'
@@ -253,6 +255,7 @@ interface ResumePresetResolution {
 interface RuntimeDisposers {
   questionProvider?: () => void
   sessionEvents?: () => void
+  assistantStream?: () => void
   agentStatus?: () => void
   approval?: () => void
   modelsCommand?: () => void
@@ -379,6 +382,7 @@ type PrepareTuiAgentRequest =
 
 /** One activation's owned Agent, interactions, Ink root, signals, and terminal transaction. */
 class TuiController {
+  private readonly assistantStreams = new Map<Agent, TuiAssistantStream>()
   private readonly terminal = new TerminalSession(terminalInternals)
   private commandCatalog!: TuiHostCommandCatalog
   private readonly interactions = new InteractionStore()
@@ -992,7 +996,7 @@ class TuiController {
       || command.completion?.aliases?.includes(name))
     return descriptor === undefined ? undefined : {
       name: descriptor.name,
-      acceptsImages: descriptor.input?.images === true,
+      acceptsImages: descriptor.input?.attachments === true,
     }
   }
 
@@ -1062,9 +1066,8 @@ class TuiController {
     const selected: ModelSelectionRef = { current: defaultSelection, assembled: undefined }
     let mountedPreset: AgentPreset | undefined
     const migration = { legacyPreset: false }
-    const setup = async (agentCtx: Context): Promise<void> => {
-      const session = agentCtx.agent?.session
-      if (session === undefined) throw new Error('TUI Agent setup cannot resolve its unpublished Session')
+    const setup = async (agentCtx: Context, unpublishedAgent: Agent): Promise<void> => {
+      const session = unpublishedAgent.session
       const presetId = request.kind === 'resume'
         ? this.assertResumeCompatible(session.header, session.snapshotEvents())
         : resolvedPreset?.id
@@ -1137,9 +1140,6 @@ class TuiController {
     header: Agent['session']['header'],
     events: readonly SessionEvent[],
   ): string {
-    if (header.version !== SESSION_FORMAT_VERSION) {
-      throw new Error(`cannot resume Session ${JSON.stringify(header.id)}: incompatible format ${header.version}`)
-    }
     if (header.origin === 'subagent') {
       throw new Error(`cannot resume subagent-owned Session ${JSON.stringify(header.id)} in the TUI`)
     }
@@ -1300,7 +1300,23 @@ class TuiController {
         }
       })
     }
+    this.disposers.assistantStream = this.ctx.on('agent/assistant-stream', ({ agent, frame }) => {
+      const root = this.handle?.agent
+      if (root === undefined || (agent !== root && !isSessionDescendantOf(agent, root.id, this.ctx.agents))) return
+      const next = updateTuiAssistantStream(this.assistantStreams.get(agent), frame)
+      if (next === undefined) this.assistantStreams.delete(agent)
+      else this.assistantStreams.set(agent, next)
+      if (agent === root) this.events?.stream.set(next)
+      if (agent === this.activeView?.agent) this.activeView.events.stream.set(next)
+    })
     this.disposers.sessionEvents = this.ctx.on('session/event', (session, event) => {
+      if (event.type === 'assistant/message' || event.type === 'assistant/attempt') {
+        for (const [owner, stream] of this.assistantStreams) {
+          if (owner.session === session && stream.turn === event.data.turn && stream.step === event.data.step) {
+            this.assistantStreams.delete(owner)
+          }
+        }
+      }
       if (event.type === 'assistant/message') {
         const text = event.data.message.content
           .filter(block => block.type === 'text')
@@ -1319,7 +1335,7 @@ class TuiController {
       if (agent !== undefined && session === agent.session) {
         this.events?.append(event)
         this.refreshPermission(agent)
-        if (event.type !== 'assistant/chunk' && this.trajectoryStore.getSnapshot() !== undefined) {
+        if (this.trajectoryStore.getSnapshot() !== undefined) {
           this.openTrajectory()
         }
       }
@@ -1345,6 +1361,7 @@ class TuiController {
       this.scheduleWorkCatalogRefresh(root)
     })
     this.disposers.agentDisposed = this.ctx.on('agent/disposed', ({ agent }) => {
+      this.assistantStreams.delete(agent)
       const root = this.handle?.agent
       if (root === undefined || agent === root) return
       if (agent === this.activeView?.agent) {
@@ -1736,6 +1753,7 @@ class TuiController {
         events: new SessionEventStore(child.session.snapshotEvents()),
         status: new AgentStatusStore(child.status),
       }
+      this.activeView.events.stream.set(this.assistantStreams.get(child))
       try {
         const events = this.events
         const status = this.status
@@ -2962,16 +2980,16 @@ class TuiController {
     let storageDiagnostic: TuiSessionStorageDiagnostic = { state: 'unavailable' }
     if (persistence !== undefined) {
       try {
-        const headers = await persistence.list(invocation.signal)
+        const headers = (await persistence.list({ signal: invocation.signal })).map(snapshot => snapshot.header)
         invocation.signal.throwIfAborted()
         storageDiagnostic = Object.freeze({
           state: 'available',
           backend: persistence.name,
           currentFormat: invocation.agent.session.header.version,
           expectedFormat: SESSION_FORMAT_VERSION,
-          compatibleSessions: headers.filter(header => header.version === SESSION_FORMAT_VERSION).length,
-          incompatibleSessions: headers.filter(header => header.version !== SESSION_FORMAT_VERSION).length,
-          supportsRawArtifacts: persistence.supportsRawArtifacts,
+          compatibleSessions: headers.length,
+          incompatibleSessions: 0,
+          supportsRawArtifacts: false,
         })
       } catch (error: unknown) {
         invocation.signal.throwIfAborted()
@@ -4161,15 +4179,22 @@ class TuiController {
     } else {
       const persistence = this.ctx.get('sessionPersistence')
       if (persistence === undefined) throw new Error('Session persistence is unavailable')
-      const preparation = await persistence.prepare(id)
-      const detach = this.ctx.sessions.enter(preparation.session)
+      const handle = await persistence.open(id, 'write')
       try {
-        this.ctx.sessions.announce(preparation.session)
-        titles.rename(preparation.session, title)
-        await this.ctx.sessions.flush(preparation.session)
+        const loaded = await handle.read()
+        const session = Session.fromRestore(id, loaded.events, handle.header, handle.inheritedEventCount, loaded.eventState)
+        const detach = this.ctx.sessions.enter(session)
+        try {
+          this.ctx.sessions.announce(session)
+          const before = session.seq
+          titles.rename(session, title)
+          await handle.append(session.snapshotEvents(before))
+          await handle.flush()
+        } finally {
+          detach()
+        }
       } finally {
-        detach()
-        preparation[Symbol.dispose]()
+        await handle.close()
       }
     }
     await this.refreshSessionManager(agent)
@@ -4224,7 +4249,6 @@ class TuiController {
     const source = live === undefined
       ? await this.ctx.sessionQuery.readSession(id)
       : { session: live.header, events: live.snapshotEvents() }
-    if (source.session.version !== SESSION_FORMAT_VERSION) throw new Error('the source Session format is incompatible')
     if (source.session.origin === 'subagent') throw new Error('subagent-owned Sessions cannot be forked here')
     const cwd = source.session.cwd
     if (cwd === undefined) throw new Error(tuiMessage(this.locale, 'session.error.workspace'))
@@ -4463,16 +4487,18 @@ class TuiController {
     signal.throwIfAborted()
     const live = this.ctx.sessions.get(record.header.id)
     if (live !== undefined) return live.snapshotEvents().at(-1)?.time
-    const location = this.ctx.get('sessionPersistence')?.locate(record.header)
-    if (location === undefined) return undefined
+    const persistence = this.ctx.get('sessionPersistence')
+    if (persistence === undefined) return undefined
+    const snapshot = await persistence.stat(record.header.id, { signal })
+    if (snapshot === undefined) return undefined
+    const handle = await persistence.open(record.header.id, 'read', { signal })
     try {
-      const updatedAt = (await stat(location.path)).mtimeMs
+      const offset = snapshot.eventCount === undefined ? 0 : Math.max(0, snapshot.eventCount - 1)
+      const { events } = await handle.read(offset, undefined, { signal })
       signal.throwIfAborted()
-      return updatedAt
-    } catch {
-      if (signal.aborted) signal.throwIfAborted()
-      // A removed or not-yet-materialized artifact falls back to header creation time.
-      return undefined
+      return events.at(-1)?.time
+    } finally {
+      await handle.close()
     }
   }
 
@@ -5124,7 +5150,7 @@ class TuiController {
         const images = composerAttachments.length === 0
           ? []
           : await this.encodeImageAttachments(composerAttachments, controller.signal)
-        return this.ctx.commands.execute(agent, text, images, controller.signal)
+        return this.ctx.commands.execute(agent, text, images.map(image => ({ type: 'image' as const, ...image })), controller.signal)
       })()
       const operation = { controller, completion }
       this.activeCommand = operation
@@ -5384,6 +5410,8 @@ class TuiController {
     this.disposers.jobsController?.()
     this.disposers.agentStatus?.()
     this.disposers.sessionEvents?.()
+    this.disposers.assistantStream?.()
+    this.assistantStreams.clear()
     this.disposers.questionProvider?.()
     this.terminal.restore()
     const releaseAgent = async (): Promise<void> => {

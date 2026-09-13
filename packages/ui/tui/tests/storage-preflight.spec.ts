@@ -1,24 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SESSION_FORMAT_VERSION, SessionId, type SessionHeader } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { preflightTuiSessionStorage } from '../src/storage-preflight.ts'
 
 function persistence(headers: readonly { version: number; id: string }[]) {
-  const list = vi.fn(async () => headers.map(header => ({
+  const list = vi.fn(async () => headers.map(header => ({ revision: 'fixture', header: {
     version: header.version,
     id: SessionId(header.id),
     createdAt: 1,
-    cwd: '/workspace',
-  })))
-  const locate = vi.fn((header: SessionHeader) => ({
-    kind: 'jsonl' as const,
-    path: `/sessions/${header.id}/session.jsonl.zstd`,
-  }))
+    cwd: '/workspace', isSeeded: false,
+  } })))
   const owner = {
     name: 'session-persistence-jsonl',
-    supportsRawArtifacts: true,
+    supportsRawArtifacts: false,
     list,
-    locate,
   } as unknown as SessionPersistence
   return { owner, list }
 }
@@ -30,15 +25,16 @@ describe('TUI Session storage preflight', () => {
       backend: 'session-persistence-jsonl',
       expectedFormat: SESSION_FORMAT_VERSION,
       compatibleSessions: 1,
-      supportsRawArtifacts: true,
+      supportsRawArtifacts: false,
     })
     expect(list).toHaveBeenCalledOnce()
   })
 
-  it('fails closed with a backup location for incompatible metadata', async () => {
-    const { owner } = persistence([{ version: SESSION_FORMAT_VERSION + 1, id: 'future' }])
+  it('fails closed with storage backup guidance for incompatible metadata', async () => {
+    const { owner, list } = persistence([])
+    list.mockRejectedValueOnce(new Error('unsupported Session format 4'))
     await expect(preflightTuiSessionStorage(owner)).rejects.toThrow(
-      /Back up: \/sessions\/future\/session\.jsonl\.zstd/u,
+      /Back up the configured Session store/u,
     )
   })
 

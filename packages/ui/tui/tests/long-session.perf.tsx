@@ -1,3 +1,4 @@
+import type { TuiAssistantStream } from '../src/assistant-stream.ts'
 /** Opt-in deterministic benchmark for native TUI long-session projection and rendering. */
 
 import { Readable, Writable } from 'node:stream'
@@ -13,7 +14,7 @@ import {
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subagent'
 import {
-  foldTranscript, TuiTranscriptProjectionCache, type TranscriptNode, type TranscriptTodoNode,
+  foldTranscript, projectTuiAssistantStream, TuiTranscriptProjectionCache, type TranscriptNode, type TranscriptTodoNode,
 } from '../src/transcript.ts'
 import { TuiTranscriptSearchIndex } from '../src/transcript-search.ts'
 import { TuiTranscriptView } from '../src/transcript-view.tsx'
@@ -43,7 +44,8 @@ const TARGETS = Object.freeze({
 
 interface LongSessionFixture {
   readonly events: readonly SessionEvent[]
-  readonly appendedEvents: readonly SessionEvent[]
+  readonly stream: TuiAssistantStream
+  readonly appendedStream: TuiAssistantStream
 }
 
 interface SampleSummary {
@@ -67,17 +69,6 @@ type SessionEventInput = {
   ]
 }[SessionEvent['type']]
 
-function event<T extends SessionEvent['type']>(
-  seq: number,
-  type: T,
-  data: Extract<SessionEvent, { type: T }>['data'],
-): Extract<SessionEvent, { type: T }> {
-  const surfaceOp = type === 'user/message' || type === 'assistant/message' || type === 'tool/result'
-    ? { surfaceOp: 'append' as const }
-    : {}
-  return { seq, time: seq, type, data, ...surfaceOp } as Extract<SessionEvent, { type: T }>
-}
-
 function longSessionFixture(nodeCount: number): LongSessionFixture {
   const events: SessionEvent[] = []
   let seq = 0
@@ -94,10 +85,6 @@ function longSessionFixture(nodeCount: number): LongSessionFixture {
   for (let index = 0; index < ordinaryNodes; index += 1) {
     const turn = index + 1
     if (index === ordinaryNodes - 1) {
-      append('assistant/chunk', {
-        turn: streamTurn, step: 1,
-        chunk: { type: 'text-delta', index: 0, text: `streaming needle ${index}` },
-      })
       continue
     }
     if (index % 5 === 0) {
@@ -108,7 +95,7 @@ function longSessionFixture(nodeCount: number): LongSessionFixture {
       continue
     }
     if (index % 5 === 1) {
-      append('assistant/message', {
+      append('assistant/message', { stream: [],
         turn, step: 1,
         message: createAssistantMessage({
           content: [{
@@ -186,11 +173,15 @@ function longSessionFixture(nodeCount: number): LongSessionFixture {
     { content: 'Measure streaming append', status: 'in_progress' },
     { content: 'Retain deterministic task fixture', status: 'pending' },
   ] })
-  const appended = event(seq, 'assistant/chunk', {
-    turn: streamTurn, step: 1,
-    chunk: { type: 'text-delta', index: 0, text: ' appended streaming needle' },
-  })
-  return { events: Object.freeze(events), appendedEvents: Object.freeze([...events, appended]) }
+  const stream: TuiAssistantStream = {
+    attemptId: 'benchmark-stream', revision: 1, turn: streamTurn, step: 1,
+    chunks: [{ time: seq, chunk: { type: 'text-delta', index: 0, text: `streaming needle ${ordinaryNodes - 1}` } }],
+  }
+  const appendedStream: TuiAssistantStream = { ...stream, chunks: [
+    ...stream.chunks,
+    { time: seq + 1, chunk: { type: 'text-delta', index: 0, text: ' appended streaming needle' } },
+  ] }
+  return { events: Object.freeze(events), stream, appendedStream }
 }
 
 function samples(operation: () => void, count = 7): SampleSummary {
@@ -294,7 +285,7 @@ describe('native TUI long-session benchmark', () => {
       forceGc()
       const heapBefore = process.memoryUsage().heapUsed
       const fixture = longSessionFixture(nodeCount)
-      const projection = foldTranscript(fixture.events)
+      const projection = [...foldTranscript(fixture.events), ...projectTuiAssistantStream(fixture.stream)]
       const searchIndex = new TuiTranscriptSearchIndex()
       searchIndex.update(projection)
       forceGc()
@@ -309,8 +300,10 @@ describe('native TUI long-session benchmark', () => {
         && node.tools.some(tool => tool.delegation?.stopReason === 'completed'))).toBe(true)
 
       let folded: readonly TranscriptNode[] = projection
-      const initialFold = samples(() => { folded = foldTranscript(fixture.events) })
-      const appendedFold = samples(() => { folded = foldTranscript(fixture.appendedEvents) })
+      const initialFold = samples(() => { folded = [...foldTranscript(fixture.events), ...projectTuiAssistantStream(fixture.stream)] })
+      const appendedFold = samples(() => {
+        folded = [...foldTranscript(fixture.events), ...projectTuiAssistantStream(fixture.appendedStream)]
+      })
       const { rows, todo } = projectedRows(projection)
       const pageRows = Math.max(1, TRANSCRIPT_ROWS - todoPanelRows(todo))
       const viewport = new TuiTranscriptViewportIndex()
@@ -387,7 +380,7 @@ describe('native TUI long-session benchmark', () => {
         instance.rerender(frame)
         stdout.reset()
       }, () => {
-        const nextProjection = projectionCache.update(fixture.appendedEvents)
+        const nextProjection = [...projectionCache.update(fixture.events), ...projectTuiAssistantStream(fixture.appendedStream)]
         const next = projectedRows(nextProjection)
         viewport.update(next.rows, 80)
         const nextPage = viewport.page(pageRows)

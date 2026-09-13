@@ -1,3 +1,5 @@
+import { expandAssistantStream } from './host.ts'
+import type { TuiAssistantStream } from './assistant-stream.ts'
 /** Pure Session-event to semantic terminal-node projection. */
 
 import {
@@ -343,6 +345,7 @@ function contentText(content: readonly ContentBlock[]): string {
     if (block.type === 'text') parts.push(block.text)
     else if (block.type === 'reasoning') parts.push(block.text)
     else if (block.type === 'image') parts.push(`[image: ${block.attachment.name ?? block.attachment.attachmentId}]`)
+    else if (block.type === 'file') parts.push(`[file: ${block.attachment.name}]`)
     else if (block.type === 'tool-call') parts.push(`${block.name} ${block.arguments}`)
     else parts.push(contentText(block.content))
   }
@@ -363,7 +366,7 @@ function knownSessionEvent(event: SessionEvent): TuiKnownSessionEvent | undefine
   return {
     type: 'assistant/message',
     seq: event.seq,
-    text: knownEventText(event.data.message.content.filter(block => block.type === 'text' || block.type === 'image')),
+    text: knownEventText(event.data.message.content.filter(block => block.type === 'text' || block.type === 'image' || block.type === 'file')),
     ...event.data.interrupted === undefined ? {} : { interrupted: event.data.interrupted },
   }
 }
@@ -646,7 +649,6 @@ export function foldTranscript(
 class TranscriptFoldState {
   private readonly nodes: TranscriptNode[] = []
   private readonly nodeIndexByKey = new Map<string, number>()
-  private readonly streamNodes = new Map<string, TranscriptTextNode>()
   private readonly lastAssistantByTurn = new Map<number, TranscriptTextNode>()
   private readonly toolNodes = new Map<string, TranscriptToolNode>()
   private readonly executionGroups = new Map<string, TranscriptToolGroupNode>()
@@ -840,38 +842,10 @@ class TranscriptFoldState {
         : { kind: 'text', key: `event:${event.seq}`, ...rendered, turn: this.currentTurn })
       return
     }
-    if (event.type === 'assistant/chunk') {
-      const projected = chunkText(event.data.chunk)
-      if (projected === undefined) return
-      const streamKey = `${event.data.turn}:${event.data.step}:${projected.tone}`
-      const previous = this.streamNodes.get(streamKey)
-      if (previous === undefined) {
-        const node: TranscriptTextNode = {
-          kind: 'text', key: `stream:${streamKey}`, tone: projected.tone,
-          label: projected.tone === 'reasoning' ? 'Thinking' : 'Assistant', text: projected.text,
-          ...projected.tone === 'reasoning' ? { reasoningStartedAt: event.time } : {},
-        }
-        this.streamNodes.set(streamKey, node)
-        this.pushRaw(node)
-      } else {
-        const next = {
-          ...previous,
-          text: previous.text + projected.text,
-          ...projected.tone === 'reasoning'
-            ? { durationMs: Math.max(0, event.time - (previous.reasoningStartedAt ?? event.time)) }
-            : {},
-        }
-        this.replaceRaw(previous, next)
-        this.streamNodes.set(streamKey, next)
-      }
-      return
-    }
     if (event.type === 'assistant/message') {
       if (!isAppendSurfaceEvent(event)) return
-      const visible = event.data.message.content.filter(block => block.type === 'text' || block.type === 'image')
+      const visible = event.data.message.content.filter(block => block.type === 'text' || block.type === 'image' || block.type === 'file')
       const reasoning = event.data.message.content.filter(block => block.type === 'reasoning')
-      const assistantKey = `${event.data.turn}:${event.data.step}:assistant`
-      const reasoningKey = `${event.data.turn}:${event.data.step}:reasoning`
       const rendered = this.renderKnownEvent?.(knownSessionEvent(event) ?? {
         type: 'assistant/message', seq: event.seq, text: '',
       })
@@ -887,28 +861,18 @@ class TranscriptFoldState {
           messageId: String(event.data.message.id), turn: event.data.turn, step: event.data.step,
           ...continuation ? { continuation: true as const } : {},
         }
-      const streamedAssistant = this.streamNodes.get(assistantKey)
-      const streamedAssistantIndex = streamedAssistant === undefined
-        ? -1
-        : this.nodeIndexByKey.get(streamedAssistant.key) ?? -1
-      const assistantIndex = streamedAssistantIndex < 0 ? this.nodes.length : streamedAssistantIndex
-      if (streamedAssistantIndex < 0) this.pushRaw(assistantNode)
-      else if (streamedAssistant !== undefined) this.replaceRaw(streamedAssistant, assistantNode)
+      const assistantIndex = this.nodes.length
+      this.pushRaw(assistantNode)
       this.lastAssistantByTurn.set(event.data.turn, assistantNode)
       if (reasoning.length > 0) {
         const reasoningNode: TranscriptTextNode = {
           kind: 'text', key: `event:${event.seq}:reasoning`, tone: 'reasoning', label: 'Thinking', text: contentText(reasoning),
           durationMs: (() => {
-            const streamed = this.streamNodes.get(reasoningKey)
-            return streamed?.reasoningStartedAt === undefined ? undefined : Math.max(0, event.time - streamed.reasoningStartedAt)
+            const first = expandAssistantStream(event.data.stream).find(item => item.chunk.type === 'reasoning-delta')
+            return first === undefined ? undefined : Math.max(0, event.time - first.time)
           })(),
         }
-        const streamedReasoning = this.streamNodes.get(reasoningKey)
-        const reasoningIndex = streamedReasoning === undefined
-          ? -1
-          : this.nodeIndexByKey.get(streamedReasoning.key) ?? -1
-        if (reasoningIndex < 0) this.insertRaw(Math.max(0, assistantIndex), reasoningNode)
-        else if (streamedReasoning !== undefined) this.replaceRaw(streamedReasoning, reasoningNode)
+        this.insertRaw(Math.max(0, assistantIndex), reasoningNode)
       }
       return
     }
@@ -1131,4 +1095,27 @@ export class TuiTranscriptProjectionCache {
     this.window.commit(events)
     return state.snapshot()
   }
+}
+
+/**
+ * Project active output independently from the durable transcript cache.
+ * @param stream - current Agent-owned transient attempt.
+ * @returns provisional text nodes removed as soon as the attempt settles.
+ */
+export function projectTuiAssistantStream(stream: TuiAssistantStream | undefined): readonly TranscriptNode[] {
+  if (stream === undefined) return []
+  const nodes = new Map<string, TranscriptTextNode>()
+  for (const { time, chunk } of stream.chunks) {
+    const projected = chunkText(chunk)
+    if (projected === undefined) continue
+    const previous = nodes.get(projected.tone)
+    const started = previous?.reasoningStartedAt ?? time
+    nodes.set(projected.tone, {
+      kind: 'text', key: `stream:${stream.attemptId}:${projected.tone}`, tone: projected.tone,
+      label: projected.tone === 'reasoning' ? 'Thinking' : 'Assistant',
+      text: (previous?.text ?? '') + projected.text, turn: stream.turn, step: stream.step,
+      ...projected.tone === 'reasoning' ? { reasoningStartedAt: started, durationMs: Math.max(0, time - started) } : {},
+    })
+  }
+  return [...nodes.values()]
 }

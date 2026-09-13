@@ -1,3 +1,6 @@
+import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
+import { SESSION_LOG_FILENAME } from '@deepseek-ai/dsh-session-log-export'
+import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 /** Host Session export service: root preflight, bounded ZIP writing, exclusive publication, and cancellation cleanup. */
 
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
@@ -13,7 +16,7 @@ import {
   SessionLogOffset, SessionSeq, type SessionEvent, type SessionHeader, type SessionId,
 } from '@deepseek-ai/dsh-session'
 import type { SessionLineageNode } from '@deepseek-ai/dsh-session-query'
-import type { SessionInspection, SessionRawArtifact } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionInspection } from '@deepseek-ai/dsh-session-persistence'
 import SessionLogExporter, {
   prepareSessionLogExport,
   renderSessionMarkdown,
@@ -30,7 +33,7 @@ afterEach(async () => {
 
 function header(id: string, parentSession?: SessionId): SessionHeader {
   return {
-    version: 0,
+    version: SESSION_FORMAT_VERSION,
     id: sid(id),
     createdAt: 1,
     cwd: '/workspace',
@@ -40,9 +43,12 @@ function header(id: string, parentSession?: SessionId): SessionHeader {
   }
 }
 
-function artifact(id: string, content = `${id}\n`, parentSession?: SessionId): SessionRawArtifact {
+function artifact(id: string, content = `${id}\n`, parentSession?: SessionId): SessionInspection {
   return {
-    meta: header(id, parentSession), inheritedEventCount: SessionLogOffset(0), filename: 'session.jsonl', content,
+    meta: header(id, parentSession), inheritedEventCount: SessionLogOffset(0), events: [{
+      type: 'user/message', seq: SessionSeq(0), time: 1, surfaceOp: 'append',
+      data: createUserMessage({ content: [{ type: 'text', text: content }], source: { kind: 'user' } }),
+    }],
   }
 }
 
@@ -54,9 +60,8 @@ function lineageNode(id: string): SessionLineageNode {
 }
 
 interface Services {
-  readonly root?: SessionRawArtifact | undefined
-  readonly readRaw?: (id: SessionId, signal?: AbortSignal) => Promise<SessionRawArtifact | undefined>
-  readonly inspect?: (id: SessionId, signal?: AbortSignal) => Promise<SessionInspection>
+  readonly root?: SessionInspection | undefined
+  readonly readSnapshot?: (id: SessionId, signal?: AbortSignal) => Promise<SessionInspection | undefined>
   readonly traceSession?: (id: SessionId, signal?: AbortSignal) => Promise<{
     target: { header: SessionHeader; live: boolean; persisted: boolean }
     ancestors: readonly SessionLineageNode[]
@@ -64,7 +69,6 @@ interface Services {
     root: { header: SessionHeader; live: boolean; persisted: boolean }
     descendants: readonly SessionLineageNode[]
   }>
-  readonly supportsRawArtifacts?: boolean
   readonly flush?: () => Promise<boolean>
 }
 
@@ -75,13 +79,18 @@ function contextWithServices(services: Services = {}): Context {
     flush: services.flush ?? (async () => true),
   } as never)
   ctx.provide('sessionPersistence', {
-    supportsRawArtifacts: services.supportsRawArtifacts ?? true,
-    readRaw: services.readRaw ?? (async (id: SessionId) => id === sid('root')
-      ? services.root ?? artifact('root')
-      : undefined),
-    inspect: services.inspect ?? (async (id: SessionId) => ({
-      meta: header(String(id)), inheritedEventCount: SessionLogOffset(0), events: [],
-    })),
+    open: async (id: SessionId, access: string, options?: { signal?: AbortSignal }) => {
+      expect(access).toBe('read')
+      const source = services.readSnapshot === undefined
+        ? id === sid('root') ? services.root ?? artifact('root') : undefined
+        : await services.readSnapshot(id, options?.signal)
+      if (source === undefined) throw new SessionPersistenceNotFoundError(id)
+      return {
+        id, access, header: source.meta, inheritedEventCount: source.inheritedEventCount,
+        read: async () => ({ eventState: 'detached', events: structuredClone(source.events) }),
+        close: async () => {},
+      }
+    },
   } as never)
   ctx.provide('sessionQuery', {
     traceSession: services.traceSession ?? (async () => ({
@@ -125,7 +134,7 @@ function markdownEvents(id: string): SessionEvent[] {
     },
     {
       type: 'assistant/message', seq: SessionSeq(1), time: 110,
-      data: {
+      data: { stream: [],
         turn: 1, step: 1,
         message: createMessage({
           role: 'assistant',
@@ -162,21 +171,20 @@ describe('prepareSessionLogExport', () => {
         flushed = true
         return true
       },
-      readRaw: async () => {
+      readSnapshot: async () => {
         expect(flushed).toBe(true)
         return artifact('root', 'durable-after-flush\n')
       },
     })
     const prepared = await prepareSessionLogExport(ctx, sid('root'), new AbortController().signal)
-    expect(prepared.root.content).toBe('durable-after-flush\n')
+    expect(prepared.root).toContain('durable-after-flush\\n')
   })
 
-  it('reports unsupported raw artifacts and missing roots with stable codes', async () => {
-    const unsupported = contextWithServices({ supportsRawArtifacts: false })
-    await expect(prepareSessionLogExport(unsupported, sid('root'), new AbortController().signal))
-      .rejects.toMatchObject({ code: 'raw-artifacts-unsupported' })
+  it('exports logical logs without a raw-artifact capability and reports missing roots', async () => {
+    const exported = await prepareSessionLogExport(contextWithServices(), sid('root'), new AbortController().signal)
+    expect(exported.root).toContain('\"version\":3')
 
-    const missing = contextWithServices({ readRaw: async () => undefined })
+    const missing = contextWithServices({ readSnapshot: async () => undefined })
     await expect(prepareSessionLogExport(missing, sid('root'), new AbortController().signal))
       .rejects.toMatchObject({ code: 'session-not-found' })
   })
@@ -188,7 +196,7 @@ describe('prepareSessionLogExport', () => {
     await expect(prepareSessionLogExport(contextWithServices(), sid('root'), controller.signal))
       .rejects.toBe(cancellation)
 
-    const ctx = contextWithServices({ readRaw: async () => { throw new Error('/private/session.jsonl') } })
+    const ctx = contextWithServices({ readSnapshot: async () => { throw new Error('/private/session.jsonl') } })
     await expect(prepareSessionLogExport(ctx, sid('root'), new AbortController().signal))
       .rejects.toEqual(expect.objectContaining({
         code: 'prepare-failed',
@@ -219,7 +227,7 @@ describe('SessionLogExporter.writeToDirectory', () => {
     })
     expect(await readFile(original, 'utf8')).toBe('existing')
     const files = unzipSync(await readFile(result.path))
-    expect(strFromU8(files['session.jsonl'] as Uint8Array)).toBe('exact raw text\n')
+    expect(strFromU8(files[SESSION_LOG_FILENAME] as Uint8Array)).toContain('exact raw text\\n')
     expect((await stat(result.path)).mode & 0o777).toBe(0o600)
     expect((await readdir(directory)).sort()).toEqual([
       'dsh-session-root-2.zip',
@@ -259,7 +267,7 @@ describe('SessionLogExporter.writeToDirectory', () => {
         root: { header: header('root'), live: true, persisted: true },
         descendants: [lineageNode('child')],
       }),
-      readRaw: async (id, signal) => {
+      readSnapshot: async (id, signal) => {
         if (id === sid('root')) return artifact('root')
         if (signal === undefined) throw new Error('missing producer signal')
         reportStarted(signal)
@@ -312,7 +320,7 @@ describe('SessionLogExporter.writeToDirectory', () => {
 describe('Session Markdown export', () => {
   it('renders human-visible messages and tool summaries without arguments or attachment bytes', async () => {
     const ctx = contextWithServices({
-      inspect: async id => ({
+      readSnapshot: async id => ({
         meta: header(String(id)), inheritedEventCount: SessionLogOffset(0), events: markdownEvents(String(id)),
       }),
     })
@@ -339,7 +347,7 @@ describe('Session Markdown export', () => {
     await writeFile(join(directory, 'dsh-session-root.md'), 'existing')
     const childId = sid('child')
     const ctx = contextWithServices({
-      inspect: async id => ({
+      readSnapshot: async id => ({
         meta: header(String(id), id === childId ? sid('root') : undefined),
         inheritedEventCount: SessionLogOffset(0),
         events: markdownEvents(String(id)),
@@ -372,7 +380,7 @@ describe('Session Markdown export', () => {
     let reportStarted!: (signal: AbortSignal) => void
     const started = new Promise<AbortSignal>((resolve) => { reportStarted = resolve })
     const ctx = contextWithServices({
-      inspect: async (_id, signal) => new Promise<SessionInspection>((_resolve, reject) => {
+      readSnapshot: async (_id, signal) => new Promise<SessionInspection>((_resolve, reject) => {
         if (signal === undefined) throw new Error('missing inspection signal')
         reportStarted(signal)
         signal.addEventListener('abort', () => { reject(signal.reason as Error) }, { once: true })
@@ -396,7 +404,7 @@ describe('Session Markdown export', () => {
 
   it('sanitizes persistence failures before exposing them to the TUI', async () => {
     const exporter = new SessionLogExporter(contextWithServices({
-      inspect: async () => { throw new Error('/private/session.sqlite') },
+      readSnapshot: async () => { throw new Error('/private/session.sqlite') },
     }), {})
     await expect(exporter.writeMarkdownToDirectory(
       { sessionId: sid('root'), includeDescendants: false },

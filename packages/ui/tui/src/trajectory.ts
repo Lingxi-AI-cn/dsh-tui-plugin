@@ -227,6 +227,7 @@ function contentText(content: readonly ContentBlock[]): string {
   const text = content.flatMap((block): string[] => {
     if (block.type === 'text' || block.type === 'reasoning') return [block.text]
     if (block.type === 'image') return [`[image: ${block.attachment.name ?? block.attachment.attachmentId}]`]
+    if (block.type === 'file') return [`[file: ${block.attachment.name}]`]
     if (block.type === 'tool-call') return [`${block.name} ${block.arguments}`]
     return [contentText(block.content)]
   }).filter(Boolean).join('\n')

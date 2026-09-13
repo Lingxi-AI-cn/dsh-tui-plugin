@@ -1,7 +1,7 @@
 /** Local HTTPS Registry and trusted profile lifecycle provider. */
 
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -41,12 +41,31 @@ const DEFAULT_MAX_ARTIFACT_BYTES = 100 * 1024 * 1024
 const DEFAULT_PLAN_TTL_MS = 5 * 60_000
 const MAX_REDIRECTS = 3
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
-const INSTALL_ANCHOR = fileURLToPath(new URL('../package.json', import.meta.url))
+const INSTALL_ANCHOR = resolveHostInstallationAnchor()
 const DSH_VERSION = readPackageVersion()
+
+function resolveHostInstallationAnchor(): string {
+  const entrypoint = process.argv[1]
+  if (entrypoint !== undefined && existsSync(entrypoint)) {
+    let directory = dirname(realpathSync(entrypoint))
+    for (;;) {
+      const manifest = join(directory, 'package.json')
+      if (existsSync(manifest)) {
+        const data = JSON.parse(readFileSync(manifest, 'utf8')) as { name?: unknown }
+        if (data.name === '@deepseek-ai/dsh') return manifest
+      }
+      const parent = dirname(directory)
+      if (parent === directory) break
+      directory = parent
+    }
+  }
+  // Embedded Hosts still derive compatibility from their official boot owner.
+  return fileURLToPath(new URL('../package.json', import.meta.resolve('@deepseek-ai/dsh-app-boot')))
+}
 
 function readPackageVersion(): string {
   const version = (JSON.parse(readFileSync(INSTALL_ANCHOR, 'utf8')) as { version?: unknown }).version
-  if (typeof version !== 'string') throw new Error('plugin-hub-local package version is missing')
+  if (typeof version !== 'string') throw new Error('plugin-hub-local Host package version is missing')
   return version
 }
 

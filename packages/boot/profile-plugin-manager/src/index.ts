@@ -10,7 +10,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { constants, createReadStream, existsSync, lstatSync, readFileSync } from 'node:fs'
 import {
-  cp, mkdir, readFile, rename, rm, stat, writeFile,
+  copyFile, cp, mkdir, readFile, rename, rm, stat, writeFile,
 } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { runNativeCommand } from '@deepseek-ai/dsh-native-command'
@@ -634,7 +634,23 @@ export class ProfilePluginManager {
     } else {
       if (artifact === undefined) throw new ProfilePluginError('typed install requires an artifact', 'INVALID_ARTIFACT')
       checkedArtifact = await verifyArtifact(artifact)
-      args = ['add', '--save-exact', checkedArtifact.path]
+      // Keep the file dependency relocatable with an inactive profile generation.
+      // A short relative spec also avoids pnpm store filenames encoding the entire cache path.
+      const digest = await digestFile(checkedArtifact.path)
+      const artifactDir = join(this.options.profileDir, '.dsh-artifacts')
+      await mkdir(artifactDir, { recursive: true, mode: 0o700 })
+      const artifactName = `${digest.toString('base64url')}.tgz`
+      const localPath = join(artifactDir, artifactName)
+      try {
+        await copyFile(checkedArtifact.path, localPath, constants.COPYFILE_EXCL)
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      }
+      await verifyArtifact({
+        ...checkedArtifact, path: localPath,
+        digest: { algorithm: 'sha512', encoding: 'base64', value: digest.toString('base64') },
+      })
+      args = ['add', '--save-exact', `./.dsh-artifacts/${artifactName}`]
     }
     const pnpm = await this.spawnPnpm(args, spawnOptions(signal))
     if (pnpm.aborted) throw new ProfilePluginError('pnpm operation was cancelled', 'OPERATION_ABORTED')

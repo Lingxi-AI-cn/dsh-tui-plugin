@@ -140,6 +140,7 @@ describe('trusted Plugin Hub installation planning', () => {
     ['expired', { expiresAt: '2026-08-18T11:59:59.000Z' }, 'DESCRIPTOR_EXPIRED'],
     ['wrong surface', { surfaces: ['headless'] }, 'SURFACE_INCOMPATIBLE'],
     ['incompatible DSH', { dsh: '>=9.0.0' }, 'DSH_INCOMPATIBLE'],
+    ['TUI version is not the Host version', { dsh: '=0.1.10-rc.2' }, 'DSH_INCOMPATIBLE'],
   ] as const)('rejects a %s descriptor before profile mutation', async (_label, overrides, code) => {
     const fixture = await createFixture({ descriptorOverrides: overrides })
     const ctx = await createContext(fixture)
@@ -298,6 +299,14 @@ async function createContext(
     ...overrides,
   })
   await ctx.pluginHub.installed()
+  // These unit fixtures own local bundle manifests; the Vitest launcher is not a DSH installation.
+  for (const name of ['@deepseek-ai/dsh-base', '@lingxi-ai-cn/dsh-tui']) {
+    const directory = join(fixture.profileDir, 'node_modules', name)
+    mkdirSync(directory, { recursive: true })
+    writeFileSync(join(directory, 'package.json'), JSON.stringify({ name, version: '1.0.0',
+      dsh: { bundle: { patch: './cordis.patch.yml' } } }))
+    writeFileSync(join(directory, 'cordis.patch.yml'), '[]\n')
+  }
   return ctx
 }
 

@@ -10,6 +10,9 @@ import {
   type SessionEvent,
 } from './host.ts'
 
+import { updateTuiAssistantStream, type TuiAssistantStream } from './assistant-stream.ts'
+import type { AssistantStreamFrame } from './host.ts'
+
 type Listener = () => void
 
 /** Observable immutable value with stable snapshots for `useSyncExternalStore`. */
@@ -44,6 +47,17 @@ export class ValueStore<T> {
 
 /** Append-only observable Session-event snapshot. */
 export class SessionEventStore extends ValueStore<readonly SessionEvent[]> {
+  /** Separate transient presentation channel for the current Agent attempt. */
+  readonly stream = new ValueStore<TuiAssistantStream | undefined>(undefined)
+
+  /**
+   * Apply an Agent-owned frame without adding it to Session history.
+   * @param frame - ordered frame from the owning Agent.
+   */
+  acceptStream(frame: AssistantStreamFrame): void {
+    this.stream.set(updateTuiAssistantStream(this.stream.getSnapshot(), frame))
+  }
+
   constructor(events: readonly SessionEvent[]) {
     super(Object.freeze([...events]))
   }
@@ -53,6 +67,9 @@ export class SessionEventStore extends ValueStore<readonly SessionEvent[]> {
    * @param event - exact post-commit event.
    */
   append(event: SessionEvent): void {
+    const live = this.stream.getSnapshot()
+    if ((event.type === 'assistant/message' || event.type === 'assistant/attempt')
+      && live?.turn === event.data.turn && live.step === event.data.step) this.stream.set(undefined)
     this.set(Object.freeze([...this.getSnapshot(), event]))
   }
 }

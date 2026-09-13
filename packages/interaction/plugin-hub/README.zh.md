@@ -11,6 +11,8 @@ kind: "package-reference"
 
 这是通过 `ctx.pluginHub` 提供的 provider-neutral 人工 Plugin Hub 能力。服务拥有稳定的目录、installed state、detached plan、staging 和 activation handoff DTO，以及 provider 注册、临时 progress event、错误分类和显式 `supportsProfileMutations()` capability；HTTP、cache、signature、profile 修改、包管理器、journal 和 maintenance process 都属于 provider。只提供目录的 provider 会报告 `false`，因此 consumer 可以继续提供发现与已安装事实，而不呈现进程内修改操作。
 
+## 目录契约
+
 目录详情 DTO 会保留 repository archive 状态、声明与验证过的 operating system、有界 curation note，以及带 severity 与 recommended action 的结构化 advisory。这些只是发现和风险展示事实；任何一项都不能确立 installability，也不能替代 signed descriptor 校验。
 
 目录 row 还可以携带由 Registry 提供的 category、package kind、metadata source 和 repository primary language。这些字段只用于展示和可选搜索筛选；client 不会从 README text、description、repository name 或 popularity 推断它们。

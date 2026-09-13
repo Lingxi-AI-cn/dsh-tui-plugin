@@ -28,7 +28,14 @@ async function parse(args: string[]): Promise<{ value?: TuiStartupValues; exits:
   internals.stderr = sink
   const ctx = new Context()
   provideCmdline(ctx, { args, exit: (code) => { exits.push(code) } })
-  applyStartup(ctx)
+  const originalEntrypoint = process.argv[1]
+  process.argv[1] = fileURLToPath(new URL('../../../../apps/cli/src/bin.ts', import.meta.url))
+  try {
+    applyStartup(ctx)
+  } finally {
+    if (originalEntrypoint === undefined) process.argv.splice(1, 1)
+    else process.argv[1] = originalEntrypoint
+  }
   const value: unknown = ctx.get(TUI_STARTUP_SERVICE)
   await ctx.fiber.dispose()
   if (value !== undefined && !isStartupValues(value)) throw new Error('tuiStartup published an invalid test value')
@@ -99,7 +106,7 @@ describe('TUI bundle plugin', () => {
 
     const ctx = new Context()
     tuiApp.apply(ctx)
-    await ctx.plugin(SystemPrompt, { persona: '' })
+    await ctx.plugin(SystemPrompt, { personaPrefix: '' })
     await new Promise(resolve => setTimeout(resolve, 0))
     const assembly = await ctx.systemPrompt.assemble()
     expect(assembly.sections.find(section => section.name === 'harness:source')?.text)

@@ -263,6 +263,7 @@ export class OpenAICodexAdapter extends PiAiAdapter {
       requestImageMaxBytes: DEFAULT_REQUEST_IMAGE_MAX_BYTES,
       retryPolicy: resolveRetryPolicy(undefined, 'llm-openai-codex.retryPolicy'),
       configuredMaxTokens: new Map(),
+      modelErrors: new Map(),
       piProvider: provider,
     })
     const profiles = new Map([[OPENAI_CODEX_PROVIDER, profile]])

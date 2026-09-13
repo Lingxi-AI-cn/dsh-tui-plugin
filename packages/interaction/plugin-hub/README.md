@@ -11,6 +11,8 @@ English | [中文](README.zh.md)
 
 Provider-neutral human Plugin Hub capability exposed as `ctx.pluginHub`. The service owns stable catalog, installed-state, detached-plan, staging, and activation-handoff DTOs plus provider registration, transient progress events, the error taxonomy, and an explicit `supportsProfileMutations()` capability. HTTP, cache, signatures, profile mutation, package-manager work, journals, and maintenance processes belong to providers. A catalog-only provider reports `false`, so a consumer can keep discovery and installed truth active without presenting an in-process mutation action.
 
+## Catalog contract
+
 Catalog detail DTOs preserve repository archive state, declared and verified operating systems, bounded curation notes, and structured advisories with severity and recommended action. These are discovery and risk-display facts; none can establish installability or replace signed descriptor verification.
 
 Catalog rows may also carry Registry-owned categories, package kind, metadata source, and repository primary language. These fields are presentation and optional search filters only; clients do not infer them from README text, descriptions, repository names, or popularity.

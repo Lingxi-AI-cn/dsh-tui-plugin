@@ -14,17 +14,10 @@ function errorText(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error)
 }
 
-function backupLocations(persistence: SessionPersistence, headers: readonly SessionHeader[]): readonly string[] {
-  return [...new Set(headers.flatMap((header) => {
-    const location = persistence.locate(header)
-    return location === undefined ? [] : [location.path]
-  }))]
-}
-
 /**
  * Refuse incompatible or unreadable storage before any TUI-owned Session write.
  * The official metadata listing is intentionally used instead of `load()` or
- * `inspect()`, so this gate neither repairs tails nor reads Session content.
+ * opening a content read handle, so this gate neither repairs tails nor reads Session content.
  * @param persistence - mounted Session persistence owner to inspect.
  * @param signal - optional cancellation for the metadata listing.
  * @returns non-secret compatibility facts safe for runtime diagnostics.
@@ -35,7 +28,7 @@ export async function preflightTuiSessionStorage(
 ): Promise<TuiSessionStoragePreflight> {
   let headers: readonly SessionHeader[]
   try {
-    headers = await persistence.list(signal)
+    headers = (await persistence.list(signal === undefined ? {} : { signal })).map(snapshot => snapshot.header)
   } catch (error: unknown) {
     signal?.throwIfAborted()
     throw new Error(
@@ -46,19 +39,10 @@ export async function preflightTuiSessionStorage(
     )
   }
   signal?.throwIfAborted()
-  const incompatible = headers.filter(header => header.version !== SESSION_FORMAT_VERSION)
-  if (incompatible.length > 0) {
-    const locations = backupLocations(persistence, incompatible)
-    throw new Error(
-      `${persistence.name} contains ${incompatible.length} Session(s) outside format ${SESSION_FORMAT_VERSION}. `
-      + `${locations.length === 0 ? 'Back up the configured Session store.' : `Back up: ${locations.join(', ')}.`} `
-      + 'Use the matching previous DSH build to export them; this TUI will not write to the store.',
-    )
-  }
   return Object.freeze({
     backend: persistence.name,
     expectedFormat: SESSION_FORMAT_VERSION,
     compatibleSessions: headers.length,
-    supportsRawArtifacts: persistence.supportsRawArtifacts,
+    supportsRawArtifacts: false,
   })
 }

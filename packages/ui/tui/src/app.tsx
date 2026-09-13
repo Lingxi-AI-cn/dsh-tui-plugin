@@ -15,7 +15,7 @@ import {
 } from './store.ts'
 import {
   navigateTuiTranscriptTurn, STRUCTURED_CHILD_LIMIT,
-  tuiTranscriptTurnAnchors, TuiTranscriptProjectionCache,
+  tuiTranscriptTurnAnchors, TuiTranscriptProjectionCache, projectTuiAssistantStream,
 } from './transcript.ts'
 import { TodoPanel, todoPanelRows, todoPanelScreenMapLines } from './todo-panel.tsx'
 import {
@@ -1128,6 +1128,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const pluginHubDialog = useSyncExternalStore(props.pluginHubDialog.subscribe, props.pluginHubDialog.getSnapshot)
   const providerCenter = useSyncExternalStore(props.providerCenter.subscribe, props.providerCenter.getSnapshot)
   const work = useSyncExternalStore(props.work.subscribe, props.work.getSnapshot)
+  const liveStream = useSyncExternalStore(props.events.stream.subscribe, props.events.stream.getSnapshot)
   const transcriptProjection = useMemo(() => new TuiTranscriptProjectionCache(), [props.agent])
   const transcriptDetailCache = useMemo(() => new TuiTranscriptDetailCache(), [props.agent])
   const transcriptViewport = useMemo(() => new TuiTranscriptViewportIndex(), [props.agent])
@@ -1141,8 +1142,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     [props.agent],
   )
   const projection = useMemo(
-    () => transcriptProjection.update(eventSnapshot, resolveTool, renderKnownSessionEvent),
-    [eventSnapshot, renderKnownSessionEvent, resolveTool, transcriptProjection],
+    () => [...transcriptProjection.update(eventSnapshot, resolveTool, renderKnownSessionEvent), ...projectTuiAssistantStream(liveStream)],
+    [eventSnapshot, liveStream, renderKnownSessionEvent, resolveTool, transcriptProjection],
   )
   const currentTodo = useMemo(() => projection.find(node => node.kind === 'todo'), [projection])
   const rows = useMemo(() => projection.filter(node => node.kind !== 'todo'), [projection])
@@ -2596,7 +2597,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     contextBreakdown: props.view.kind === 'root' ? contextBreakdown : undefined,
     sessionStats: props.view.kind === 'root' ? sessionStats : undefined,
     speed: props.view.kind === 'root'
-      ? projectTuiLatestSpeed(eventSnapshot, Date.now()) ?? projectTuiSettledSpeed(sessionStats)
+      ? projectTuiLatestSpeed(eventSnapshot, Date.now(), liveStream) ?? projectTuiSettledSpeed(sessionStats)
       : undefined,
     work: work.summary,
     schedules: props.view.kind === 'root' ? schedules : undefined,

@@ -1,3 +1,5 @@
+import { AssistantStreamAccumulator, type TimedStreamChunk } from '@deepseek-ai/dsh-llm'
+import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 /** Pure transcript, interaction, terminal-safety, and startup-failure coverage. */
 
 import { resolve } from 'node:path'
@@ -78,6 +80,12 @@ afterEach(() => {
   Object.assign(terminalInternals, originalStreams)
   externalEditorInternals.spawn = originalEditorSpawn
 })
+
+function packTestStream(chunks: readonly TimedStreamChunk[]) {
+  const stream = new AssistantStreamAccumulator()
+  for (const chunk of chunks) stream.push(chunk)
+  return [...stream.snapshot()]
+}
 
 function event<T extends SessionEvent['type']>(
   seq: number,
@@ -271,8 +279,8 @@ describe('foldTranscript', () => {
       content: [{ type: 'text', text: 'Supplemental conclusion.' }], source: { provider: 'p', model: 'm' },
     })
     const nodes = foldTranscript([
-      event(0, 'assistant/message', { turn: 1, step: 1, message: first }),
-      event(1, 'assistant/message', { turn: 1, step: 2, message: second }),
+      event(0, 'assistant/message', { stream: [], turn: 1, step: 1, message: first }),
+      event(1, 'assistant/message', { stream: [], turn: 1, step: 2, message: second }),
       event(2, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
     ])
     expect(nodes).toMatchObject([
@@ -294,10 +302,7 @@ describe('foldTranscript', () => {
     const complete = [
       event(0, 'turn/start', { turn: 1 }),
       event(1, 'step/start', { turn: 1, step: 1 }),
-      event(2, 'assistant/chunk', {
-        turn: 1, step: 1, chunk: { type: 'usage', usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 } },
-      }),
-      event(3, 'assistant/message', {
+      event(3, 'assistant/message', { stream: packTestStream([{ time: 2, chunk: { type: 'usage', usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 } } }]),
         turn: 1, step: 1, message: assistant, usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
       }),
       event(4, 'step/end', { turn: 1, step: 1 }),
@@ -325,11 +330,11 @@ describe('foldTranscript', () => {
     const nodes = foldTranscript([
       event(0, 'turn/start', { turn: 1 }),
       event(1, 'user/message', createUserMessage({ content: [{ type: 'text', text: 'one' }], source: { kind: 'user' } })),
-      event(2, 'assistant/message', { turn: 1, step: 1, message: assistant('first') }),
+      event(2, 'assistant/message', { stream: [], turn: 1, step: 1, message: assistant('first') }),
       event(3, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
       event(4, 'turn/start', { turn: 2 }),
       event(5, 'user/message', createUserMessage({ content: [{ type: 'text', text: 'two' }], source: { kind: 'user' } })),
-      event(6, 'assistant/message', { turn: 2, step: 1, message: assistant('second') }),
+      event(6, 'assistant/message', { stream: [], turn: 2, step: 1, message: assistant('second') }),
       event(7, 'turn/end', { turn: 2, reason: { kind: 'completed' } }),
     ])
     const anchors = tuiTranscriptTurnAnchors(nodes)
@@ -411,8 +416,7 @@ describe('foldTranscript', () => {
     })
     const events: SessionEvent[] = [
       event(0, 'user/message', user),
-      event(1, 'assistant/chunk', { turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'partial' } }),
-      event(2, 'assistant/message', { turn: 1, step: 1, message: assistant }),
+      event(2, 'assistant/message', { stream: packTestStream([{ time: 1, chunk: { type: 'text-delta', index: 0, text: 'partial' } }]), turn: 1, step: 1, message: assistant }),
       event(3, 'tool/call', { turn: 1, step: 1, callId, name: 'bash', arguments: '{"cmd":"pwd"}' }),
       event(4, 'tool/result', { turn: 1, step: 1, message: result }),
       event(5, 'turn/end', { turn: 1, reason: { kind: 'error', error: { code: 'SERVER', message: 'down' } } }),
@@ -443,7 +447,7 @@ describe('foldTranscript', () => {
     })
     const rendered = foldTranscript([
       event(0, 'user/message', user),
-      event(1, 'assistant/message', { turn: 1, step: 1, message: assistant }),
+      event(1, 'assistant/message', { stream: [], turn: 1, step: 1, message: assistant }),
     ], undefined, input => input.type === 'assistant/message'
       ? { label: 'Extension', text: `${input.text} · ${input.seq}`, tone: 'status' }
       : undefined)
@@ -459,9 +463,7 @@ describe('foldTranscript', () => {
       source: { provider: 'p', model: 'm' },
     })
     const nodes = foldTranscript([
-      { ...event(1, 'assistant/chunk', { turn: 1, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: 'considered ' } }), time: 100 },
-      { ...event(2, 'assistant/chunk', { turn: 1, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: 'alternatives' } }), time: 350 },
-      { ...event(3, 'assistant/message', { turn: 1, step: 1, message: assistant }), time: 600 },
+      { ...event(3, 'assistant/message', { stream: packTestStream([{ time: 100, chunk: { type: 'reasoning-delta', index: 0, text: 'considered ' } }, { time: 350, chunk: { type: 'reasoning-delta', index: 0, text: 'alternatives' } }]), turn: 1, step: 1, message: assistant }), time: 600 },
     ])
     expect(nodes[0]).toMatchObject({ tone: 'reasoning', text: 'considered alternatives', durationMs: 500 })
   })
@@ -476,7 +478,7 @@ describe('foldTranscript', () => {
 
   it('omits model-only surface replacements from the human transcript', () => {
     const replacement = {
-      ...event(1, 'assistant/message', {
+      ...event(1, 'assistant/message', { stream: [],
         turn: 1,
         step: 1,
         message: createAssistantMessage({
@@ -484,8 +486,7 @@ describe('foldTranscript', () => {
           source: { provider: 'p', model: 'm' },
         }),
       }),
-      surfaceOp: { op: 'replace' as const, start: SessionSeq(0), end: SessionSeq(0) },
-      sourceEventSeqs: [SessionSeq(0)],
+      surfaceOp: { op: 'replace' as const, startSeq: SessionSeq(0), endSeq: SessionSeq(0) },
     }
     expect(foldTranscript([replacement])).toEqual([])
   })
@@ -501,7 +502,7 @@ describe('foldTranscript', () => {
         content: [{ type: 'text', text: 'Model-only checkpoint' }],
         source: compactCheckpointSource(compactionId, commandId),
       })),
-      surfaceOp: { op: 'replace' as const, start: SessionSeq(0), end: SessionSeq(0) },
+      surfaceOp: { op: 'replace' as const, startSeq: SessionSeq(0), endSeq: SessionSeq(0) },
       sourceEventSeqs: [SessionSeq(0), SessionSeq(1), SessionSeq(2)],
     }
     const nodes = foldTranscript([
@@ -765,13 +766,7 @@ describe('TuiTranscriptProjectionCache', () => {
       event(0, 'user/message', createUserMessage({
         content: [{ type: 'text', text: 'Incremental prompt' }], source: { kind: 'user' },
       })),
-      event(1, 'assistant/chunk', {
-        turn: 1, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: 'Think ' },
-      }),
-      event(2, 'assistant/chunk', {
-        turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'partial' },
-      }),
-      event(3, 'assistant/message', {
+      event(3, 'assistant/message', { stream: packTestStream([{ time: 1, chunk: { type: 'reasoning-delta', index: 0, text: 'Think ' } }, { time: 2, chunk: { type: 'text-delta', index: 0, text: 'partial' } }]),
         turn: 1, step: 1,
         message: createAssistantMessage({
           content: [{ type: 'reasoning', text: 'Thought' }, { type: 'text', text: 'Complete' }],
@@ -811,23 +806,20 @@ describe('TuiTranscriptProjectionCache', () => {
     }
   })
 
-  it('preserves unchanged node identity and replaces only an updated streaming block', () => {
+  it('preserves durable node identity independently of transient output', () => {
     const user = event(0, 'user/message', createUserMessage({
       content: [{ type: 'text', text: 'Stable user' }], source: { kind: 'user' },
     }))
-    const firstChunk = event(1, 'assistant/chunk', {
-      turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'first' },
-    })
-    const secondChunk = event(2, 'assistant/chunk', {
-      turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: ' second' },
-    })
     const cache = new TuiTranscriptProjectionCache()
-    const first = cache.update([user, firstChunk])
-    expect(cache.update([user, firstChunk])).toBe(first)
-    const second = cache.update([user, firstChunk, secondChunk])
+    const first = cache.update([user])
+    expect(cache.update([user])).toBe(first)
+    const committed = event(1, 'assistant/message', {
+      stream: [], turn: 1, step: 1,
+      message: createAssistantMessage({ content: [{ type: 'text', text: 'first second' }], source: { provider: 'p', model: 'm' } }),
+    })
+    const second = cache.update([user, committed])
     expect(second[0]).toBe(first[0])
-    expect(second[1]).not.toBe(first[1])
-    expect(second[1]).toMatchObject({ key: 'stream:1:1:assistant', text: 'first second' })
+    expect(second[1]).toMatchObject({ key: 'event:1:assistant', text: 'first second' })
   })
 
   it('fully resets for a non-prefix snapshot and a compaction lifecycle', () => {
@@ -2625,7 +2617,7 @@ describe('TUI Session rewind boundaries', () => {
       ...event(3, 'user/message', createUserMessage({
         content: [{ type: 'text', text: 'model-only summary' }], source: { kind: 'user' },
       })),
-      surfaceOp: { op: 'replace' as const, start: SessionSeq(1), end: SessionSeq(1) },
+      surfaceOp: { op: 'replace' as const, startSeq: SessionSeq(1), endSeq: SessionSeq(1) },
       sourceEventSeqs: [SessionSeq(1)],
     }
     const plugin = createUserMessage({
@@ -2674,7 +2666,7 @@ describe('TUI Session resume picker', () => {
     const { live, persisted, omitCwd, ...header } = options
     return {
       header: {
-        version: 0,
+        version: SESSION_FORMAT_VERSION,
         id: SessionId(id),
         createdAt,
         delegationDepth: 0,
@@ -2701,8 +2693,6 @@ describe('TUI Session resume picker', () => {
       .toBe('session is already live in this runtime')
     expect(summarize(record('memory', 1, { live: false, persisted: false })).disabledReason)
       .toBe('session is not persisted')
-    expect(summarize(record('format', 1, { live: false, persisted: true, version: 99 })).disabledReason)
-      .toBe('session format is incompatible')
     expect(summarize(record('child', 1, { live: false, persisted: true, origin: 'subagent' })).disabledReason)
       .toBe('subagent-owned session')
     expect(summarizeTuiResumeCandidate(

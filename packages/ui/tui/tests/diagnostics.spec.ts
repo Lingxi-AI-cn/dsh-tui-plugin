@@ -13,20 +13,20 @@ import {
 
 const host: TuiHostDiagnosticSnapshot = Object.freeze({
   compatibility: 'compatible',
-  dshVersion: '0.1.2-rc.1',
-  supportedDshVersion: '0.1.2-rc.1',
-  tuiVersion: '0.1.9-rc.1',
+  dshVersion: '0.1.5-rc.2',
+  supportedDshVersion: '0.1.5-rc.2',
+  tuiVersion: '0.1.10-rc.2',
   profile: 'tui',
   nodeVersion: '24.7.0',
   platform: 'darwin',
   architecture: 'arm64',
   packages: Object.freeze([Object.freeze({
     name: '@deepseek-ai/dsh-app-boot',
-    version: '0.1.2-rc.1',
+    version: '0.1.5-rc.2',
     manifestPath: '/opt/dsh/node_modules/@deepseek-ai/dsh-app-boot/package.json',
   })]),
   agentPresetIds: Object.freeze(['standard', 'ptc', 'minimal', 'cordis']),
-  recoveryCommand: 'dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.9-rc.1',
+  recoveryCommand: 'dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.10-rc.2',
 })
 
 function input(overrides: Partial<TuiDiagnosticInput> = {}): TuiDiagnosticInput {

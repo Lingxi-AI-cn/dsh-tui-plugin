@@ -12,9 +12,9 @@ import { basename, extname, isAbsolute, join } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { SessionRawArtifact } from '@deepseek-ai/dsh-session-persistence'
 import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
+  readSessionLogText,
   flushLiveSessionLog,
   sessionLogExportDeps,
   sessionLogZipFilename,
@@ -58,7 +58,6 @@ export type {
 /** Stable failure categories shared by the native writer and host transports. */
 export type SessionLogExportErrorCode =
   | 'services-unavailable'
-  | 'raw-artifacts-unsupported'
   | 'session-not-found'
   | 'prepare-failed'
   | 'destination-invalid'
@@ -85,8 +84,8 @@ export class SessionLogExportError extends Error {
 export interface PreparedSessionLogExport {
   /** Mounted services used while descendant and attachment entries stream. */
   readonly ready: SessionLogExportReady
-  /** Root artifact already flushed and read for the first ZIP entry. */
-  readonly root: SessionRawArtifact
+  /** Root logical log already flushed and read for the first ZIP entry. */
+  readonly root: string
 }
 
 /** One export request independent of its transport or destination. */
@@ -131,7 +130,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 /**
- * Flush and read the root artifact before any ZIP byte is produced. Expected
+ * Flush and read the root logical log before any ZIP byte is produced. Expected
  * capability and persistence failures use {@link SessionLogExportError}; an
  * aborted signal preserves its original reason.
  * @param ctx - composed host context.
@@ -152,22 +151,16 @@ export async function prepareSessionLogExport(
       'session log export is unavailable: missing session-query, session-persistence, or attachments service',
     )
   }
-  if (!deps.sessionPersistence.supportsRawArtifacts) {
-    throw new SessionLogExportError(
-      'raw-artifacts-unsupported',
-      'session log export is unavailable: the persistence backend does not expose per-session raw artifacts',
-    )
-  }
   const ready: SessionLogExportReady = {
     sessionQuery: deps.sessionQuery,
     sessionPersistence: deps.sessionPersistence,
     attachments: deps.attachments,
     sessions: deps.sessions,
   }
-  let root: SessionRawArtifact | undefined
+  let root: string | undefined
   try {
     await flushLiveSessionLog(deps, sessionId, signal)
-    root = await deps.sessionPersistence.readRaw(sessionId, signal)
+    root = await readSessionLogText(deps.sessionPersistence, sessionId, signal)
     signal.throwIfAborted()
   } catch (error) {
     signal.throwIfAborted()

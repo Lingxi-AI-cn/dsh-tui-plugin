@@ -58,7 +58,6 @@ class FakeSubprocess {
         }
         const stdout = Readable.from([response.bytes])
         const handle = {
-          pid: 1,
           stdin: undefined,
           stdout,
           stderr: undefined,

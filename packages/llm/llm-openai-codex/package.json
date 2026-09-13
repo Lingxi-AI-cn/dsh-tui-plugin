@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-llm-openai-codex",
   "description": "OpenAI Codex ChatGPT OAuth adapter with dynamic account model discovery",
-  "version": "0.1.9-rc.1",
+  "version": "0.1.10-rc.2",
   "publishConfig": {
     "access": "public"
   },
@@ -31,18 +31,18 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/dsh-attachment": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-authorization": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-atomic-write": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-credentials": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-home-paths": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-invariants": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-llm": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-llm-pi-ai": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-timeout": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-attachment": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-authorization": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-atomic-write": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-home-paths": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-timeout": "0.1.5-rc.2",
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/schemastery": "3.18.2",
-    "@earendil-works/pi-ai": "0.84.4"
+    "@earendil-works/pi-ai": "0.85.1"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-attachment": {
@@ -83,20 +83,20 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-attachment": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-authorization": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-atomic-write": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-credentials": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-home-paths": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-invariants": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-llm": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-llm-pi-ai": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-timeout": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-attachment": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-authorization": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-atomic-write": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-home-paths": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-timeout": "0.1.5-rc.2",
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/schemastery": "3.18.2",
-    "@earendil-works/pi-ai": "0.84.4",
+    "@earendil-works/pi-ai": "0.85.1",
     "@deepseek-ai/cordis-plugin-loader": "1.0.3",
     "@deepseek-ai/cordis-plugin-include": "1.0.7",
-    "@deepseek-ai/dsh-credentials-local": "0.1.2-rc.1"
+    "@deepseek-ai/dsh-credentials-local": "0.1.5-rc.2"
   }
 }

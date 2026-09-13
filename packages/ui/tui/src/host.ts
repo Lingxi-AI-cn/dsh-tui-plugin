@@ -64,6 +64,7 @@ export type {
   Agent,
   AgentHandle,
   AgentStatus,
+  AssistantStreamFrame,
   ModelSelection,
   ModelSelectionRef,
 } from '@deepseek-ai/dsh-agent'
@@ -73,10 +74,10 @@ export type {
 export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { JobId } from '@deepseek-ai/dsh-jobs'
 export type { JobSnapshot, JobStatus } from '@deepseek-ai/dsh-jobs'
-export { createUserMessage, errorChain, freezeMessage, normalizeApiKey, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+export { expandAssistantStream, createUserMessage, errorChain, freezeMessage, normalizeApiKey, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 export type {
   ContentBlock, LlmConfigurableProvider, LlmDiscoveredModel, LlmModelDiscoveryRequest,
-  StreamChunk, TokenUsage, UserMessage,
+  StreamChunk, TokenUsage, UserMessage, TimedStreamChunk,
 } from '@deepseek-ai/dsh-llm'
 export { MessageId } from '@deepseek-ai/dsh-llm/brand'
 export { runNativeCommand } from '@deepseek-ai/dsh-native-command'
@@ -86,6 +87,7 @@ export {
 } from '@deepseek-ai/dsh-session/surface'
 export {
   SESSION_FORMAT_VERSION,
+  Session,
   SessionId,
   SessionLogOffset,
 } from '@deepseek-ai/dsh-session'

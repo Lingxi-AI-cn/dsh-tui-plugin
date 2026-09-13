@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.10-rc.2
+
+- Supports exactly official DeepSeek Harness `0.1.5-rc.2` across all seven packages, with pi-ai `0.85.1`.
+- Reads Session v3 through logical persistence handles, preserves inherited history during cold rename, and exports canonical logical logs.
+- Renders revisioned assistant streams across active child views while retaining durable Session messages as transcript truth.
+- Updates attachment and subagent provenance handling, official Host identification, and profile artifact paths.
+- Preserves the independent Codex provider and provider-owned credentials. Real-account OAuth, native IME preedit, and the wider terminal matrix remain manual checks.
+
 ## 0.1.9-rc.1
 
 - Keeps exact compatibility with official DeepSeek Harness `0.1.2-rc.1` across all seven packages.

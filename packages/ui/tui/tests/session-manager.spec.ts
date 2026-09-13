@@ -1,3 +1,4 @@
+import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 /** Session Manager metadata joins, archive filtering, and Workspace projection. */
 
 import { describe, expect, it } from 'vitest'
@@ -12,7 +13,7 @@ const workspaceId = (value: string): TuiWorkspaceId => value as TuiWorkspaceId
 function candidate(id: string, cwd: string | undefined, title: string, current = false, updatedAt = 200) {
   const record: SessionRecord = {
     header: {
-      version: 0,
+      version: SESSION_FORMAT_VERSION,
       id: SessionId(id),
       createdAt: 100,
       isSeeded: false,

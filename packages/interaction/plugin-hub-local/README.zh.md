@@ -9,7 +9,13 @@ kind: "package-reference"
 
 ## 概述
 
-这是可信本地 Plugin Hub provider。部署显式提供 HTTPS `registryUrl` 和本地固定的 Ed25519 key；缺少配置时可选 provider 不挂载。目录响应会进行 runtime parse 和 API 版本校验，最多在配置的 Registry origin 内跟随三次 redirect，限制字节数并遵守调用方取消；Registry 暂时不可用时保留进程内 last-good view。HTTP 304 响应会验证匹配的 ETag entry，并返回其 cached value 而不把目录标记为 stale；其他 Registry failure 可以使用 last-good fallback。Registry detail 响应会归一化 `validationMatrix` row（`manifest`、`install` 和 `tui-boot`），并严格把 quarantine、repository archive、operating-system、curation 和结构化 advisory 事实投影为 provider-neutral DTO；detail metadata 异常时会 fail closed。
+这是可信本地 Plugin Hub provider。部署显式提供 HTTPS `registryUrl` 和本地固定的 Ed25519 key；缺少配置时可选 provider 不挂载。
+
+## Registry 行为
+
+安装验证从当前运行的官方 DSH 启动器解析内置 bundle，并使用该 Host 版本进行兼容性检查。嵌入式 Host 回退到官方 app-boot owner；独立版本的 TUI 包不会被当作 DSH 兼容性目标。
+
+目录响应会进行 runtime parse 和 API 版本校验，最多在配置的 Registry origin 内跟随三次 redirect，限制字节数并遵守调用方取消；Registry 暂时不可用时保留进程内 last-good view。HTTP 304 响应会验证匹配的 ETag entry，并返回其 cached value 而不把目录标记为 stale；其他 Registry failure 可以使用 last-good fallback。Registry detail 响应会归一化 `validationMatrix` row（`manifest`、`install` 和 `tui-boot`），并严格把 quarantine、repository archive、operating-system、curation 和结构化 advisory 事实投影为 provider-neutral DTO；detail metadata 异常时会 fail closed。
 
 ## 目录
 
@@ -17,7 +23,7 @@ kind: "package-reference"
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 - [开发备注](#dev-note)
 
-`profileMutations` 默认为 `false`。在这种适用于后装插件的安全模式中，Registry 浏览和 active-profile `installed()` 事实仍然可用，修改方法以 `CONTRACT_UNSUPPORTED` 失败，启动 ready 操作则为空操作。已发布 TUI bundle 使用该模式，因为官方 DSH `0.1.2-rc.1` 在 profile composition 之前没有通用 recovery hook；用户通过 `dsh plugin --profile tui ...` 执行修改。设置 `profileMutations: true` 会启用下文所述的 downstream maintenance lifecycle，只供安装了配套 pre-composition recovery hook 的 composition 使用。
+`profileMutations` 默认为 `false`。在这种适用于后装插件的安全模式中，Registry 浏览和 active-profile `installed()` 事实仍然可用，修改方法以 `CONTRACT_UNSUPPORTED` 失败，启动 ready 操作则为空操作。已发布 TUI bundle 使用该模式，因为官方 DSH `0.1.5-rc.2` 在 profile composition 之前没有通用 recovery hook；用户通过 `dsh plugin --profile tui ...` 执行修改。设置 `profileMutations: true` 会启用下文所述的 downstream maintenance lifecycle，只供安装了配套 pre-composition recovery hook 的 composition 使用。
 
 目录 search 会把 provider-neutral 的 `relevance`、`stars`、`updated` 或 `newest` ordering 传给 Registry，将 ordering 纳入 request cache key，并让 signed snapshot fallback 使用相同 ordering 和 cursor binding。Registry 返回 `INVALID_CURSOR` 时会保留为 typed provider error，不会静默从第一页重启。
 
