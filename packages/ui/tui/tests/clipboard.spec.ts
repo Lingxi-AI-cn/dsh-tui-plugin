@@ -61,6 +61,7 @@ class FakeSubprocess {
           stdin: undefined,
           stdout,
           stderr: undefined,
+          control: undefined,
           collected: {},
           done: Promise.resolve({ exitCode: response.exitCode, signal: response.signal }),
           terminate: this.terminated,

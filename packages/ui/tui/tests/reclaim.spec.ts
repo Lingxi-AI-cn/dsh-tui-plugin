@@ -5,7 +5,7 @@ import { selectTuiReclaimableMessage, tuiReclaimMessageText } from '../src/recla
 function message(text: string, source: 'user' | 'plugin' = 'user') {
   return createUserMessage({
     content: [{ type: 'text', text }],
-    source: source === 'user' ? { kind: 'user' } : { kind: 'plugin', plugin: 'fixture' },
+    source: source === 'user' ? { kind: 'user' } : { kind: 'test' },
   })
 }
 

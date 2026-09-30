@@ -7,8 +7,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.11-rc.2'
-const DSH_VERSION = '0.1.5-rc.2'
+const TUI_VERSION = '0.1.12-rc.2'
+const DSH_VERSION = '0.1.7-rc.2'
 const PACKAGE_DIRS = Object.freeze([
   'packages/boot/profile-plugin-manager',
   'packages/llm/llm-openai-codex',

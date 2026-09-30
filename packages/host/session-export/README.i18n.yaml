@@ -1,6 +1,34 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/host/session-export/README.md
-README.md: 08694e65ca50f27bb950f153f4658f84d76ff013
-README.zh.md: 3ed832c27850f6dd884a7c6a001f0c901233ba78
+/:
+  en: b3a23fc7c673d031
+  zh: 31102138f992720d
+/lingxi-ai-cn-dsh-session-export:
+  en: 31131f25a4a35377
+  zh: 793bd79ca807e7e4
+/lingxi-ai-cn-dsh-session-export/summary:
+  en: 8938ce5c3fd628ae
+  zh: e061940c1c839cf4
+/lingxi-ai-cn-dsh-session-export/native-publication:
+  en: 60c726adb792145c
+  zh: 41937cf3623faf09
+/lingxi-ai-cn-dsh-session-export/table-of-contents:
+  en: 73bf9d2f705fceff
+  zh: 5c28cc3236a08dc4
+/lingxi-ai-cn-dsh-session-export/configuration:
+  en: f8285a133ac1be41
+  zh: 61f375835be01061
+/lingxi-ai-cn-dsh-session-export/model-experience:
+  en: aacc51f6547095d6
+  zh: e4c0ccad3c89d128
+/lingxi-ai-cn-dsh-session-export/model-experience/kv-cache-effect:
+  en: 03aa3b7d0769fe81
+  zh: 3c14b5e0dbe6f8ce
+/lingxi-ai-cn-dsh-session-export/known-limitations-and-deferred-work:
+  en: 44bfce4ec97611ac
+  zh: 1e0f62fb42ad9b62
+/lingxi-ai-cn-dsh-session-export/known-limitations-and-deferred-work/dev-note:
+  en: 0a1253c6f7b5e8b9
+  zh: 9f56528562c7c914

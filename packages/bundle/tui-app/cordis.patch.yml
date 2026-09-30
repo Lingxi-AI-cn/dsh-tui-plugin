@@ -20,6 +20,9 @@
 # rows are Agent-plane consumers in dsh-base; leaving even one enabled leaks a
 # global tool or prompt behavior into Minimal and can collide with a preset's
 # scoped registration.
+- id: tool-plugin-manager
+  disabled: true
+
 - id: tool-bash
   disabled: true
 
@@ -33,9 +36,6 @@
   disabled: true
 
 - id: tool-fs-search
-  disabled: true
-
-- id: tool-str-replace-editor
   disabled: true
 
 - id: skill-filesystem
@@ -74,7 +74,7 @@
 - id: tool-subagent-fork
   disabled: true
 
-- id: workflow-worker-thread
+- id: workflow-ptc
   disabled: true
 
 - id: tool-workflow
@@ -97,11 +97,6 @@
     # mounts its preset.
     - id: subagent-model-selection-settings
       name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
-
-    # PTC owns only the per-Agent Code Mode presentation. Its worker runtime is
-    # a Host singleton shared by every PTC Session.
-    - id: code-runtime
-      name: '@deepseek-ai/dsh-code-runtime-worker-thread'
 
     # Creator composes the model-facing Cordis tool inside the preset; its
     # runtime/inspection backends are Host singletons shared by all Sessions.
@@ -128,6 +123,11 @@
     # contains provider timing boundaries.
     - id: session-stats
       name: '@deepseek-ai/dsh-session-stats'
+
+    # Schedule restores cold ordinary Sessions through the official Host
+    # controller. Its browser file-upload registration stays conditional.
+    - id: session-controller
+      name: '@deepseek-ai/dsh-api-session-controller'
 
     # The native status row and /schedules panel consume this owner's active
     # projection. Creation, deletion, persistence, and dispatch remain owned
@@ -183,7 +183,7 @@
       name: '@lingxi-ai-cn/dsh-plugin-hub-local'
       config:
         profile: tui
-        # Official rc.1 has no generic pre-composition recovery hook. Keep the
+        # The official launcher has no generic pre-composition recovery hook. Keep the
         # published post-install bundle catalog-only and use `dsh plugin` for
         # profile changes.
         profileMutations: false
@@ -198,14 +198,11 @@
     - id: tui-startup
       name: '@lingxi-ai-cn/dsh-tui/startup'
 
-    # The official package owns both its bundled system presets and the
-    # writable DSH_HOME user root.
-    - id: agent-presets
-      name: '@deepseek-ai/dsh-agent-presets'
+    # Preset declarations are contributed by supported Agent-preset plugins.
+    - id: agent-preset-registry
+      name: '@deepseek-ai/dsh-agent-preset-registry'
       config:
         default: standard
-        includeShippedRoot: true
-        includeUserRoot: true
 
     - id: tui-app
       name: '@lingxi-ai-cn/dsh-tui'

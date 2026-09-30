@@ -2,8 +2,9 @@
 
 import { readdirSync, readFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
+import { composeEntries, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 
 const ROOT = new URL('../../../..', import.meta.url)
 const PACKAGE_DIRS = Object.freeze([
@@ -28,6 +29,7 @@ interface PackageManifest {
   readonly peerDependencies?: Readonly<Record<string, string>>
   readonly peerDependenciesMeta?: Readonly<Record<string, { readonly optional?: boolean }>>
   readonly repository?: { readonly url?: string }
+  readonly dsh?: { readonly bundle?: { readonly patch?: string | readonly string[] } }
 }
 
 function manifest(directory: string): PackageManifest {
@@ -52,7 +54,7 @@ describe('post-install TUI package surface', () => {
   const top = manifests[0]!
 
   it('publishes one same-version Lingxi package family without install hooks or source exports', () => {
-    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.11-rc.2']))
+    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.12-rc.2']))
     for (const entry of manifests) {
       expect(entry.name).toMatch(/^@lingxi-ai-cn\/dsh-/u)
       expect(entry.repository?.url).toBe(REPOSITORY)
@@ -64,7 +66,38 @@ describe('post-install TUI package surface', () => {
         if (name.startsWith('@lingxi-ai-cn/dsh-')) expect(spec).toBe('workspace:*')
       }
     }
-    expect(top.files).toEqual(expect.arrayContaining(['cordis.patch.yml', 'README.md', 'LICENSE']))
+    expect(top.files).toEqual(expect.arrayContaining([
+      'cordis.patch.yml', 'presets/standard.patch.yml', 'presets/ptc.patch.yml',
+      'presets/minimal.patch.yml', 'presets/cordis.patch.yml', 'README.md', 'LICENSE',
+    ]))
+    expect(Object.keys(top.exports ?? {}).filter(key => key.startsWith('./presets/'))).toEqual([
+      './presets/standard.patch.yml', './presets/ptc.patch.yml',
+      './presets/minimal.patch.yml', './presets/cordis.patch.yml',
+    ])
+  })
+
+  it('composes the four official preset declarations after the TUI registry', () => {
+    const files = top.dsh?.bundle?.patch
+    expect(files).toEqual([
+      './cordis.patch.yml', './presets/standard.patch.yml', './presets/ptc.patch.yml',
+      './presets/minimal.patch.yml', './presets/cordis.patch.yml',
+    ])
+    if (!Array.isArray(files)) throw new Error('TUI bundle has no ordered preset patch files')
+    const layers = files.map(file => loadOverlayPatches('TUI preset closure', new URL(`../${file}`, import.meta.url).pathname))
+    const registry = layers[0]?.flatMap(patch => patch.insert ?? []).find(row => row.id === 'agent-preset-registry')
+    expect(registry?.name).toBe('@deepseek-ai/dsh-agent-preset-registry')
+    const rows = layers.slice(1).flatMap(layer => layer.flatMap(patch => patch.insert ?? []))
+    expect(rows.map(row => row.id)).toEqual(['preset-standard', 'preset-ptc', 'preset-minimal', 'preset-cordis'])
+    expect(rows.every(row => row.name === '@deepseek-ai/dsh-agent-preset')).toBe(true)
+    expect(rows.map(row => (row.config as { id?: string } | undefined)?.id))
+      .toEqual(['standard', 'ptc', 'minimal', 'cordis'])
+    expect(top.peerDependencies).toHaveProperty('@deepseek-ai/dsh-agent-preset')
+    const base = loadOverlayPatches('TUI base', fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-base/cordis.patch.yml')))
+    const composed = composeEntries([base, ...layers])
+    expect(composed.filter(row => row.id?.startsWith('preset-')).map(row => row.id))
+      .toEqual(['preset-standard', 'preset-ptc', 'preset-minimal', 'preset-cordis'])
+    expect(composed.find(row => row.id === 'agent-preset-registry')?.name)
+      .toBe('@deepseek-ai/dsh-agent-preset-registry')
   })
 
   it('keeps every official package as an exact packed peer supplied by the DSH installation', () => {
@@ -105,29 +138,32 @@ describe('post-install TUI package surface', () => {
     const overrides = new Set(patches.filter(entry => entry.id !== undefined).map(entry => entry.id))
     expect(overrides).toEqual(new Set([
       'system-prompt', 'hmr', 'tools',
-      'tool-bash', 'tool-pwsh', 'tool-jobs', 'tool-fs', 'tool-fs-search',
-      'tool-str-replace-editor', 'skill-filesystem', 'tool-skill', 'tool-goal', 'command-goal',
+      'tool-plugin-manager', 'tool-bash', 'tool-pwsh', 'tool-jobs', 'tool-fs', 'tool-fs-search',
+      'skill-filesystem', 'tool-skill', 'tool-goal', 'command-goal',
       'plan-mode', 'compaction-basic', 'command-compact', 'tool-result-pruner',
       'tool-subagent-control', 'tool-subagent-list-agents', 'tool-subagent',
-      'tool-subagent-fork', 'workflow-worker-thread', 'tool-workflow', 'tool-ralph',
+      'tool-subagent-fork', 'workflow-ptc', 'tool-workflow', 'tool-ralph',
       'agent-instructions', 'tool-todo', 'tool-web',
     ]))
     const closure = new Set([top.name, ...Object.keys(top.dependencies ?? {}), ...Object.keys(top.peerDependencies ?? {})])
     const rows = patches.flatMap(entry => entry.insert ?? [])
     const inserted = rows.map(entry => entry.name).filter((name): name is string => name !== undefined)
     expect(inserted.filter(name => name.startsWith('@deepseek-ai/') || name.startsWith('@lingxi-ai-cn/'))
-      .filter(name => ![...closure].some(owner => name === owner || name.startsWith(`${owner}/`))
-        && !name.startsWith(`${top.name}/`))).toEqual([])
-    expect(rows.some(entry => entry.id === 'code-runtime'
-      && entry.name === '@deepseek-ai/dsh-code-runtime-worker-thread')).toBe(true)
+      .filter((name) => {
+        const packageName = /^(@[^/]+\/[^/]+)/u.exec(name)?.[1]
+        return packageName === undefined || !closure.has(packageName)
+      })).toEqual([])
+    expect(rows.some(entry => ['code-runtime', 'storage', 'storage-json', 'storage-domain', 'session-projection-cache']
+      .includes(entry.id ?? ''))).toBe(false)
     expect(rows.find(entry => entry.id === 'cordis-host-runner')?.name)
       .toBe('@deepseek-ai/dsh-cordis-host-runner')
-    expect(rows.find(entry => entry.id === 'agent-presets')).toMatchObject({
-      name: '@deepseek-ai/dsh-agent-presets',
-      config: { default: 'standard', includeShippedRoot: true, includeUserRoot: true },
+    expect(rows.find(entry => entry.id === 'agent-preset-registry')).toMatchObject({
+      name: '@deepseek-ai/dsh-agent-preset-registry', config: { default: 'standard' },
     })
-    expect(rows.find(entry => entry.id === 'message-feedback')?.name)
-      .toBe('@deepseek-ai/dsh-message-feedback')
+    expect(rows.find(entry => entry.id === 'session-controller')?.name)
+      .toBe('@deepseek-ai/dsh-api-session-controller')
+    expect(rows.find(entry => entry.id === 'workspace')?.name).toBe('@deepseek-ai/dsh-workspace')
+    expect(rows.find(entry => entry.id === 'message-feedback')?.name).toBe('@deepseek-ai/dsh-message-feedback')
     expect(rows.find(entry => entry.id === 'directory-picker')).toMatchObject({
       name: '@deepseek-ai/dsh-host-directory-picker-browse', config: { maxEntries: 1000 },
     })

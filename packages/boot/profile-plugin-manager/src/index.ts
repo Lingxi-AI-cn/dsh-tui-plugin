@@ -199,9 +199,8 @@ export async function inspectProfileInstalled(
       resolvedPath = packagePath
       version = parsed.version
       bundlePatch = parsed.bundlePatch
-      if (bundlePatch !== undefined && !isSafePackageRelativePath(bundlePatch)) {
-        health = 'manifest-invalid'
-      } else if (bundlePatch !== undefined && !existsSync(resolve(packagePath, bundlePatch))) {
+      if (parsed.bundlePatches?.some(patch => !isSafePackageRelativePath(patch)
+        || !existsSync(resolve(packagePath, patch))) === true) {
         health = 'manifest-invalid'
       } else if (bundlePatch !== undefined && !bundles.includes(packageName)) {
         health = 'missing-entry'
@@ -599,8 +598,9 @@ export class ProfilePluginManager {
       }
       try {
         const packageDir = resolveBundleDir('dsh profile manager', bundle, this.options.installAnchor, profileDir)
-        const patch = parsePackageManifest(readFileSync(join(packageDir, 'package.json'), 'utf8'), bundle).bundlePatch
-        if (patch === undefined || !existsSync(resolve(packageDir, patch))) errors.push(`${bundle}: bundle patch is missing`)
+        const patches = parsePackageManifest(readFileSync(join(packageDir, 'package.json'), 'utf8'), bundle).bundlePatches
+        if (patches === undefined || patches.some(patch => !isSafePackageRelativePath(patch)
+          || !existsSync(resolve(packageDir, patch)))) errors.push(`${bundle}: bundle patch is missing`)
       } catch (error: unknown) {
         errors.push(`${bundle}: ${String(error)}`)
       }
@@ -835,13 +835,17 @@ function findPackageResolution(packages: unknown, packageName: string, version: 
 async function readInstalledBundlePatch(profileDir: string, packageName: string): Promise<string | undefined> {
   try {
     const parsed = parsePackageManifest(await readFile(join(profileDir, 'node_modules', packageName, 'package.json'), 'utf8'), packageName)
-    if (parsed.bundlePatch === undefined || !isSafePackageRelativePath(parsed.bundlePatch)) return undefined
-    if (!existsSync(resolve(profileDir, 'node_modules', packageName, parsed.bundlePatch))) return undefined
+    if (parsed.bundlePatches === undefined || parsed.bundlePatches.some(patch => !isSafePackageRelativePath(patch)
+      || !existsSync(resolve(profileDir, 'node_modules', packageName, patch)))) return undefined
     return parsed.bundlePatch
   } catch { return undefined }
 }
 
-function parsePackageManifest(raw: string, expectedName: string): { readonly version: string; readonly bundlePatch?: string } {
+function parsePackageManifest(raw: string, expectedName: string): {
+  readonly version: string
+  readonly bundlePatch?: string
+  readonly bundlePatches?: readonly string[]
+} {
   const parsed = JSON.parse(raw) as unknown
   if (!isRecord(parsed) || parsed.name !== expectedName || typeof parsed.version !== 'string' || parsed.version === '') {
     throw new Error(`package manifest for ${expectedName} is invalid`)
@@ -849,8 +853,15 @@ function parsePackageManifest(raw: string, expectedName: string): { readonly ver
   const dsh = isRecord(parsed.dsh) ? parsed.dsh : {}
   const bundle = isRecord(dsh.bundle) ? dsh.bundle : {}
   const patch = bundle.patch
-  if (patch !== undefined && typeof patch !== 'string') throw new Error(`dsh.bundle.patch for ${expectedName} is invalid`)
-  return { version: parsed.version, ...patch === undefined ? {} : { bundlePatch: patch } }
+  if (patch === undefined) return { version: parsed.version }
+  const bundlePatches = typeof patch === 'string' ? [patch] : patch
+  if (!Array.isArray(bundlePatches) || bundlePatches.length === 0
+    || !bundlePatches.every(file => typeof file === 'string')) {
+    throw new Error(`dsh.bundle.patch for ${expectedName} is invalid`)
+  }
+  const firstPatch = bundlePatches[0]
+  if (firstPatch === undefined) throw new Error(`dsh.bundle.patch for ${expectedName} is invalid`)
+  return { version: parsed.version, bundlePatch: firstPatch, bundlePatches }
 }
 
 function validateArtifact(artifact: ProfilePluginArtifact): ProfilePluginArtifact {

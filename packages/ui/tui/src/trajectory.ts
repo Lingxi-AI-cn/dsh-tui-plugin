@@ -229,7 +229,8 @@ function contentText(content: readonly ContentBlock[]): string {
     if (block.type === 'image') return [`[image: ${block.attachment.name ?? block.attachment.attachmentId}]`]
     if (block.type === 'file') return [`[file: ${block.attachment.name}]`]
     if (block.type === 'tool-call') return [`${block.name} ${block.arguments}`]
-    return [contentText(block.content)]
+    if (block.type === 'tool-addition') return [`[tool added: ${block.toolName}]`]
+    return [`[tool removed: ${block.toolName}]`]
   }).filter(Boolean).join('\n')
   return boundedInspectorText(text)
 }
@@ -243,6 +244,7 @@ function turnEndDetail(reason: TurnEndReason): string {
       : reason.reason.kind
     return `aborted (${cause})`
   }
+  if (reason.kind === 'forked') return 'forked'
   return terminalSafe(`error ${reason.error.code}: ${reason.error.message}`).slice(0, 240)
 }
 
@@ -416,7 +418,7 @@ function projectEvent(
       const data = event.data
       const callId = data.message.source.callId
       const dispatched = toolDispatches.get(callId)
-      const text = contentText(data.message.content[0].content)
+      const text = contentText(data.message.content)
       return {
         key: `tool-result:${String(callId)}:${event.seq}`,
         kind: 'tool-result',

@@ -2886,7 +2886,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             ...(presetManagerDetail.canCopy ? [{ action: { id: 'presetManager.copy' as const }, label: tuiMessage(locale, 'presets.action.copy') }] : []),
             ...(presetManagerDetail.canDelete ? [{ action: { id: 'presetManager.delete' as const }, label: tuiMessage(locale, 'presets.action.delete') }] : []),
             { action: { id: 'presetManager.view' as const }, label: tuiMessage(locale, 'presets.action.view') },
-            ...(props.pathOpenerAvailable ? [
+            ...(props.pathOpenerAvailable && presetManagerDetail.preset.path !== undefined ? [
               { action: { id: 'presetManager.openFile' as const }, label: tuiMessage(locale, 'presets.action.openFile') },
               { action: { id: 'presetManager.open' as const }, label: tuiMessage(locale, 'presets.action.open') },
             ] : []),
@@ -2913,8 +2913,10 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                 presetManagerDetail.canCopy ? tuiMessage(locale, 'presets.action.copy') : undefined,
                 presetManagerDetail.canDelete ? tuiMessage(locale, 'presets.action.delete') : undefined,
                 tuiMessage(locale, 'presets.action.view'),
-                props.pathOpenerAvailable ? tuiMessage(locale, 'presets.action.openFile') : undefined,
-                props.pathOpenerAvailable ? tuiMessage(locale, 'presets.action.open') : undefined,
+                props.pathOpenerAvailable && presetManagerDetail.preset.path !== undefined
+                  ? tuiMessage(locale, 'presets.action.openFile') : undefined,
+                props.pathOpenerAvailable && presetManagerDetail.preset.path !== undefined
+                  ? tuiMessage(locale, 'presets.action.open') : undefined,
                 tuiMessage(locale, 'presets.action.close'),
               ].filter((label): label is string => label !== undefined).join(' · ')
               : tuiMessage(locale, 'presets.action.close'),
@@ -6653,9 +6655,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             setPresetManagerComposition(undefined)
             setPresetManagerError(terminalSafe(error instanceof Error ? error.message : String(error)))
           })
-        } else if (lower === 'f' && props.pathOpenerAvailable) {
+        } else if (lower === 'f' && props.pathOpenerAvailable && presetManagerDetail.preset.path !== undefined) {
           void props.onOpenPresetFile(presetManagerDetail.preset.id)
-        } else if (lower === 'o' && props.pathOpenerAvailable) {
+        } else if (lower === 'o' && props.pathOpenerAvailable && presetManagerDetail.preset.path !== undefined) {
           void props.onOpenPresetLocation(presetManagerDetail.preset.id)
         }
         return
@@ -8377,8 +8379,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             <TuiSection title={terminalSafe(hostPresetDetail.name)} tone="accent" paddingX={0}>
               <Text>{tuiMessage(locale, 'hostPlugins.presets.detail.identity', {
                 id: hostPresetDetail.preset.id,
-                trust: tuiMessage(locale, hostPresetDetail.preset.trust === 'system'
-                  ? 'presets.system' : 'presets.user'),
+                trust: tuiMessage(locale, 'presets.declared'),
               })}</Text>
               {hostPresetDetail.preset.isDefault
                 && <Text bold>{tuiMessage(locale, 'hostPlugins.presets.default')}</Text>}
@@ -8465,7 +8466,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                         ? tuiMessage(locale, 'hostPlugins.presets.count', { count: row.preset.rows.length })
                         : tuiMessage(locale, 'hostPlugins.presets.broken', { reason: row.broken })
                       const badges = [
-                        tuiMessage(locale, row.preset.trust === 'system' ? 'presets.system' : 'presets.user'),
+                        tuiMessage(locale, 'presets.declared'),
                         row.preset.isDefault ? tuiMessage(locale, 'presets.default') : undefined,
                       ].filter(Boolean).join(' · ')
                       return <TuiListRow
@@ -8625,12 +8626,15 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
             ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
               <TuiSection title={terminalSafe(presetManagerDetail.name)} tone="accent" paddingX={0}>
                 <Text>{tuiMessage(locale, 'presets.detail.trust', {
-                  trust: tuiMessage(locale, presetManagerDetail.trust === 'system' ? 'presets.system' : 'presets.user'),
+                  trust: tuiMessage(locale, presetManagerDetail.trust === 'system' ? 'presets.system'
+                    : presetManagerDetail.trust === 'user' ? 'presets.user' : 'presets.declared'),
                 })}</Text>
                 <Text>{tuiMessage(locale, 'presets.detail.source', {
                   source: presetManagerDetail.trust === 'system'
                     ? tuiMessage(locale, 'presets.source.deployment')
-                    : tuiMessage(locale, 'presets.source.user'),
+                    : presetManagerDetail.trust === 'user'
+                      ? tuiMessage(locale, 'presets.source.user')
+                      : tuiMessage(locale, 'presets.source.declared'),
                 })}</Text>
                 <Text>{presetManagerDetail.current && currentPresetModel !== undefined
                   ? tuiMessage(locale, 'presets.detail.model.current', { model: currentPresetModel })
@@ -8640,7 +8644,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                   : tuiMessage(locale, 'presets.detail.permission.deferred')}</Text>
                 {presetManagerDetail.description !== undefined
                   && <Text wrap="wrap">{terminalSafe(presetManagerDetail.description)}</Text>}
-                <Text>{tuiMessage(locale, 'presets.detail.path', { path: presetManagerDetail.preset.path })}</Text>
+                {presetManagerDetail.preset.path !== undefined
+                  && <Text>{tuiMessage(locale, 'presets.detail.path', { path: presetManagerDetail.preset.path })}</Text>}
                 <TuiSection title={tuiMessage(locale, 'presets.detail.plugins')} paddingX={0}>
                   {presetManager.compositionState === 'unavailable'
                     ? <TuiHintLine>{tuiMessage(locale, 'presets.detail.pluginsUnavailable')}</TuiHintLine>
@@ -8680,7 +8685,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                   && <Text {...tuiTextStyle(theme.tokens.error)}>{tuiMessage(locale, 'presets.broken', {
                     reason: presetManagerDetail.broken,
                   })}</Text>}
-                {!props.pathOpenerAvailable
+                {presetManagerDetail.preset.path !== undefined && !props.pathOpenerAvailable
                   && <TuiHintLine>{tuiMessage(locale, 'presets.detail.remotePath')}</TuiHintLine>}
               </TuiSection>
             </TuiScrollablePanel>
@@ -8698,7 +8703,8 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                     selected={index === effectivePresetManagerSelection}
                     height={presetManagerRowHeight}
                     title={terminalSafe(row.name)}
-                    description={`${tuiMessage(locale, row.trust === 'system' ? 'presets.system' : 'presets.user')}${badges ? ` · ${badges}` : ''}`}
+                    description={`${tuiMessage(locale, row.trust === 'system' ? 'presets.system'
+                      : row.trust === 'user' ? 'presets.user' : 'presets.declared')}${badges ? ` · ${badges}` : ''}`}
                   />
                 })}
             </TuiScrollablePanel>}
@@ -8722,8 +8728,10 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                 presetManagerDetail.canCopy ? tuiMessage(locale, 'presets.action.copy') : undefined,
                 presetManagerDetail.canDelete ? tuiMessage(locale, 'presets.action.delete') : undefined,
                 tuiMessage(locale, 'presets.action.view'),
-                props.pathOpenerAvailable ? tuiMessage(locale, 'presets.action.openFile') : undefined,
-                props.pathOpenerAvailable ? tuiMessage(locale, 'presets.action.open') : undefined,
+                props.pathOpenerAvailable && presetManagerDetail.preset.path !== undefined
+                  ? tuiMessage(locale, 'presets.action.openFile') : undefined,
+                props.pathOpenerAvailable && presetManagerDetail.preset.path !== undefined
+                  ? tuiMessage(locale, 'presets.action.open') : undefined,
                 tuiMessage(locale, 'presets.action.close'),
               ].filter(Boolean).join(' · ')
               : tuiMessage(locale, 'presets.action.close')}</TuiHintLine>}

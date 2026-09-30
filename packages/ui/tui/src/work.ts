@@ -1,7 +1,7 @@
 /** Authoritative background-work projection for the native TUI. */
 
 import type {
-  AgentStatus, JobSnapshot, JobStatus, SessionIdType as SessionId,
+  AgentStatus, JobView, JobStatus, SessionIdType as SessionId,
   SubagentDescendantListEntry, SubagentRunEndInfo, SubagentRunInfo, SubagentTimingProjection,
 } from './host.ts'
 
@@ -112,7 +112,7 @@ export const EMPTY_TUI_WORK_SNAPSHOT: TuiWorkSnapshot = Object.freeze({
 /** Inputs for one deterministic work projection. */
 export interface TuiWorkProjectionInput {
   /** Jobs visible to the root and its currently live descendants. */
-  readonly jobs: readonly JobSnapshot[]
+  readonly jobs: readonly JobView[]
   /** Durable local child catalog below the TUI root. */
   readonly subagents: readonly SubagentDescendantListEntry[]
   /** Exact live Agent facts keyed by child Session id. */
@@ -189,13 +189,13 @@ export function projectTuiWork(input: TuiWorkProjectionInput): TuiWorkSnapshot {
   })
 }
 
-function jobView(job: JobSnapshot): TuiWorkItemView {
+function jobView(job: JobView): TuiWorkItemView {
   return Object.freeze({
     key: `job:${job.id}`,
     source: 'job',
     id: job.id,
     label: job.label,
-    ...job.ownerSession === undefined ? {} : { ownerSession: job.ownerSession },
+    ...job.owner === undefined ? {} : { ownerSession: job.owner },
     state: job.status,
     ...job.detail === undefined ? {} : { detail: job.detail },
     startedAt: job.startedAt,

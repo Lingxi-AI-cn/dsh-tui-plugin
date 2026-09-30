@@ -7,9 +7,10 @@ import { collectTuiResumeActivity } from './resume-activity.ts'
 import { requestTuiExit } from './exit.ts'
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
-import { basename, dirname, extname, resolve } from 'node:path'
+import { basename, extname, resolve } from 'node:path'
 import React from 'react'
 import { render, type Instance } from 'ink'
+import type { Volatile } from './host.ts'
 import {
   createUserMessage,
   credentialRef,
@@ -28,7 +29,6 @@ import {
   formatFileMention,
   assembleContextFor,
   installModelSelection,
-  installSettingsSection,
   JobId,
   MessageId,
   resolveSessionForkAnchor,
@@ -52,7 +52,7 @@ import {
   type CommandResult,
   type Context,
   type ContextPressureProjection,
-  type JobSnapshot,
+  type JobView,
   type ImageAttachmentRef,
   type ImageMediaType,
   type LlmAuthenticationEvent,
@@ -65,7 +65,6 @@ import {
   type SessionEvent,
   type SessionProjectionCache,
   type SessionRecord,
-  type ScheduleRecord,
   type SessionStatsProjection,
   type SubagentDescendantListEntry,
   type SubagentResult,
@@ -87,7 +86,7 @@ import type { TuiAgentViewDescriptor } from './agent-view.ts'
 import type { TuiFooterItemId } from './footer.ts'
 import {
   resolveTuiInteractionRegistry, TUI_INTERACTION_REGISTRY, tuiInteractionDescription,
-  type TuiInteractionDescriptor,
+  type TuiInteractionDescriptor, type TuiKeybindingOverrides,
 } from './keybindings.ts'
 import { openExternalUrl } from './open-url.ts'
 import { canOpenExternalPath, openExternalPath } from './open-path.ts'
@@ -97,7 +96,7 @@ import {
 } from './resume.ts'
 import {
   collectTuiWorkspaceRows,
-  type TuiSessionManagerDialogSnapshot,
+  type TuiSessionManagerDialogSnapshot, type TuiSessionManagerPreferences,
   type TuiWorkspaceManagerRow,
 } from './session-manager.ts'
 import {
@@ -143,9 +142,10 @@ import {
   type TuiClipboardInsert,
 } from './clipboard.ts'
 import {
-  DEFAULT_TUI_SETTINGS, resolveTuiTheme, TUI_ACTIVITY_PREFERENCES, TUI_SETTINGS_NAMESPACE, TUI_SETTINGS_SCHEMA,
+  DEFAULT_TUI_SETTINGS, resolveTuiTheme, TUI_ACTIVITY_PREFERENCES, TUI_SETTINGS_FIELDS, TUI_SETTINGS_NAMESPACE, TUI_SETTINGS_SCHEMA,
   TUI_MOUSE_PREFERENCES, TUI_PROVIDER_ONBOARDING_VERSION, TUI_THEME_PREFERENCES,
-  TuiThemeProvider, type TuiActivityPreference, type TuiCustomThemeDefinition, type TuiSettings, type TuiTheme,
+  TuiThemeProvider, type TuiActivityPreference, type TuiCustomThemeDefinition, type TuiSettings,
+  type TuiTheme,
 } from './theme.tsx'
 import { listTuiCustomThemes, loadTuiCustomTheme } from './custom-theme.ts'
 import {
@@ -236,12 +236,46 @@ export interface Config {
   maxResumeOptions?: number
   /** Maximum concurrent metadata reads in one resume scan. */
   resumeScanConcurrency?: number
+  /** Live preferences owned by the TUI profile entry and edited through Settings. */
+  defaultModel: Volatile<{
+    /** Provider id for new TUI Agents. */
+    provider: string
+    /** Model id offered by the selected provider. */
+    model: string
+    /** Optional provider-supported reasoning level. */
+    reasoningEffort?: string
+  } | undefined>
+  /** Built-in theme selected through the live Settings owner. */
+  theme: Volatile<'auto' | 'dark' | 'light' | 'no-color'>
+  /** Optional theme JSON filename under the Harness home themes directory. */
+  themeFile: Volatile<string | undefined>
+  /** Runtime language selected through the live Settings owner. */
+  locale: Volatile<'en' | 'zh'>
+  /** Whether the TUI captures terminal pointer reports. */
+  mouse: Volatile<'auto' | 'off'>
+  /** Running-Agent status animation preference. */
+  activity: Volatile<'dots' | 'pulse' | 'minimal' | 'off'>
+  /** Per-action key gesture replacements. */
+  keybindings: Volatile<TuiKeybindingOverrides>
+  /** Provider onboarding copy version acknowledged by the user. */
+  providerOnboardingVersion: Volatile<number | undefined>
+  /** Session Manager scope, archive, sort, and grouping preferences. */
+  sessionManager: Volatile<TuiSessionManagerPreferences>
 }
 
-export const Config: z<Config> = z.object({
+export const Config: ReturnType<typeof z.object> = z.object({
   resume: z.string(),
   maxResumeOptions: z.number().step(1).min(1).default(8),
   resumeScanConcurrency: z.number().step(1).min(1).default(4),
+  defaultModel: TUI_SETTINGS_FIELDS.defaultModel.volatile(),
+  theme: TUI_SETTINGS_FIELDS.theme.volatile(),
+  themeFile: TUI_SETTINGS_FIELDS.themeFile.volatile(),
+  locale: TUI_SETTINGS_FIELDS.locale.volatile(),
+  mouse: TUI_SETTINGS_FIELDS.mouse.volatile(),
+  activity: TUI_SETTINGS_FIELDS.activity.volatile(),
+  keybindings: TUI_SETTINGS_FIELDS.keybindings.volatile(),
+  providerOnboardingVersion: TUI_SETTINGS_FIELDS.providerOnboardingVersion.volatile(),
+  sessionManager: TUI_SETTINGS_FIELDS.sessionManager.volatile(),
 })
 
 type ResumePreviewResolution =
@@ -276,6 +310,7 @@ interface RuntimeDisposers {
   sessionsCommand?: () => void
   presetsCommand?: () => void
   schedulesCommand?: () => void
+  scheduleChanged?: () => void
   hostPluginsCommand?: () => void
   trajectoryCommand?: () => void
   feedbackCommand?: () => void
@@ -462,6 +497,7 @@ class TuiController {
   private pluginHubGeneration = 0
   private providerCenterGeneration = 0
   private startupGuidanceGeneration = 0
+  private scheduleGeneration = 0
   private providerOnboardingAcknowledged = false
   private composerPrefillRevision = 0
   private updateCheck: ActiveOperation | undefined
@@ -556,6 +592,7 @@ class TuiController {
         return
       }
       this.handle = handle
+      // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
       this.events = new SessionEventStore(handle.agent.session.snapshotEvents())
       this.status = new AgentStatusStore(handle.agent.status)
       this.selection = prepared.selection
@@ -1070,10 +1107,12 @@ class TuiController {
     const setup = async (agentCtx: Context, unpublishedAgent: Agent): Promise<void> => {
       const session = unpublishedAgent.session
       const presetId = request.kind === 'resume'
+        // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
         ? this.assertResumeCompatible(session.header, session.snapshotEvents())
         : resolvedPreset?.id
       migration.legacyPreset = request.kind === 'resume' && sessionUsesLegacyCodePreset({
         header: session.header,
+        // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
         events: session.snapshotEvents(),
       })
       if (presetId === undefined) throw new Error('TUI Agent setup has no resolved Agent preset')
@@ -1085,6 +1124,7 @@ class TuiController {
           ...logged.reasoningEffort === undefined ? {} : { reasoningEffort: logged.reasoningEffort },
         }
       } else if (request.kind === 'resume') {
+        // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
         const route = resumeRoute(session.snapshotEvents())
         if (route !== undefined) selected.current = route
       }
@@ -1170,9 +1210,7 @@ class TuiController {
     this.tokenUsage.set(values?.tokenUsage)
     this.contextBreakdown.set(values?.contextBreakdown)
     this.sessionStats.set(values?.sessionStats)
-    const schedules = collectTuiSchedules(values?.schedule)
-    this.schedulesStore.set(schedules)
-    if (this.scheduleDialogStore.getSnapshot() !== undefined) this.scheduleDialogStore.set(schedules)
+    void this.refreshScheduleRows(agent)
     const frame = createTuiGoalPlanProjectionFrame(
       agent.session,
       snapshot?.asOfSeq ?? agent.session.seq,
@@ -1239,7 +1277,8 @@ class TuiController {
       const root = this.handle?.agent
       if (root !== undefined && this.providerCenter.getSnapshot() !== undefined) void this.refreshProviderCenter(root)
     })
-    this.disposers.settingsDocumentUpdated = this.ctx.on('settings/document-updated', () => {
+    this.disposers.settingsDocumentUpdated = this.ctx.on('settings/document-updated', (ns) => {
+      if (ns === TUI_SETTINGS_NAMESPACE) this.refreshSettings()
       const root = this.handle?.agent
       if (root !== undefined && this.providerCenter.getSnapshot() !== undefined) void this.refreshProviderCenter(root)
       if (this.hostPluginCenterStore.getSnapshot() !== undefined) void this.refreshHostPluginCenter()
@@ -1277,11 +1316,6 @@ class TuiController {
           if (key === 'tokenUsage') this.tokenUsage.set(value as TokenUsageProjection)
           if (key === 'contextBreakdown') this.contextBreakdown.set(value as ContextBreakdownProjection)
           if (key === 'sessionStats') this.sessionStats.set(value as SessionStatsProjection)
-          if (key === 'schedule') {
-            const schedules = collectTuiSchedules(value as readonly ScheduleRecord[])
-            this.schedulesStore.set(schedules)
-            if (this.scheduleDialogStore.getSnapshot() !== undefined) this.scheduleDialogStore.set(schedules)
-          }
           if (key === 'goal' || key === 'plan') {
             const frame = this.goalPlanProjectionFrame
             if (frame !== undefined) {
@@ -1336,6 +1370,7 @@ class TuiController {
       if (agent !== undefined && session === agent.session) {
         this.events?.append(event)
         this.refreshPermission(agent)
+        if (event.type === 'subagent/catalog') this.scheduleWorkCatalogRefresh(agent)
         if (this.trajectoryStore.getSnapshot() !== undefined) {
           this.openTrajectory()
         }
@@ -1350,10 +1385,15 @@ class TuiController {
         || this.workCatalog.some(entry => entry.id === payload.agent.id)) this.rebuildWorkSnapshot()
     })
     this.disposers.jobsController = this.ctx.jobs.attachController('native-tui')
-    this.disposers.jobsChanged = this.ctx.jobs.onJobsChanged((owner) => {
+    this.disposers.scheduleChanged = this.ctx.on('schedule/changed', () => {
+      const agent = this.handle?.agent
+      if (agent !== undefined) void this.refreshScheduleRows(agent)
+    })
+    this.disposers.jobsChanged = this.ctx.jobs.events.subscribe({ owners: 'all' }, (event) => {
       const root = this.handle?.agent
-      if (root === undefined || (owner !== undefined && owner !== root
-        && !this.workCatalog.some(entry => entry.id === owner.id))) return
+      const owner = 'job' in event ? event.job.owner : event.owner
+      if (root === undefined || (owner !== undefined && owner !== root.id
+        && !this.workCatalog.some(entry => entry.id === owner))) return
       this.rebuildWorkSnapshot()
     })
     this.disposers.agentCreated = this.ctx.on('agent/created', ({ agent }) => {
@@ -1656,7 +1696,7 @@ class TuiController {
   private rebuildWorkSnapshot(): void {
     const root = this.handle?.agent
     if (root === undefined || this.isClosing()) return
-    const jobs = new Map<string, JobSnapshot>()
+    const jobs = new Map<string, JobView>()
     const liveAgents = new Map<SessionId, TuiWorkAgentSnapshot>()
     const owners: Agent[] = [root]
     const projections = this.ctx.get('sessionProjections')
@@ -1685,7 +1725,7 @@ class TuiController {
       })
     }
     for (const owner of owners) {
-      for (const job of this.ctx.jobs.list(owner)) jobs.set(job.id, job)
+      for (const job of this.ctx.jobs.list(owner.id)) jobs.set(job.id, job)
     }
     this.work.set(projectTuiWork({
       jobs: [...jobs.values()],
@@ -1703,7 +1743,7 @@ class TuiController {
       if (item.action === 'cancel-job') {
         const owner = item.ownerSession === undefined ? root : this.ctx.agents.get(item.ownerSession)
         if (owner === undefined) throw new Error('The job owner is no longer live.')
-        const result = this.ctx.jobs.kill(JobId(item.id), owner, 'cancelled by the TUI user')
+        const result = this.ctx.jobs.kill(JobId(item.id), owner.id, 'cancelled by the TUI user')
         this.externalNotice.set(result === 'requested'
           ? `Stopping background job ${item.id}.`
           : `Background job ${item.id} already finished.`)
@@ -1751,6 +1791,7 @@ class TuiController {
           acceptsInput: true,
         }),
         agent: child,
+        // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
         events: new SessionEventStore(child.session.snapshotEvents()),
         status: new AgentStatusStore(child.status),
       }
@@ -3102,6 +3143,7 @@ class TuiController {
     const presets = hostAgentPresets(this.ctx)
     const currentId = resolveSessionPreset({
       header: invocation.agent.session.header,
+      // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
       events: invocation.agent.session.snapshotEvents(),
     })
       ?? presets.composedPreset(invocation.agent.ctx)
@@ -3130,6 +3172,7 @@ class TuiController {
     if (selected.preset.id === currentId) {
       return { kind: 'success', text: tuiMessage(this.locale, 'mode.same', { mode: selected.name }) }
     }
+    // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
     if (invocation.agent.session.snapshotEvents().some(event => event.type === 'turn/start')) {
       const cwd = invocation.agent.session.header.cwd
       if (cwd === undefined) return { kind: 'error', text: tuiMessage(this.locale, 'session.error.workspace') }
@@ -3499,6 +3542,7 @@ class TuiController {
     this.rewindDialog.set({
       ...dialog,
       phase: 'browsing',
+      // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
       candidates: tuiRewindCandidates(agent.session.snapshotEvents()),
     })
   }
@@ -3528,11 +3572,13 @@ class TuiController {
     const detached = this.detachedRewindSource?.id === dialog.currentSessionId
       ? this.detachedRewindSource : undefined
     const sourceId = detached?.id ?? agent.session.id
+    // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
     const sourceEvents = detached?.events ?? agent.session.snapshotEvents()
     const cwd = detached?.cwd ?? agent.session.header.cwd
     const selectedModel = detached?.selection ?? this.selection?.current ?? this.modelSelection.getSnapshot()
     const preset = detached?.preset ?? resolveSessionPreset({
       header: agent.session.header,
+      // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
       events: agent.session.snapshotEvents(),
     })
     if (cwd === undefined || selectedModel === undefined) {
@@ -3901,7 +3947,7 @@ class TuiController {
     if (presets === undefined) return
     const currentPresetId = presets.composedPreset(agent.ctx)
     try {
-      const snapshot = await collectTuiPresetManager(presets, currentPresetId, this.locale)
+      const snapshot = await collectTuiPresetManager(presets, currentPresetId, this.locale, this.ctx.get('settings'))
       this.presetManagerStore.set(snapshot)
     } catch {
       this.presetManagerStore.set(undefined)
@@ -3917,48 +3963,69 @@ class TuiController {
     await this.openPresetManager(agent)
   }
 
-  private scheduleSnapshot(agent: Agent): TuiScheduleSnapshot {
-    if (!this.ownsAgent(agent)) return TUI_SCHEDULES_UNAVAILABLE
-    const value = this.ctx.get('sessionProjections')?.snapshot(agent.session, ['schedule']).values.schedule
-    return collectTuiSchedules(value)
-  }
-
   private openScheduleDialog(agent: Agent): void {
-    const snapshot = this.scheduleSnapshot(agent)
+    const snapshot = this.ownsAgent(agent) ? this.schedulesStore.getSnapshot() : TUI_SCHEDULES_UNAVAILABLE
     this.schedulesStore.set(snapshot)
     this.scheduleDialogStore.set(snapshot)
+    void this.refreshScheduleRows(agent)
+  }
+
+  private async refreshScheduleRows(agent: Agent): Promise<void> {
+    const generation = ++this.scheduleGeneration
+    const owner = this.ctx.get('schedule')
+    if (owner === undefined) {
+      if (this.ownsAgent(agent)) {
+        this.schedulesStore.set(TUI_SCHEDULES_UNAVAILABLE)
+        if (this.scheduleDialogStore.getSnapshot() !== undefined) {
+          this.scheduleDialogStore.set(TUI_SCHEDULES_UNAVAILABLE)
+        }
+      }
+      return
+    }
+    let snapshot: TuiScheduleSnapshot
+    try {
+      snapshot = collectTuiSchedules(await owner.list({ sessionId: agent.session.id }))
+    } catch (error: unknown) {
+      snapshot = {
+        sourceState: 'error', rows: [],
+        error: errorChain(error),
+      }
+    }
+    if (!this.ownsAgent(agent) || generation !== this.scheduleGeneration) return
+    this.schedulesStore.set(snapshot)
+    if (this.scheduleDialogStore.getSnapshot() !== undefined) this.scheduleDialogStore.set(snapshot)
   }
 
   private closeScheduleDialog(): void {
     this.scheduleDialogStore.set(undefined)
   }
 
-  private async copyPreset(_agent: Agent, sourceId: string, newId: string, displayName?: string): Promise<void> {
-    const presets = this.ctx.agentPresets as unknown as TuiAgentPresets | undefined
-    if (presets === undefined) throw new Error('Agent presets unavailable')
-    await presets.copy(sourceId, newId, displayName)
+  private copyPreset(_agent: Agent, sourceId: string, newId: string, displayName?: string): Promise<void> {
+    void sourceId
+    void newId
+    void displayName
+    return Promise.reject(new Error('preset copying is unavailable: the official preset registry has no authoring operation'))
   }
 
-  private async deletePreset(_agent: Agent, id: string): Promise<void> {
-    const presets = this.ctx.agentPresets as unknown as TuiAgentPresets | undefined
-    if (presets === undefined) throw new Error('Agent presets unavailable')
-    await presets.remove(id)
+  private deletePreset(_agent: Agent, id: string): Promise<void> {
+    void id
+    return Promise.reject(new Error('preset deletion is unavailable: the official preset registry has no authoring operation'))
   }
 
   private async setDefaultPreset(_agent: Agent, id: string, expectedRevision: number | undefined): Promise<void> {
     const presets = this.ctx.agentPresets as unknown as TuiAgentPresets | undefined
     if (presets === undefined) throw new Error('Agent presets unavailable')
-    await setTuiDefaultPreset(presets, id, expectedRevision)
+    await setTuiDefaultPreset(presets, this.ctx.get('settings'), id, expectedRevision)
   }
 
-  private async openPresetLocation(agent: Agent, id: string): Promise<void> {
-    const preset = await hostAgentPresets(agent.ctx).resolve(id)
-    await this.openTuiPath(agent, dirname(preset.path))
+  private openPresetLocation(agent: Agent, id: string): Promise<void> {
+    void agent
+    void id
+    return Promise.reject(new Error('preset file location is unavailable from the official registry'))
   }
 
-  private async openPresetFile(agent: Agent, id: string): Promise<void> {
-    const preset = await hostAgentPresets(agent.ctx).resolve(id)
-    await this.openTuiPath(agent, preset.path)
+  private openPresetFile(agent: Agent, id: string): Promise<void> {
+    return this.openPresetLocation(agent, id)
   }
 
   private async refreshFeedback(requestedAgent?: Agent): Promise<void> {
@@ -4059,6 +4126,7 @@ class TuiController {
   private openTrajectory(): void {
     const root = this.handle?.agent
     if (root === undefined) return
+    // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
     const events = root.session.snapshotEvents()
     const snapshot = this.trajectoryProjection.update(events, this.trajectoryLimit)
     this.trajectoryStore.set(snapshot)
@@ -4189,6 +4257,7 @@ class TuiController {
           this.ctx.sessions.announce(session)
           const before = session.seq
           titles.rename(session, title)
+          // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
           await handle.append(session.snapshotEvents(before))
           await handle.flush()
         } finally {
@@ -4249,6 +4318,7 @@ class TuiController {
     const live = this.ctx.sessions.get(id)
     const source = live === undefined
       ? await this.ctx.sessionQuery.readSession(id)
+      // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
       : { session: live.header, events: live.snapshotEvents() }
     if (source.session.origin === 'subagent') throw new Error('subagent-owned Sessions cannot be forked here')
     const cwd = source.session.cwd
@@ -4394,6 +4464,7 @@ class TuiController {
           const live = this.ctx.sessions.get(record.header.id)
           const session = live === undefined
             ? await this.ctx.sessionQuery.readSession(record.header.id)
+            // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
             : { session: live.header, events: live.snapshotEvents() }
           signal.throwIfAborted()
           const id = resolveSessionPreset({ header: session.session, events: session.events })
@@ -4412,7 +4483,6 @@ class TuiController {
           const summary: TuiResumePresetSummary = {
             id,
             label: tuiAgentModeName(preset, this.locale),
-            trust: preset.trust,
             ...preset.broken === undefined ? {} : {
               disabledReason: tuiMessage(this.locale, 'resume.preset.broken', {
                 id, reason: preset.broken,
@@ -4470,6 +4540,7 @@ class TuiController {
   private async resumeActivityTime(record: SessionRecord, signal: AbortSignal): Promise<number | undefined> {
     signal.throwIfAborted()
     const live = this.ctx.sessions.get(record.header.id)
+    // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
     if (live !== undefined) return live.snapshotEvents().at(-1)?.time
     const persistence = this.ctx.get('sessionPersistence')
     if (persistence === undefined) return undefined
@@ -4546,7 +4617,7 @@ class TuiController {
     if (live !== undefined) return this.ctx.get('sessionProjections')?.snapshot(live).values.title
     const cached = record.header.isSeeded
       ? undefined
-      : cache.cachedSnapshot(record.header, SessionLogOffset(0), ['title'])
+      : cache.cachedSnapshot(record.header, ['title'])
     if (cached !== undefined && 'title' in cached.values) return cached.values.title
     const observation = await this.ctx.sessionQuery.observeSession(record.header.id, { signal })
     try {
@@ -4731,6 +4802,7 @@ class TuiController {
     if (initialStatus !== 'idle') throw new Error(`current Agent is ${initialStatus}`)
     const preset = targetPreset?.id ?? resolveSessionPreset({
       header: oldAgent.session.header,
+      // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
       events: oldAgent.session.snapshotEvents(),
     })
     if (preset === undefined) throw new Error('the current Session has no Agent preset to inherit')
@@ -4799,6 +4871,7 @@ class TuiController {
     if (oldHandle?.agent !== oldAgent || oldEvents === undefined || oldStatus === undefined || this.instance === undefined) {
       throw new Error('TUI Agent switch lost its current owner')
     }
+    // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
     const nextEvents = new SessionEventStore(prepared.handle.agent.session.snapshotEvents())
     const nextStatus = new AgentStatusStore(prepared.handle.agent.status)
     this.handle = prepared.handle
@@ -5391,6 +5464,7 @@ class TuiController {
     this.disposers.agentDisposed?.()
     this.disposers.agentCreated?.()
     this.disposers.jobsChanged?.()
+    this.disposers.scheduleChanged?.()
     this.disposers.jobsController?.()
     this.disposers.agentStatus?.()
     this.disposers.sessionEvents?.()
@@ -5483,9 +5557,24 @@ export function apply(ctx: Context, config: Config): void {
   const extensions = new TuiExtensionRegistry()
   ctx.provide('tuiExtensions', extensions)
   ctx.effect(() => () => { extensions.dispose() }, 'tui: extension registry lifecycle')
-  installSettingsSection(ctx, TUI_SETTINGS_NAMESPACE, TUI_SETTINGS_SCHEMA, DEFAULT_TUI_SETTINGS, {
-    setSource: (source) => { controller.setSettingsSource(source) },
-    onChange: () => { controller.refreshSettings() },
+  controller.setSettingsSource(() => {
+    const defaultModel = config.defaultModel.get()
+    const themeFile = config.themeFile.get()
+    const providerOnboardingVersion = config.providerOnboardingVersion.get()
+    return TUI_SETTINGS_SCHEMA({
+      ...(defaultModel === undefined ? {} : { defaultModel }),
+      theme: config.theme.get(),
+      ...(themeFile === undefined ? {} : { themeFile }),
+      locale: config.locale.get(),
+      mouse: config.mouse.get(),
+      activity: config.activity.get(),
+      keybindings: structuredClone(config.keybindings.get()),
+      ...(providerOnboardingVersion === undefined ? {} : { providerOnboardingVersion }),
+      sessionManager: config.sessionManager.get(),
+    })
+  })
+  ctx.inject(['settings'], (child) => {
+    child.effect(() => child.settings.configure({ auto: false }, ctx.fiber))
   })
   ctx.effect(() => async () => { await controller.dispose() }, 'tui: application lifecycle')
   void controller.run()

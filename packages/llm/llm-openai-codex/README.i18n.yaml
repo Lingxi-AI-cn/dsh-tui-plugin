@@ -1,6 +1,58 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/llm/llm-openai-codex/README.md
-README.md: 06c58906db1cd8c6d76e4049cf644d7e61741acb
-README.zh.md: aa070c0083f5a7f4d6f33c1a85523b133a8f3cdc
+/:
+  en: 573a1058ac02fc07
+  zh: d6d55a07c3c81d9a
+/lingxi-ai-cn-dsh-llm-openai-codex:
+  en: 51eb8e39039d5bbf
+  zh: fb3885ab0824f921
+/lingxi-ai-cn-dsh-llm-openai-codex/summary:
+  en: 4853dc9ae96a6c9a
+  zh: fedb934f88108be4
+/lingxi-ai-cn-dsh-llm-openai-codex/table-of-contents:
+  en: fce78ec308bb1b52
+  zh: 282986252d49fe25
+/lingxi-ai-cn-dsh-llm-openai-codex/configuration:
+  en: 9ae703379694a48a
+  zh: 3a35ae8b93ebac4f
+/lingxi-ai-cn-dsh-llm-openai-codex/dynamic-model-catalog:
+  en: e95d524aca1dcab5
+  zh: dc001132351cd52c
+/lingxi-ai-cn-dsh-llm-openai-codex/credential-safety:
+  en: 2f30e3b164208b07
+  zh: 4fc94db95437498c
+/lingxi-ai-cn-dsh-llm-openai-codex/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/lingxi-ai-cn-dsh-llm-openai-codex/model-experience/openai-codex-request:
+  en: 7f92ece368a139ee
+  zh: 14ca1ec8046b5f78
+/lingxi-ai-cn-dsh-llm-openai-codex/model-experience/openai-codex-request/what-the-model-sees:
+  en: a120197c3678571a
+  zh: d29c97336c059b10
+/lingxi-ai-cn-dsh-llm-openai-codex/model-experience/openai-codex-request/token-effect:
+  en: 811a7d4a519549db
+  zh: cc72e50d96c772ab
+/lingxi-ai-cn-dsh-llm-openai-codex/model-experience/openai-codex-request/kv-cache-effect:
+  en: c4bb335126f9c886
+  zh: cdeb74a8cb6e0a62
+/lingxi-ai-cn-dsh-llm-openai-codex/model-experience/openai-codex-response:
+  en: bdcc6e37ed383425
+  zh: ff83769f475f885a
+/lingxi-ai-cn-dsh-llm-openai-codex/model-experience/openai-codex-response/what-the-model-sees:
+  en: f850566b878afc7e
+  zh: ac0a44175e050e8d
+/lingxi-ai-cn-dsh-llm-openai-codex/model-experience/openai-codex-response/token-effect:
+  en: 774dc225456cbeea
+  zh: d469dc9fffa7a434
+/lingxi-ai-cn-dsh-llm-openai-codex/model-experience/openai-codex-response/kv-cache-effect:
+  en: 88a6db58192fe694
+  zh: daac0dc17da83033
+/lingxi-ai-cn-dsh-llm-openai-codex/known-limitations-and-deferred-work:
+  en: 9815b06ed686c306
+  zh: 910f7fc7bfe1d4a8
+/lingxi-ai-cn-dsh-llm-openai-codex/known-limitations-and-deferred-work/dev-note:
+  en: 0a1253c6f7b5e8b9
+  zh: 9f56528562c7c914

@@ -347,7 +347,8 @@ function contentText(content: readonly ContentBlock[]): string {
     else if (block.type === 'image') parts.push(`[image: ${block.attachment.name ?? block.attachment.attachmentId}]`)
     else if (block.type === 'file') parts.push(`[file: ${block.attachment.name}]`)
     else if (block.type === 'tool-call') parts.push(`${block.name} ${block.arguments}`)
-    else parts.push(contentText(block.content))
+    else if (block.type === 'tool-addition') parts.push(`[tool added: ${block.toolName}]`)
+    else parts.push(`[tool removed: ${block.toolName}]`)
   }
   return terminalSafe(parts.filter(Boolean).join('\n'))
 }
@@ -478,10 +479,10 @@ function presentResult(
   event: Extract<SessionEvent, { type: 'tool/result' }>,
   resolveTool?: ToolDefinitionResolver,
 ): ToolResultView | undefined {
-  const result = event.data.message.content[0]
+  const result = event.data.message
   try {
     return resolveTool?.(name)?.presentResult?.(args, {
-      content: result.content,
+      content: [...result.content],
       isError: result.isError === true,
       ...event.data.meta === undefined ? {} : { meta: event.data.meta },
     })
@@ -901,7 +902,7 @@ class TranscriptFoldState {
     if (event.type === 'tool/result') {
       if (!isAppendSurfaceEvent(event)) return
       const callId = String(event.data.message.source.callId)
-      const result = event.data.message.content[0]
+      const result = event.data.message
       const paired = this.toolNodes.get(callId)
       if (paired === undefined) {
         this.pushRaw({

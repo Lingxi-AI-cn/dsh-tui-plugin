@@ -87,6 +87,32 @@ describe('trusted Plugin Hub installation planning', () => {
     await ctx.fiber.dispose()
   })
 
+  it('stages a TUI bundle with ordered preset patch files', async () => {
+    const fixture = await createFixture()
+    const ctx = await createContext(fixture)
+    const bundleDir = join(fixture.profileDir, 'node_modules', '@lingxi-ai-cn/dsh-tui')
+    writeFileSync(join(bundleDir, 'package.json'), JSON.stringify({
+      name: '@lingxi-ai-cn/dsh-tui', version: '1.0.0',
+      dsh: { bundle: { patch: ['./cordis.patch.yml', './preset.patch.yml'] } },
+    }))
+    writeFileSync(join(bundleDir, 'preset.patch.yml'), '[]\n')
+    const before = readFileSync(join(fixture.profileDir, 'package.json'), 'utf8')
+    const plan = await ctx.pluginHub.planInstall(PluginId('plg_fixture'), PluginVersionId('ver_fixture'))
+
+    const staged = await ctx.pluginHub.stage(plan.id)
+
+    const stagingProfile = join(fixture.dataDir, 'staging', staged.id, 'profile')
+    const stagedManifest = JSON.parse(readFileSync(join(stagingProfile, 'package.json'), 'utf8')) as {
+      dsh?: { profile?: { bundles?: string[] } }
+    }
+    expect(stagedManifest.dsh?.profile?.bundles).toEqual([
+      '@deepseek-ai/dsh-base', '@lingxi-ai-cn/dsh-tui', '@fixture/plugin',
+    ])
+    expect(readFileSync(join(fixture.profileDir, 'package.json'), 'utf8')).toBe(before)
+    await ctx.pluginHub.discard(staged.id)
+    await ctx.fiber.dispose()
+  })
+
   it('hands a staged transaction to the provider-owned maintenance controller', async () => {
     const fixture = await createFixture()
     const ctx = await createContext(fixture, {
@@ -140,7 +166,7 @@ describe('trusted Plugin Hub installation planning', () => {
     ['expired', { expiresAt: '2026-08-18T11:59:59.000Z' }, 'DESCRIPTOR_EXPIRED'],
     ['wrong surface', { surfaces: ['headless'] }, 'SURFACE_INCOMPATIBLE'],
     ['incompatible DSH', { dsh: '>=9.0.0' }, 'DSH_INCOMPATIBLE'],
-    ['TUI version is not the Host version', { dsh: '=0.1.11-rc.2' }, 'DSH_INCOMPATIBLE'],
+    ['TUI version is not the Host version', { dsh: '=0.1.12-rc.2' }, 'DSH_INCOMPATIBLE'],
   ] as const)('rejects a %s descriptor before profile mutation', async (_label, overrides, code) => {
     const fixture = await createFixture({ descriptorOverrides: overrides })
     const ctx = await createContext(fixture)

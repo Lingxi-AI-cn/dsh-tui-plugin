@@ -11,7 +11,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { compactCheckpointSource, CompactionId } from '@deepseek-ai/dsh-compaction'
 import { CommandId } from '@deepseek-ai/dsh-commands'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
-import { JobId, type JobSnapshot } from '@deepseek-ai/dsh-jobs'
+import { JobId, type JobView } from '@deepseek-ai/dsh-jobs'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import {
   ToolCallId, createAssistantMessage, createToolResultMessage, createUserMessage, ReasoningEffortId,
@@ -471,7 +471,7 @@ describe('foldTranscript', () => {
   it('omits plugin-origin context messages from the human transcript', () => {
     const context = createUserMessage({
       content: [{ type: 'text', text: 'hidden context' }],
-      source: { kind: 'plugin', plugin: 'test' },
+      source: { kind: 'test' },
     })
     expect(foldTranscript([event(0, 'user/message', context)])).toEqual([])
   })
@@ -2577,7 +2577,7 @@ describe('TUI Session rewind boundaries', () => {
       content: [{ type: 'text', text: 'open prompt' }], source: { kind: 'user' },
     })
     const plugin = createUserMessage({
-      content: [{ type: 'text', text: 'hidden plugin context' }], source: { kind: 'plugin', plugin: 'test' },
+      content: [{ type: 'text', text: 'hidden plugin context' }], source: { kind: 'test' },
     })
     const events: SessionEvent[] = [
       event(0, 'turn/start', { turn: 1 }),
@@ -2621,7 +2621,7 @@ describe('TUI Session rewind boundaries', () => {
       sourceEventSeqs: [SessionSeq(1)],
     }
     const plugin = createUserMessage({
-      content: [{ type: 'text', text: 'plugin context' }], source: { kind: 'plugin', plugin: 'test' },
+      content: [{ type: 'text', text: 'plugin context' }], source: { kind: 'test' },
     })
     const candidates = tuiRewindCandidates([
       event(0, 'turn/start', { turn: 1 }),
@@ -3099,6 +3099,7 @@ describe('TUI actionable footer', () => {
     const schedules = collectTuiSchedules([{
       id: 'daily' as never,
       kind: 'every',
+      title: 'Review the build',
       prompt: 'Review the build',
       everySeconds: 86_400,
       scheduledAt: '2026-08-31T00:00:00.000Z',
@@ -3150,7 +3151,8 @@ describe('TUI Agent mode roster projection', () => {
     expect(options.find(option => option.preset.id === 'mine')?.description).toContain('user')
     expect(options.find(option => option.preset.id === 'broken')?.description)
       .toContain('unavailable · invalid composition')
-    expect(options.every(option => !option.description.includes(option.preset.path))).toBe(true)
+    expect(options.every(option => option.preset.path === undefined
+      || !option.description.includes(option.preset.path))).toBe(true)
   })
 })
 
@@ -3159,14 +3161,14 @@ describe('TUI background work', () => {
   const childId = SessionId('child')
 
   it('deduplicates job-managed one-shot children and retains authoritative live states', () => {
-    const job: JobSnapshot = {
+    const job: JobView = {
       id: JobId('subagent-1'),
       kind: 'subagent',
       label: 'one-shot research',
-      ownerSession: rootId,
+      owner: rootId,
       status: 'running',
       startedAt: 1_000,
-      reported: false,
+      output: { earliest: 0, total: 0 },
     }
     const snapshot = projectTuiWork({
       jobs: [job],
@@ -3201,6 +3203,7 @@ describe('TUI background work', () => {
     expect(snapshot.items.map(item => item.key)).toEqual([
       'job:subagent-1', 'subagent:child', 'remote-subagent:remote-1',
     ])
+    expect(snapshot.items[0]).toMatchObject({ ownerSession: rootId, action: 'cancel-job' })
     expect(snapshot.items[1]).toMatchObject({
       label: 'reviewer', ownerSession: rootId, state: 'running', action: 'interrupt-subagent', inspectable: true,
     })
@@ -3253,7 +3256,7 @@ describe('TUI background work', () => {
     const frozen = projectTuiWork({
       jobs: [{
         id: JobId('bash-1'), kind: 'bash', label: 'build', status: 'completed',
-        startedAt: 1_000, finishedAt: 66_000, reported: true,
+        startedAt: 1_000, finishedAt: 66_000, output: { earliest: 0, total: 0 },
       }],
       subagents: [], liveAgents: new Map(), remoteRuns: [],
     }).items[0]
@@ -3318,7 +3321,7 @@ describe('TUI activation', () => {
     })
     const ctx = new Context()
     const exited = new Promise<number>((resolve) => { ctx.provide('appExit', resolve) })
-    await ctx.plugin((pluginCtx) => { apply(pluginCtx, {}) })
+    await ctx.plugin((pluginCtx) => { apply(pluginCtx, {} as Parameters<typeof apply>[1]) })
     await expect(exited).resolves.toBe(1)
     expect(err).toContain('TUI requires interactive stdin and stdout TTYs')
     await ctx.fiber.dispose()

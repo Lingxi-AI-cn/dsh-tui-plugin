@@ -1,4 +1,4 @@
-/** Agent Preset Manager roster projection, validation, copy, and delete. */
+/** Official Agent Preset Registry roster and Settings-owned default selection. */
 
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -10,6 +10,7 @@ import {
   tuiPresetMutationErrorMessage,
   TuiPresetIdError,
   validateTuiPresetId,
+  type TuiPresetSettings,
 } from '../src/preset-manager.ts'
 import type { AgentPreset, TuiAgentPresets } from '../src/host.ts'
 
@@ -24,7 +25,6 @@ function preset(overrides: Partial<AgentPreset> & { id: string }): AgentPreset {
 function service(
   roster: AgentPreset[],
   defaultId = 'standard',
-  setDefault = vi.fn(async () => {}),
 ): TuiAgentPresets {
   return {
     list: vi.fn(async () => roster),
@@ -46,41 +46,46 @@ function service(
         entryId: 'tools', moduleName: '@deepseek-ai/dsh-tools', enabled: true as const,
       }] : [],
     }))),
-    read: vi.fn(async (id: string) => `# ${id}\n- row: plugin-a\n- row: plugin-b`),
-    copy: vi.fn(async () => {}),
-    remove: vi.fn(async () => {}),
-    setDefault,
+    readDocument: vi.fn(async (id: string) => ({
+      agentPreset: id, content: `# ${id}\n- row: plugin-a\n- row: plugin-b`,
+    })),
     get defaultId() { return defaultId },
-    defaultRevision: 0,
-    authorable: true,
-    roots: [{ path: '/system', trust: 'system' as const }, { path: '~/.agent-presets', trust: 'user' as const }],
+  }
+}
+
+function settings(revision = 0): TuiPresetSettings & { mutate: ReturnType<typeof vi.fn> } {
+  return {
+    writable: true,
+    describe: vi.fn(() => [{ ns: 'agent-preset-registry' as never, autoGenerate: true,
+      schema: {}, value: {}, applies: 'live' as const, revision }]),
+    mutate: vi.fn(async () => {}),
   }
 }
 
 describe('native TUI Preset Manager', () => {
-  it('projects system and user presets with current, default, and capability flags', async () => {
+  it('projects declared presets with current, default, and Settings capability flags', async () => {
     const roster = [
       preset({ id: 'standard', name: 'Standard', trust: 'system', order: 0 }),
       preset({ id: 'minimal', name: 'Minimal', trust: 'system', order: 2 }),
       preset({ id: 'my-preset', name: 'My Preset', trust: 'user' }),
       preset({ id: 'broken-one', trust: 'user', broken: 'unparsable YAML' }),
     ]
-    const snapshot = await collectTuiPresetManager(service(roster), 'standard', 'en')
+    const snapshot = await collectTuiPresetManager(service(roster), 'standard', 'en', settings())
 
     expect(snapshot.defaultPresetId).toBe('standard')
     expect(snapshot.defaultRevision).toBe(0)
     expect(snapshot.currentPresetId).toBe('standard')
-    expect(snapshot.authorable).toBe(true)
+    expect(snapshot.authorable).toBe(false)
     expect(snapshot.compositionState).toBe('ready')
     expect(snapshot.rows).toHaveLength(4)
 
     const standard = snapshot.rows[0]!
     expect(typeof standard.name).toBe('string')
     expect(standard).toMatchObject({
-      trust: 'system',
+      trust: 'declared',
       current: true,
       isDefault: true,
-      canCopy: true,
+      canCopy: false,
       canDelete: false,
       canSetDefault: false,
       composition: { rows: [{ entryId: 'tools', moduleName: '@deepseek-ai/dsh-tools', enabled: true }] },
@@ -88,10 +93,10 @@ describe('native TUI Preset Manager', () => {
 
     const minimal = snapshot.rows[1]!
     expect(minimal).toMatchObject({
-      trust: 'system',
+      trust: 'declared',
       current: false,
       isDefault: false,
-      canCopy: true,
+      canCopy: false,
       canDelete: false,
       canSetDefault: true,
     })
@@ -100,15 +105,15 @@ describe('native TUI Preset Manager', () => {
     expect(broken).toMatchObject({
       broken: 'unparsable YAML',
       canCopy: false,
-      canDelete: true,
+      canDelete: false,
       canSetDefault: false,
     })
 
     const userPreset = snapshot.rows.find(r => r.preset.id === 'my-preset')!
     expect(userPreset).toMatchObject({
-      trust: 'user',
-      canCopy: true,
-      canDelete: true,
+      trust: 'declared',
+      canCopy: false,
+      canDelete: false,
       canSetDefault: true,
     })
   })
@@ -131,25 +136,22 @@ describe('native TUI Preset Manager', () => {
     expect((failure as TuiPresetIdError).code).toBe('id-taken')
   })
 
-  it('copies an existing preset through the Host service', async () => {
+  it('refuses directory authoring that the official registry does not provide', async () => {
     const svc = service([preset({ id: 'standard', trust: 'system' })])
-    const result = await copyTuiPreset(svc, 'standard', 'my-copy', 'My Copy')
-    expect(result).toEqual({ id: 'my-copy' })
-    expect(svc.copy).toHaveBeenCalledWith('standard', 'my-copy', 'My Copy')
+    await expect(copyTuiPreset(svc, 'standard', 'my-copy', 'My Copy')).rejects.toThrow(/unavailable/u)
+    await expect(deleteTuiPreset(svc, 'standard')).rejects.toThrow(/unavailable/u)
   })
 
-  it('deletes a user-owned preset through the Host service', async () => {
-    const svc = service([preset({ id: 'custom', trust: 'user' })])
-    await deleteTuiPreset(svc, 'custom')
-    expect(svc.remove).toHaveBeenCalledWith('custom')
-  })
-
-  it('sets the future default through the owner at the roster revision', async () => {
-    const setDefault = vi.fn(async () => {})
-    const svc = service([preset({ id: 'standard' }), preset({ id: 'minimal' })], 'standard', setDefault)
-    await setTuiDefaultPreset(svc, 'minimal', 7)
-    expect(setDefault).toHaveBeenCalledWith('minimal', 7)
-    await expect(setTuiDefaultPreset(svc, 'minimal', undefined)).rejects.toThrow(/read-only/u)
+  it('sets a valid future default through Settings at the observed revision', async () => {
+    const svc = service([preset({ id: 'standard' }), preset({ id: 'minimal' }), preset({ id: 'broken', broken: 'error' })])
+    const owner = settings(7)
+    await setTuiDefaultPreset(svc, owner, 'minimal', 7)
+    expect(owner.mutate).toHaveBeenCalledWith('agent-preset-registry', [
+      { op: 'set', path: ['selectedDefault'], value: 'minimal' },
+    ], 7)
+    await expect(setTuiDefaultPreset(svc, owner, 'missing', 7)).rejects.toThrow(/unknown or broken/u)
+    await expect(setTuiDefaultPreset(svc, owner, 'broken', 7)).rejects.toThrow(/unknown or broken/u)
+    await expect(setTuiDefaultPreset(svc, owner, 'minimal', undefined)).rejects.toThrow(/read-only/u)
   })
 
   it('reads and bounds composition text', async () => {
@@ -159,14 +161,14 @@ describe('native TUI Preset Manager', () => {
     expect(preview.truncated).toBe(false)
 
     const longText = 'x'.repeat(5_000)
-    const longSvc = { ...svc, read: vi.fn(async () => longText) }
+    const longSvc = { ...svc, readDocument: vi.fn(async () => ({ agentPreset: 'standard', content: longText })) }
     const truncated = await readTuiPresetComposition(longSvc, 'standard')
     expect(truncated.truncated).toBe(true)
     expect(truncated.text.length).toBeLessThanOrEqual(4_096)
   })
 
   it('reports non-authorable deployments that cannot copy', async () => {
-    const svc = { ...service([preset({ id: 'standard', trust: 'system' })]), authorable: false }
+    const svc = service([preset({ id: 'standard', trust: 'system' })])
     const snapshot = await collectTuiPresetManager(svc, 'standard', 'en')
     expect(snapshot.authorable).toBe(false)
     expect(snapshot.rows[0]!.canCopy).toBe(false)
@@ -186,15 +188,17 @@ describe('native TUI Preset Manager', () => {
     expect(failedSnapshot.rows[0]?.composition).toBeUndefined()
   })
 
-  it('hides default mutation when the official Host does not expose the newer owner seam', async () => {
-    const legacy = Object.fromEntries(Object.entries(service([
+  it('hides default mutation when Settings or its registry entry is unavailable', async () => {
+    const registry = service([
       preset({ id: 'standard', trust: 'system' }),
       preset({ id: 'minimal', trust: 'system' }),
-    ])).filter(([name]) => name !== 'setDefault' && name !== 'defaultRevision')) as unknown as TuiAgentPresets
-    const snapshot = await collectTuiPresetManager(legacy, 'standard', 'en')
+    ])
+    const snapshot = await collectTuiPresetManager(registry, 'standard', 'en')
     expect(snapshot.defaultRevision).toBeUndefined()
     expect(snapshot.rows.every(row => !row.canSetDefault)).toBe(true)
-    await expect(setTuiDefaultPreset(legacy, 'minimal', 1)).rejects.toThrow(/read-only/u)
+    await expect(setTuiDefaultPreset(registry, undefined, 'minimal', 1)).rejects.toThrow(/read-only/u)
+    const missing = { ...settings(), describe: vi.fn(() => []) as TuiPresetSettings['describe'] }
+    expect((await collectTuiPresetManager(registry, 'standard', 'en', missing)).rows.every(row => !row.canSetDefault)).toBe(true)
   })
 
   it('maps owner races and read-only settings without leaking implementation errors', () => {

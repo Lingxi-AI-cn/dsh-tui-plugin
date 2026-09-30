@@ -66,7 +66,8 @@ function rewindPromptText(content: readonly ContentBlock[]): string {
     else if (block.type === 'image') parts.push(`[image: ${block.attachment.name ?? block.attachment.attachmentId}]`)
     else if (block.type === 'file') parts.push(`[file: ${block.attachment.name}]`)
     else if (block.type === 'tool-call') parts.push(`${block.name} ${block.arguments}`)
-    else parts.push(rewindPromptText(block.content))
+    else if (block.type === 'tool-addition') parts.push(`[tool added: ${block.toolName}]`)
+    else parts.push(`[tool removed: ${block.toolName}]`)
   }
   return terminalSafe(parts.filter(Boolean).join('\n')) || '(non-text prompt)'
 }

@@ -2,18 +2,22 @@
 
 import { terminalSafe } from './sanitize.ts'
 import { tuiAgentModeDescription, tuiAgentModeName } from './mode.ts'
-import type { AgentPreset, AgentPresetCompositionRow, TuiAgentPresets } from './host.ts'
+import type { AgentPreset, AgentPresetCompositionRow, SettingsForms, TuiAgentPresets } from './host.ts'
 import { tuiMessage, type TuiLocale } from './locale.ts'
 
 const MAX_COMPOSITION_PREVIEW = 4_096
 const PRESET_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/
+const PRESET_SETTINGS_ENTRY = 'agent-preset-registry'
+
+/** The official Settings owner is the only writer of the registry's selectedDefault field. */
+export type TuiPresetSettings = Pick<SettingsForms, 'describe' | 'mutate' | 'writable'>
 
 /** One preset row projected for the Preset Manager panel. */
 export interface TuiPresetManagerRow {
   readonly preset: AgentPreset
   readonly name: string
   readonly description: string | undefined
-  readonly trust: 'system' | 'user'
+  readonly trust: 'system' | 'user' | 'declared'
   readonly current: boolean
   readonly isDefault: boolean
   readonly broken: string | undefined
@@ -45,16 +49,27 @@ export interface TuiPresetManagerSnapshot {
  * @param presets - Host preset service.
  * @param currentPresetId - effective preset id of the current Session.
  * @param locale - active TUI locale.
+ * @param settings - optional official Profile settings owner.
  * @returns frozen snapshot.
  */
 export async function collectTuiPresetManager(
   presets: TuiAgentPresets,
   currentPresetId: string | undefined,
   locale: TuiLocale,
+  settings?: TuiPresetSettings,
 ): Promise<TuiPresetManagerSnapshot> {
   const roster = await presets.list()
   const defaultId = presets.defaultId
-  const canAuthor = presets.authorable
+  const canAuthor = false
+  let defaultRevision: number | undefined
+  if (settings?.writable) {
+    try {
+      defaultRevision = settings.describe({ redactSecrets: true })
+        .find(row => String(row.ns) === PRESET_SETTINGS_ENTRY)?.revision
+    } catch {
+      // A missing or inactive Settings entry keeps the default action unavailable.
+    }
+  }
   let compositionState: TuiPresetManagerSnapshot['compositionState'] =
     typeof presets.compositionInventory === 'function' ? 'ready' : 'unavailable'
   let compositionById = new Map<string, TuiPresetCompositionInventory>()
@@ -83,14 +98,13 @@ export async function collectTuiPresetManager(
       preset,
       name: tuiAgentModeName(preset, locale),
       description: tuiAgentModeDescription(preset, locale),
-      trust: preset.trust,
+      trust: 'declared' as const,
       current: preset.id === currentPresetId,
       isDefault: preset.id === defaultId,
       broken: preset.broken === undefined ? undefined : terminalSafe(preset.broken),
-      canCopy: canAuthor && preset.broken === undefined,
-      canDelete: preset.trust === 'user',
-      canSetDefault: typeof presets.setDefault === 'function'
-        && presets.defaultRevision !== undefined
+      canCopy: false,
+      canDelete: false,
+      canSetDefault: defaultRevision !== undefined
         && preset.id !== defaultId
         && preset.broken === undefined,
       composition: compositionById.get(preset.id),
@@ -100,7 +114,7 @@ export async function collectTuiPresetManager(
     rows,
     currentPresetId,
     defaultPresetId: defaultId,
-    defaultRevision: presets.defaultRevision,
+    defaultRevision,
     authorable: canAuthor,
     compositionState,
   })
@@ -135,58 +149,71 @@ export function validateTuiPresetId(id: string, existingIds: readonly string[]):
   return trimmed
 }
 
-/** Result of a copy mutation. */
+/** Retired copy result retained for the exported compatibility signature. */
 export interface TuiPresetCopyResult {
   readonly id: string
 }
 
 /**
- * Copy a preset and return the new id.
+ * Refuse a directory-style copy because the official registry only reads plugin declarations.
  * @param presets - Host preset service.
  * @param sourceId - id of the preset to copy.
  * @param newId - validated target id.
  * @param displayName - optional display name for the copy.
- * @returns the created preset id.
+ * @returns A rejected promise because the official registry has no authoring operation.
  */
-export async function copyTuiPreset(
+export function copyTuiPreset(
   presets: TuiAgentPresets,
   sourceId: string,
   newId: string,
   displayName?: string,
 ): Promise<TuiPresetCopyResult> {
-  await presets.copy(sourceId, newId, displayName)
-  return { id: newId }
+  void presets
+  void sourceId
+  void newId
+  void displayName
+  return Promise.reject(new Error('preset copying is unavailable: the official preset registry has no authoring operation'))
 }
 
 /**
- * Delete a user-owned preset.
+ * Refuse deletion because the official registry does not own declaration files.
  * @param presets - Host preset service.
  * @param id - the preset to delete.
- * @throws on system presets or unknown ids.
+ * @returns A rejected promise because the official registry has no deletion operation.
  */
-export async function deleteTuiPreset(
+export function deleteTuiPreset(
   presets: TuiAgentPresets,
   id: string,
 ): Promise<void> {
-  await presets.remove(id)
+  void presets
+  void id
+  return Promise.reject(new Error('preset deletion is unavailable: the official preset registry has no authoring operation'))
 }
 
 /**
- * Select a future-session default through the preset owner at the observed revision.
+ * Select a future-session default through the official Profile Settings owner.
  * @param presets - Host preset service.
+ * @param settings - official Profile settings owner.
  * @param id - existing preset id.
  * @param expectedRevision - settings revision carried by the roster snapshot.
  * @returns a promise settled after the owner commits the settings mutation.
  */
 export async function setTuiDefaultPreset(
   presets: TuiAgentPresets,
+  settings: TuiPresetSettings | undefined,
   id: string,
   expectedRevision: number | undefined,
 ): Promise<void> {
-  if (expectedRevision === undefined || typeof presets.setDefault !== 'function') {
+  if (expectedRevision === undefined || !settings?.writable) {
     throw new Error('preset default is read-only because settings are unavailable')
   }
-  await presets.setDefault(id, expectedRevision)
+  const row = (await presets.list()).find(preset => preset.id === id)
+  if (row === undefined || row.broken !== undefined) {
+    throw new Error('preset default cannot select an unknown or broken preset')
+  }
+  await settings.mutate(PRESET_SETTINGS_ENTRY, [{
+    op: 'set', path: ['selectedDefault'], value: id,
+  }], expectedRevision)
 }
 
 /** Bounded composition preview. */
@@ -205,7 +232,7 @@ export async function readTuiPresetComposition(
   presets: TuiAgentPresets,
   id: string,
 ): Promise<TuiPresetCompositionPreview> {
-  const text = await presets.read(id)
+  const { content: text } = await presets.readDocument(id)
   const safe = terminalSafe(text)
   if (safe.length <= MAX_COMPOSITION_PREVIEW) {
     return { text: safe, truncated: false }

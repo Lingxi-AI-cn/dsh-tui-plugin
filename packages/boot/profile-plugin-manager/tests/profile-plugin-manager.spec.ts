@@ -323,6 +323,30 @@ describe('materialization and validation', () => {
     expect(await profileManager.validateProfile(destination)).toMatchObject({ valid: true, errors: [] })
   })
 
+  it('inspects every declared patch of a profile-local bundle', async () => {
+    const root = scratch()
+    const profileManager = manager(root)
+    const bundle = await artifact(root, 'multi-bundle', '1.0.0', './cordis.patch.yml')
+    const plan = await profileManager.plan({ operation: 'install', artifact: bundle })
+    await profileManager.applyPlan(plan)
+    const profileDir = join(root, 'profiles', 'tui')
+    const bundleDir = join(profileDir, 'node_modules', 'multi-bundle')
+    writeFileSync(join(bundleDir, 'package.json'), JSON.stringify({
+      name: 'multi-bundle', version: '1.0.0',
+      dsh: { bundle: { patch: ['./cordis.patch.yml', './preset.patch.yml'] } },
+    }))
+    writeFileSync(join(bundleDir, 'preset.patch.yml'), '[]\n')
+
+    expect((await profileManager.inspectInstalled()).plugins[0]).toMatchObject({
+      bundlePatch: './cordis.patch.yml', activeBundle: true, health: 'ok',
+    })
+    expect(await profileManager.validateProfile()).toMatchObject({ valid: true, errors: [] })
+
+    rmSync(join(bundleDir, 'preset.patch.yml'))
+    expect((await profileManager.inspectInstalled()).plugins[0]).toMatchObject({ health: 'manifest-invalid' })
+    expect(await profileManager.validateProfile()).toMatchObject({ valid: false })
+  })
+
   it('rejects nested destinations and pre-cancelled materialization', async () => {
     const root = scratch()
     const profileManager = manager(root)

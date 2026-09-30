@@ -15,9 +15,13 @@ export type TuiSessionSort = 'updated-desc' | 'updated-asc' | 'title' | 'workspa
 
 /** Durable native-TUI preferences for the metadata-only Session list. */
 export interface TuiSessionManagerPreferences {
+  /** Workspace-local or all-Workspace Session scope. */
   readonly scope: TuiSessionScope
+  /** Include active, archived, or all Session rows. */
   readonly archive: TuiSessionArchiveFilter
+  /** Stable ordering of visible Session rows. */
   readonly sort: TuiSessionSort
+  /** Whether Session rows are grouped by Workspace. */
   readonly groupByWorkspace: boolean
 }
 

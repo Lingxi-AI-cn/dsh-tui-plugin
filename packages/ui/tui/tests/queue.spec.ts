@@ -148,11 +148,11 @@ describe('native TUI pending Queue projection', () => {
     const { agent, inbox } = fixture()
     const message = createUserMessage({
       content: [{ type: 'text', text: 'injected context' }],
-      source: { kind: 'plugin', plugin: 'fixture' },
+      source: { kind: 'test' },
     })
     inbox.append('next-step', message)
     const queue = projectTuiQueue(inbox.snapshot())
-    expect(queue.items[0]).toMatchObject({ source: 'plugin', canEdit: false, canDelete: false })
+    expect(queue.items[0]).toMatchObject({ source: 'test', canEdit: false, canDelete: false })
     expect(editTuiQueueItem(agent, message.id, 'changed', queue.revision)).toMatchObject({ reason: 'not-editable' })
     expect(deleteTuiQueueItem(agent, message.id, queue.revision)).toMatchObject({ reason: 'not-deletable' })
     expect(inbox.nextStep).toEqual([message])

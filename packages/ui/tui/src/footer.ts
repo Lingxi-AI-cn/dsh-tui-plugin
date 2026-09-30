@@ -144,7 +144,8 @@ export function tuiFooterItems(
       [
         tuiMessage(locale, 'footer.mode.current', { mode: name, id: preset.id }),
         tuiMessage(locale, 'footer.mode.kind', {
-          kind: tuiMessage(locale, preset.trust === 'system' ? 'mode.kind.system' : 'mode.kind.user'),
+          kind: tuiMessage(locale, preset.trust === 'system' ? 'mode.kind.system'
+            : preset.trust === 'user' ? 'mode.kind.user' : 'mode.kind.declared'),
         }),
         ...description === undefined ? [] : [description],
       ],

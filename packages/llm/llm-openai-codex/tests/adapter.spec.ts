@@ -98,7 +98,7 @@ describe('OpenAICodexAdapter', () => {
               height: 1,
             },
           }],
-          source: { kind: 'plugin', plugin: 'test' },
+          source: { kind: 'test' },
         })],
       })) { /* drain */ }
     }

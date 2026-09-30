@@ -26,7 +26,7 @@ export interface TuiAgentModeOption {
  * @returns terminal-safe localized name.
  */
 export function tuiAgentModeName(preset: AgentPreset, locale: TuiLocale): string {
-  const official = preset.trust === 'system' ? OFFICIAL_MODE_KEYS[preset.id] : undefined
+  const official = OFFICIAL_MODE_KEYS[preset.id]
   return terminalSafe(official === undefined
     ? preset.name ?? preset.id
     : tuiMessage(locale, official.name))
@@ -39,7 +39,7 @@ export function tuiAgentModeName(preset: AgentPreset, locale: TuiLocale): string
  * @returns terminal-safe description when the preset provides one.
  */
 export function tuiAgentModeDescription(preset: AgentPreset, locale: TuiLocale): string | undefined {
-  const official = preset.trust === 'system' ? OFFICIAL_MODE_KEYS[preset.id] : undefined
+  const official = OFFICIAL_MODE_KEYS[preset.id]
   const description = official === undefined ? preset.description : tuiMessage(locale, official.description)
   return description === undefined ? undefined : terminalSafe(description)
 }
@@ -61,7 +61,8 @@ export function tuiAgentModeOptions(
       || left.id.localeCompare(right.id))
     .map((preset) => {
       const name = tuiAgentModeName(preset, locale)
-      const kind = tuiMessage(locale, preset.trust === 'system' ? 'mode.kind.system' : 'mode.kind.user')
+      const kind = tuiMessage(locale, preset.trust === 'system' ? 'mode.kind.system'
+        : preset.trust === 'user' ? 'mode.kind.user' : 'mode.kind.declared')
       const state = preset.broken !== undefined
         ? tuiMessage(locale, 'mode.state.unavailable')
         : preset.id === currentId ? tuiMessage(locale, 'mode.state.current') : undefined

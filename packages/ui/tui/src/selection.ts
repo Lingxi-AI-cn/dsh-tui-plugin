@@ -205,7 +205,7 @@ function dragSelection(map: TuiScreenMap, anchor: TuiScreenPosition, focus: TuiS
  * and emoji select one grapheme, punctuation selects one grapheme, and spaces
  * select their contiguous run. Triple-click selects the current soft-wrapped
  * logical line. Gutter, padding, and non-selectable cells never resolve.
- * @param map - immutable screen-cell provenance.
+ * @param map - immutable screen-cell source mapping.
  * @param gesture - process-local gesture coordinates.
  * @returns normalized inclusive range, or `undefined` when no text is selected.
  */
@@ -238,7 +238,7 @@ function adjacentRowPoint(
  *
  * The operation is intentionally monotonic: keyboard gestures add text to the
  * existing normalized range and never collapse a pointer-established range.
- * @param map - immutable screen-cell provenance.
+ * @param map - immutable screen-cell source mapping.
  * @param selection - active normalized range.
  * @param direction - requested expansion direction.
  * @returns expanded immutable range, or the original range at a screen edge.
@@ -283,7 +283,7 @@ export function extendTuiScreenSelection(
  *
  * Gutters, continuation cells, and padding are omitted. Combining marks stay
  * attached to their grapheme because the screen map already stores clusters.
- * @param map - immutable screen-cell provenance.
+ * @param map - immutable screen-cell source mapping.
  * @param row - zero-based physical map row.
  * @param selection - active range, when one exists.
  * @returns immutable text segments in rendered order.
@@ -314,7 +314,7 @@ export function tuiScreenTextSegments(
  *
  * Soft-wrapped rows are joined directly. Hard newlines and independent
  * semantic rows retain a newline so copy-on-release remains readable.
- * @param map - immutable screen-cell provenance.
+ * @param map - immutable screen-cell source mapping.
  * @param selection - inclusive range to copy.
  * @returns grapheme-safe selected text.
  */

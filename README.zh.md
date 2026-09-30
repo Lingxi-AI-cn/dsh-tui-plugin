@@ -44,7 +44,7 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 
 ### 4 种真实 Agent 执行模式
 
-- `/mode` 可以选择官方 Standard、PTC、Minimal 与 Creator Agent Preset，也可以选择 `$DSH_HOME/.agent-presets` 下已经安装且健康的 user preset。
+- `/mode` 可以选择官方 Standard、PTC、Minimal 与 Creator Agent Preset，也可以选择 Host 注册器中已声明且健康的自定义 preset。
 - Standard 提供完整原生编码工具；PTC 通过 TypeScript Code Mode SDK 与 `run_code` 呈现这些能力；Minimal 保留官方固定提示词和严格的双工具；Creator 增加 runtime 检查与 preset 创作指导。
 - 空白 Session 会原子地原位切换。开始工作后，同一操作会在确认后创建新 Session，避免用不同 tool catalog 重放历史。
 - Preset identity 会耐久保存：`/resume`、`/new`、`/clear` 和 `/rewind` 都会保留该身份，兼容的 Session 可以在 Web 与 TUI 之间切换而不改变组装。
@@ -77,7 +77,7 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 - `/plugins` 明确分开已安装事实、Registry 收录与仅浏览的 GitHub 仓库；筛选器可区分全部收录与可安装版本，仓库详情会先显示扫描和发布状态，再由用户选择打开 GitHub。
 - Profile 变更继续使用官方 `dsh plugin` 路径；TUI 显示精确安装或移除命令，不建立第二套包管理权限。
 - `/doctor` 检查 Host/TUI 能力，`/context` 查看当前模型、权限、工具、skills 和 system prompt 贡献者。
-- `/presets` 可安全复制、删除和检查 Agent Preset 的来源与组合，按 Host 能力打开文件，并仅在 settings owner 提供 compare-and-set 时选择未来默认项；`/host-plugins` 检查规范 Loader 清单与 owner-defined settings。
+- `/presets` 可检查已注册的 Agent Preset，并通过带 revision 检查的 Settings 选择未来默认项。官方注册器没有创作或源文件 API，因此复制、删除和打开文件不可用；`/host-plugins` 检查规范 Loader 清单与 owner-defined settings。
 
 ## 常用命令
 
@@ -109,19 +109,19 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 
 | DSH TUI | DeepSeek Harness | Node.js | 平台 |
 | --- | --- | --- | --- |
-| `0.1.11-rc.2` | 精确匹配 `0.1.5-rc.2` | `^22.19.0` 或 `>=24` | macOS 14 与 Ubuntu 24.04 CI |
+| `0.1.12-rc.2` | 精确匹配 `0.1.7-rc.2` | `^22.19.0` 或 `>=24` | macOS 14 与 Ubuntu 24.04 CI |
 
 只有在精确官方包 clean-room 安装、profile 组合、PTY 启动/退出和终端恢复验证完成后，才会增加对新 Harness 版本的支持。
 
-TUI 核心版本独立递增（这里是 `0.1.11`），最后的预发布后缀（`rc.2`）则始终表示兼容的官方 Harness 预发布版本。这样不会让用户把一次 TUI 迭代误认为上游 DSH 已升级。
+TUI 核心版本独立递增（这里是 `0.1.12`），最后的预发布后缀（`rc.2`）则始终表示兼容的官方 Harness 预发布版本。这样不会让用户把一次 TUI 迭代误认为上游 DSH 已升级。
 
 ## 安装
 
 先安装精确支持的官方 Harness，再把 DSH TUI 加入独立的 `tui` profile：
 
 ```sh
-npm install --global @deepseek-ai/dsh@0.1.5-rc.2
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.11-rc.2
+npm install --global @deepseek-ai/dsh@0.1.7-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.12-rc.2
 dsh --profile tui
 ```
 
@@ -144,7 +144,7 @@ dsh --profile tui
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.11-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.12-rc.2
 ```
 
 Session 和凭据位于 profile 目录之外。只重新应用经过审查的自定义 patch，不要把旧 profile 整体复制回来。
@@ -164,7 +164,7 @@ Session 和凭据位于 profile 目录之外。只重新应用经过审查的自
 安装声明兼容当前官方 Harness 版本的精确 TUI 版本：
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.11-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.12-rc.2
 ```
 
 Release tag 和 npm 版本不可覆盖或移动。不要混用不同 release candidate 的 package。
@@ -173,14 +173,7 @@ Release tag 和 npm 版本不可覆盖或移动。不要混用不同 release can
 
 增强账户目录 Provider 显示为 **ChatGPT Codex（Lingxi 增强）**，路由为 `lingxi-openai-codex`。已有凭据仍位于 `llm-openai-codex/openai-codex`，与官方路由的 `llm-pi-ai/openai-codex` grant 隔离。安装不会移动或合并这些记录。
 
-从 `0.1.8-rc.1` 升级时，若 TUI 可正常启动，请通过 `/models` 选择增强路由。若共享默认值保存为 `openai-codex`，但未启用该官方路由，请在启动前把以下内容合并到 `$DSH_HOME/settings.yaml`。将示例模型替换为已有 Codex model id，保留其他 `tui` 设置，并保持 `agent-default-model` 与凭据不变：
-
-```yaml
-tui:
-  defaultModel:
-    provider: lingxi-openai-codex
-    model: gpt-5.6-terra
-```
+升级后请通过 `/models` 选择增强路由。TUI 会将旧 `settings.yaml` 偏好一次性导入 Profile 所有的 Settings 并保留备份；Provider 凭据和共享 Agent 默认值仍由各自 owner 管理。旧目录式自定义 Agent Preset 不会自动导入新注册器。
 
 本包会在退出时释放自有连接并恢复终端模式。它不会替换官方 DSH CLI；应用清理完成后，远程 WebSocket 关闭握手仍可能拖延该 CLI 的自然进程退出。
 

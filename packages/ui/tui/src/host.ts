@@ -19,12 +19,12 @@ import type { Agent as HostAgent } from '@deepseek-ai/dsh-agent'
 import type { GoalProjection, GoalRef, GoalService } from '@deepseek-ai/dsh-goal'
 import type { PlanProjection } from '@deepseek-ai/dsh-plan-mode'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import type z from '@deepseek-ai/schemastery'
 import {
   credentialKeyId, credentialKeyScope, credentialRef as hostCredentialRef,
 } from '@deepseek-ai/dsh-credentials'
 import type { Context as HostContext } from '@deepseek-ai/cordis'
-import type { AgentPreset, AgentPresets as HostAgentPresets } from '@deepseek-ai/dsh-agent-presets'
+import type { Volatile } from '@deepseek-ai/cordis'
+import type { AgentPreset as HostAgentPreset, AgentPresetRegistry as HostAgentPresets } from '@deepseek-ai/dsh-agent-preset-registry'
 import type {
   Workspace, WorkspaceId, WorkspaceRegistry as HostWorkspaceRegistry,
 } from '@deepseek-ai/dsh-workspace'
@@ -33,6 +33,7 @@ import type {
 } from '@deepseek-ai/dsh-host-directory-picker'
 
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-compaction'
@@ -47,6 +48,7 @@ import type {} from '@deepseek-ai/dsh-tool-todo'
 import type {} from '@deepseek-ai/dsh-authorization'
 
 export type { Context } from '@deepseek-ai/cordis'
+export type { Volatile }
 export { FsError } from '@deepseek-ai/dsh-fs'
 export type { FileSystem } from '@deepseek-ai/dsh-fs'
 export { AttachmentError } from '@deepseek-ai/dsh-attachment'
@@ -68,12 +70,13 @@ export type {
   ModelSelection,
   ModelSelectionRef,
 } from '@deepseek-ai/dsh-agent'
-export type {
-  AgentPreset, AgentPresetComposition, AgentPresetCompositionRow,
-} from '@deepseek-ai/dsh-agent-presets'
+/** Preset metadata plus optional legacy source metadata, never required from the official registry. */
+export type AgentPreset = HostAgentPreset & { readonly trust?: 'system' | 'user'; readonly path?: string }
+export type AgentPresetComposition = Awaited<ReturnType<HostAgentPresets['compositionInventory']>>[number]
+export type AgentPresetCompositionRow = AgentPresetComposition['rows'][number]
 export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { JobId } from '@deepseek-ai/dsh-jobs'
-export type { JobSnapshot, JobStatus } from '@deepseek-ai/dsh-jobs'
+export type { JobView, JobStatus } from '@deepseek-ai/dsh-jobs'
 export { expandAssistantStream, createUserMessage, errorChain, freezeMessage, normalizeApiKey, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 export type {
   ContentBlock, LlmConfigurableProvider, LlmDiscoveredModel, LlmModelDiscoveryRequest,
@@ -81,7 +84,10 @@ export type {
 } from '@deepseek-ai/dsh-llm'
 export { MessageId } from '@deepseek-ai/dsh-llm/brand'
 export { runNativeCommand } from '@deepseek-ai/dsh-native-command'
-export type { PermissionSelect } from '@deepseek-ai/dsh-permission-presets'
+/** TUI view joins the durable selection with the current process catalog. */
+export type PermissionSelect = import('@deepseek-ai/dsh-permission-presets').PermissionSelection & {
+  readonly options: readonly import('@deepseek-ai/dsh-permission-presets').PresetOption[]
+}
 export {
   isAppendSurfaceEvent,
 } from '@deepseek-ai/dsh-session/surface'
@@ -98,7 +104,7 @@ export type { SessionProjectionCache } from '@deepseek-ai/dsh-session-projection
 export type { SessionRecord } from '@deepseek-ai/dsh-session-query'
 export { queueHostSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 export type {
-  SettingsDescriptor, SettingsNamespace, SettingsPathOp, SettingsProvider,
+  SettingsDescriptor, SettingsNamespace, SettingsPathOp, SettingsForms,
 } from '@deepseek-ai/dsh-settings'
 export { activeAtToken, formatFileMention } from '@deepseek-ai/dsh-file-reference'
 export type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
@@ -121,31 +127,8 @@ export function settingsNamespace(value: string): import('@deepseek-ai/dsh-setti
   return brandString<import('@deepseek-ai/dsh-settings').SettingsNamespace>(value)
 }
 
-/** Hooks used while the TUI follows the optional settings owner. */
-export interface TuiSettingsSectionHooks<T> {
-  /** Replace the currently authoritative configuration source. */
-  setSource(current: () => T): void
-  /** Recompute TUI state derived from the active source. */
-  onChange(): void
-  /** Refuse a resolved settings section the TUI cannot apply. */
-  validate?: (value: T) => void
-}
-
-/** Install one TUI settings section through the rc.1 owner method. */
-export function installSettingsSection<T>(
-  ctx: HostContext,
-  namespace: string,
-  schema: z<T>,
-  entry: T,
-  hooks: TuiSettingsSectionHooks<T>,
-): void {
-  ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.installSection(ctx, namespace, schema, entry, hooks)
-  })
-}
-
 /** Resolve the shared Host settings owner through the reviewed adapter boundary. */
-export function hostSettings(ctx: HostContext): import('@deepseek-ai/dsh-settings').SettingsProvider {
+export function hostSettings(ctx: HostContext): import('@deepseek-ai/dsh-settings').SettingsForms {
   const settings = ctx.get('settings')
   if (settings === undefined) throw new Error('TUI settings service is unavailable')
   return settings
@@ -212,24 +195,20 @@ export type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 /** Preset operations the native TUI is allowed to use from the official Host. */
 export type TuiAgentPresets = Pick<HostAgentPresets,
   'list' | 'resolve' | 'mount' | 'recompose' | 'composedPreset'
-  | 'read' | 'copy' | 'remove' | 'defaultId' | 'authorable' | 'roots'> & {
+  | 'readDocument' | 'defaultId'> & {
     /** Structured owner projection; absent only on an older compatible Host. */
     compositionInventory?: HostAgentPresets['compositionInventory']
-    /** Newer owner mutation; absent on legacy Hosts. */
-    setDefault?(id: string, expectedRevision: number): Promise<void>
-    /** Settings revision paired with {@link setDefault}. */
-    readonly defaultRevision?: number
   }
 
 /** Resolve the required preset roster through the reviewed Host adapter. */
 export function hostAgentPresets(ctx: HostContext): TuiAgentPresets {
   const presets = ctx.get('agentPresets')
   if (presets === undefined) throw new Error('TUI Agent preset service is unavailable')
-  return presets as unknown as TuiAgentPresets
+  return presets
 }
 
 /** Keep the imported preset row type on the public Host boundary. */
-export type TuiAgentPreset = AgentPreset
+export type TuiAgentPreset = HostAgentPreset
 
 /** Workspace operations the native TUI consumes from the durable Host owner. */
 export type TuiWorkspaceRegistry = Pick<HostWorkspaceRegistry,

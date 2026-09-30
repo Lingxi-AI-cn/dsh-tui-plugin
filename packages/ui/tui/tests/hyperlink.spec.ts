@@ -23,7 +23,7 @@ describe('TUI OSC 8 hyperlinks', () => {
     )
   })
 
-  it('records hyperlink provenance on visible text cells', () => {
+  it('records hyperlink target on visible text cells', () => {
     const map = projectTuiScreenMap([
       { semanticBlockKey: 'message:1', text: 'https://example.test/docs' },
     ], { columns: 32 })

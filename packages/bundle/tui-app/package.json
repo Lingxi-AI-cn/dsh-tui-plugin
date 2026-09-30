@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-tui",
   "description": "Post-install native terminal UI bundle for DeepSeek Harness",
-  "version": "0.1.11-rc.2",
+  "version": "0.1.12-rc.2",
   "publishConfig": {
     "access": "public"
   },
@@ -27,11 +27,19 @@
       "default": "./lib/invariant.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./presets/standard.patch.yml": "./presets/standard.patch.yml",
+    "./presets/ptc.patch.yml": "./presets/ptc.patch.yml",
+    "./presets/minimal.patch.yml": "./presets/minimal.patch.yml",
+    "./presets/cordis.patch.yml": "./presets/cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/*.js",
     "cordis.patch.yml",
+    "presets/standard.patch.yml",
+    "presets/ptc.patch.yml",
+    "presets/minimal.patch.yml",
+    "presets/cordis.patch.yml",
     "README.md",
     "LICENSE",
     "lib/types/**/*.d.ts"
@@ -39,7 +47,13 @@
   "license": "MIT",
   "dsh": {
     "bundle": {
-      "patch": "./cordis.patch.yml"
+      "patch": [
+        "./cordis.patch.yml",
+        "./presets/standard.patch.yml",
+        "./presets/ptc.patch.yml",
+        "./presets/minimal.patch.yml",
+        "./presets/cordis.patch.yml"
+      ]
     }
   },
   "dependencies": {
@@ -51,70 +65,101 @@
     "commander": "^15.0.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis-plugin-loader": "1.0.3",
-    "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-agent-default-model": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-agent-presets": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-app-boot": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-attachment": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-authorization": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-atomic-write": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-brand": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-cmdline": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-code-runtime-worker-thread": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-commands": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-compaction": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-cordis-host-runner": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-credentials": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-fs": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-file-reference": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-file-reference-local": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-home-paths": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-host-directory-picker": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-host-directory-picker-browse": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-host-plugin-inventory": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-goal": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-jobs": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-message-feedback": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-llm-pi-ai": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-timeout": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-native-command": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-output-retention": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-permission-presets": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-plan-mode": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-log-export": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-persistence": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-projection": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-projection-cache": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-stats": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-query": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-reference": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-schedule": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-title": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-settings": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-storage": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-storage-domain": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-storage-json": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-subagent": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-subprocess": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-token-meter": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-tool-todo": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-tool-ask-user": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-tool-subagent": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-user-approval": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-user-questions": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-workspace": "0.1.5-rc.2",
-    "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/schemastery": "3.18.2",
-    "@earendil-works/pi-ai": "0.85.1"
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/cordis-plugin-loader": "1.0.5",
+    "@deepseek-ai/dsh-agent": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-agent-default-model": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-agent-preset": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-agent-preset-registry": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-app-boot": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-atomic-write": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-attachment": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-brand": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-cmdline": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-commands": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-compaction": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-cordis-host-runner": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-fs": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-home-paths": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-invariants": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-jobs": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-native-command": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-output-retention": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-permission-presets": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-log-export": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-persistence": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-projection": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-projection-cache": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-stats": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-query": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-title": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-settings": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-storage": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-storage-domain": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-storage-json": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-subagent": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-subprocess": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-timeout": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-token-meter": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-ask-user": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-subagent": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-user-approval": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-user-questions": "0.1.7-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@deepseek-ai/dsh-workspace": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-file-reference": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-file-reference-local": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-host-directory-picker": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-host-directory-picker-browse": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-host-plugin-inventory": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-goal": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-message-feedback": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-plan-mode": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-reference": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-authorization": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-todo": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-schedule": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-agent-instructions": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-agent-tool-presentation": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-command-compact": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-command-goal": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-compaction-basic": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-compaction-tool-result-pruner": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-persona": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-plugin-manager": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-skill-filesystem": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-terminal": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-terminal-bash": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-bash": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-bash-persistent": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-cordis": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-fs": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-fs-search": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-goal": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-jobs": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-present": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-pwsh": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-pwsh-persistent": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-ralph": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-skill": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-subagent-control": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-web": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-workflow": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-workflow-ptc": "0.1.7-rc.2"
   },
   "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
     "@deepseek-ai/cordis-plugin-loader": {
       "optional": true
     },
@@ -124,28 +169,28 @@
     "@deepseek-ai/dsh-agent-default-model": {
       "optional": true
     },
-    "@deepseek-ai/dsh-agent-presets": {
+    "@deepseek-ai/dsh-agent-preset": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent-preset-registry": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-api-session-controller": {
       "optional": true
     },
     "@deepseek-ai/dsh-app-boot": {
       "optional": true
     },
-    "@deepseek-ai/dsh-attachment": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-authorization": {
-      "optional": true
-    },
     "@deepseek-ai/dsh-atomic-write": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-attachment": {
       "optional": true
     },
     "@deepseek-ai/dsh-brand": {
       "optional": true
     },
     "@deepseek-ai/dsh-cmdline": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-code-runtime-worker-thread": {
       "optional": true
     },
     "@deepseek-ai/dsh-commands": {
@@ -157,31 +202,10 @@
     "@deepseek-ai/dsh-cordis-host-runner": {
       "optional": true
     },
-    "@deepseek-ai/dsh-credentials": {
-      "optional": true
-    },
     "@deepseek-ai/dsh-fs": {
       "optional": true
     },
-    "@deepseek-ai/dsh-file-reference": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-file-reference-local": {
-      "optional": true
-    },
     "@deepseek-ai/dsh-home-paths": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-host-directory-picker": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-host-directory-picker-browse": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-host-plugin-inventory": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-goal": {
       "optional": true
     },
     "@deepseek-ai/dsh-invariants": {
@@ -193,13 +217,7 @@
     "@deepseek-ai/dsh-llm": {
       "optional": true
     },
-    "@deepseek-ai/dsh-message-feedback": {
-      "optional": true
-    },
     "@deepseek-ai/dsh-llm-pi-ai": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-timeout": {
       "optional": true
     },
     "@deepseek-ai/dsh-native-command": {
@@ -209,9 +227,6 @@
       "optional": true
     },
     "@deepseek-ai/dsh-permission-presets": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-plan-mode": {
       "optional": true
     },
     "@deepseek-ai/dsh-session": {
@@ -233,12 +248,6 @@
       "optional": true
     },
     "@deepseek-ai/dsh-session-query": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-session-reference": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-schedule": {
       "optional": true
     },
     "@deepseek-ai/dsh-session-title": {
@@ -265,10 +274,10 @@
     "@deepseek-ai/dsh-system-prompt": {
       "optional": true
     },
-    "@deepseek-ai/dsh-token-meter": {
+    "@deepseek-ai/dsh-timeout": {
       "optional": true
     },
-    "@deepseek-ai/dsh-tool-todo": {
+    "@deepseek-ai/dsh-token-meter": {
       "optional": true
     },
     "@deepseek-ai/dsh-tool-ask-user": {
@@ -280,19 +289,10 @@
     "@deepseek-ai/dsh-tools": {
       "optional": true
     },
-    "@deepseek-ai/dsh-typert-protocol": {
-      "optional": true
-    },
     "@deepseek-ai/dsh-user-approval": {
       "optional": true
     },
     "@deepseek-ai/dsh-user-questions": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-workspace": {
-      "optional": true
-    },
-    "@deepseek-ai/cordis": {
       "optional": true
     },
     "@deepseek-ai/schemastery": {
@@ -300,70 +300,198 @@
     },
     "@earendil-works/pi-ai": {
       "optional": true
+    },
+    "@deepseek-ai/dsh-workspace": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-credentials": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-file-reference": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-file-reference-local": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-host-directory-picker": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-host-directory-picker-browse": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-host-plugin-inventory": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-goal": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-message-feedback": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-plan-mode": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session-reference": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-typert-protocol": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-authorization": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-todo": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-schedule": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent-instructions": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent-tool-presentation": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-command-compact": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-command-goal": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-compaction-basic": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-compaction-tool-result-pruner": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-persona": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-plugin-manager": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-skill-filesystem": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-terminal": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-terminal-bash": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-bash": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-bash-persistent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-fs": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-fs-search": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-goal": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-jobs": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-present": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-pwsh": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-pwsh-persistent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-ralph": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-skill": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-subagent-control": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-web": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tool-workflow": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-workflow-ptc": {
+      "optional": true
     }
   },
   "devDependencies": {
-    "@deepseek-ai/cordis-plugin-loader": "1.0.3",
-    "@deepseek-ai/dsh-agent": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-agent-default-model": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-agent-presets": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-app-boot": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-attachment": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-authorization": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-atomic-write": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-brand": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-cmdline": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-code-runtime-worker-thread": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-commands": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-compaction": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-cordis-host-runner": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-credentials": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-fs": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-file-reference": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-file-reference-local": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-home-paths": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-host-directory-picker": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-host-directory-picker-browse": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-host-plugin-inventory": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-goal": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-invariants": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-jobs": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-message-feedback": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-llm-pi-ai": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-timeout": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-native-command": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-output-retention": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-permission-presets": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-plan-mode": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-log-export": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-persistence": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-projection": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-projection-cache": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-stats": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-query": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-reference": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-schedule": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-title": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-settings": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-storage": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-storage-domain": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-storage-json": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-subagent": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-subprocess": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-token-meter": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-tool-todo": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-tool-ask-user": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-tool-subagent": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-user-approval": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-user-questions": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-workspace": "0.1.5-rc.2",
-    "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/schemastery": "3.18.2",
-    "@earendil-works/pi-ai": "0.85.1"
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-base": "0.1.7-rc.2",
+    "@deepseek-ai/cordis-plugin-loader": "1.0.5",
+    "@deepseek-ai/dsh-agent": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-agent-default-model": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-agent-preset": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-agent-preset-registry": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-app-boot": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-atomic-write": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-attachment": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-brand": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-cmdline": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-commands": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-compaction": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-cordis-host-runner": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-fs": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-home-paths": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-invariants": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-jobs": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-llm": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-native-command": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-output-retention": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-permission-presets": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-log-export": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-persistence": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-projection": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-projection-cache": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-stats": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-query": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-title": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-settings": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-storage": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-storage-domain": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-storage-json": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-subagent": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-subprocess": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-timeout": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-token-meter": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-ask-user": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-subagent": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-user-approval": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-user-questions": "0.1.7-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@deepseek-ai/dsh-workspace": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-file-reference": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-file-reference-local": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-host-directory-picker": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-host-directory-picker-browse": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-host-plugin-inventory": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-goal": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-message-feedback": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-plan-mode": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-session-reference": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-authorization": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-tool-todo": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-schedule": "0.1.7-rc.2"
   }
 }

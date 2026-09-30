@@ -66,6 +66,7 @@ function options(
       writable: true,
       describe: () => [{
         ns,
+        autoGenerate: true,
         schema: providerSchema.toJSON(),
         value: {
           providers: {
@@ -238,6 +239,7 @@ describe('native TUI Provider Center snapshot', () => {
         writable: true,
         describe: () => [{
           ns,
+          autoGenerate: true,
           schema: providerSchema.toJSON(),
           value: { providers: { gateway: { models: [{ id: 'one' }] } } },
           revision: 8,
@@ -288,6 +290,7 @@ describe('native TUI Provider Center snapshot', () => {
         writable: true,
         describe: () => [{
           ns,
+          autoGenerate: true,
           schema: providerSchema.toJSON(),
           value: { providers: { gateway: {
             apiKeyEnv: 'GATEWAY_API_KEY', displayName: 'Before', api: 'openai-completions',
@@ -371,7 +374,7 @@ describe('native TUI Provider Center snapshot', () => {
       settings: {
         writable: true,
         describe: () => [{
-          ns, schema: providerSchema.toJSON(),
+          ns, autoGenerate: true, schema: providerSchema.toJSON(),
           value: { providers: { gateway: { apiKeyEnv: 'SHARED_API_KEY', models: [{ id: 'one' }] } } },
           user: { providers: { gateway: { apiKeyEnv: 'SHARED_API_KEY' } } }, revision: 14, applies: 'live',
         }],
@@ -565,6 +568,7 @@ describe('native TUI Provider Center snapshot', () => {
         writable: true,
         describe: () => [{
           ns,
+          autoGenerate: true,
           schema: providerSchema.toJSON(),
           value: { providers: { openai: { models: [] } } },
           revision: 4,

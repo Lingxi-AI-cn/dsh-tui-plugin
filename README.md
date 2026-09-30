@@ -44,7 +44,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 
 ### Four real Agent execution modes
 
-- `/mode` selects the official Standard, PTC, Minimal, and Creator Agent Presets, plus healthy user presets already installed under `$DSH_HOME/.agent-presets`.
+- `/mode` selects the official Standard, PTC, Minimal, and Creator Agent Presets, plus healthy custom presets declared in the Host registry.
 - Standard provides the full native coding toolset; PTC presents those capabilities through the TypeScript Code Mode SDK and `run_code`; Minimal keeps the official fixed prompt and exactly two tools; Creator adds runtime inspection and preset-authoring guidance.
 - A blank Session switches atomically in place. After work has started, the same action creates a new confirmed Session so history is never replayed under a different tool catalog.
 - Preset identity is durable: `/resume`, `/new`, `/clear`, and `/rewind` preserve it, and compatible Sessions move between Web and TUI without changing their composition.
@@ -77,7 +77,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 - `/plugins` separates installed-profile truth, Registry entries, and browse-only GitHub repositories; filters can distinguish all Registry entries from installable versions, while repository details expose scan and publication status before opening GitHub.
 - Profile changes remain on the official `dsh plugin` path; the TUI shows exact install or removal commands rather than creating a second package-management authority.
 - `/doctor` reports Host/TUI capabilities and `/context` shows the loaded model, permission, tools, skills, and prompt contributors.
-- `/presets` manages installed Agent Presets with safe copy, delete, source/composition inspection, Host-gated file opening, and future-default selection when the settings owner exposes compare-and-set; `/host-plugins` inspects the canonical Loader inventory and owner-defined settings.
+- `/presets` inspects registered Agent Presets and selects a future default through revision-checked Settings. Copy, delete, and file opening are unavailable because the official registry has no authoring or source-file API; `/host-plugins` inspects the canonical Loader inventory and owner-defined settings.
 
 ## Command overview
 
@@ -109,19 +109,19 @@ The current public TUI release is deliberately pinned to the matching official H
 
 | DSH TUI | DeepSeek Harness | Node.js | Platforms |
 | --- | --- | --- | --- |
-| `0.1.11-rc.2` | exactly `0.1.5-rc.2` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
+| `0.1.12-rc.2` | exactly `0.1.7-rc.2` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
 
 Support for a newer Harness version is added only after exact-package clean-room installation, profile composition, PTY startup/exit, and terminal-restoration verification.
 
-The TUI core version advances independently (`0.1.11` here), while the final prerelease suffix (`rc.2`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
+The TUI core version advances independently (`0.1.12` here), while the final prerelease suffix (`rc.2`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
 
 ## Install
 
 Install the exact supported official Harness, then add DSH TUI to a dedicated `tui` profile:
 
 ```sh
-npm install --global @deepseek-ai/dsh@0.1.5-rc.2
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.11-rc.2
+npm install --global @deepseek-ai/dsh@0.1.7-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.12-rc.2
 dsh --profile tui
 ```
 
@@ -144,7 +144,7 @@ The canonical profile contains exactly `@deepseek-ai/dsh-base` followed by `@lin
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.11-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.12-rc.2
 ```
 
 Sessions and credentials live outside the profile directory. Reapply only reviewed custom patches; do not copy the old profile back wholesale.
@@ -164,7 +164,7 @@ Sessions and credentials live outside the profile directory. Reapply only review
 Install the exact TUI version that declares compatibility with the installed official Harness version:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.11-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.12-rc.2
 ```
 
 Release tags and npm versions are immutable. Do not mix package versions from different release candidates.
@@ -173,14 +173,7 @@ Release tags and npm versions are immutable. Do not mix package versions from di
 
 The enhanced account-catalog provider appears as **ChatGPT Codex（Lingxi 增强）** with route `lingxi-openai-codex`. Its existing credentials remain at `llm-openai-codex/openai-codex`, separate from the official route's `llm-pi-ai/openai-codex` grant. Installation does not move or combine these records.
 
-For an upgrade from `0.1.8-rc.1`, use `/models` to choose the enhanced route if the TUI starts normally. If the saved shared default is `openai-codex` and that official route is not enabled, merge the following into `$DSH_HOME/settings.yaml` before launch. Replace the example model with your existing Codex model id, preserve other `tui` settings, and leave `agent-default-model` and credentials unchanged:
-
-```yaml
-tui:
-  defaultModel:
-    provider: lingxi-openai-codex
-    model: gpt-5.6-terra
-```
+Use `/models` to choose the enhanced route after upgrading. The TUI imports legacy `settings.yaml` preferences once into Profile-backed Settings and keeps a backup; provider credentials and the shared Agent default remain under their existing owners. Custom directory-based Agent Presets are not imported into the new registry automatically.
 
 The package releases its owned connections and restores terminal modes on exit. It does not replace the official DSH CLI; a remote WebSocket close handshake can still delay that CLI's natural process termination after application cleanup.
 

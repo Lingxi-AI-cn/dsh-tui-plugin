@@ -1,6 +1,43 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/bundle/tui-app/README.md
-README.md: d798a74cf6fe9959330fd8711a9c2876c378e291
-README.zh.md: 335c3ae66ced018b3b95eadccb323f43ebcb3868
+/:
+  en: d478192674577d57
+  zh: 2f4246a360506b83
+/lingxi-ai-cn-dsh-tui:
+  en: 4665a09377f20ba2
+  zh: 6b2b7eb003e1ce30
+/lingxi-ai-cn-dsh-tui/summary:
+  en: 7bb330f56ba60587
+  zh: dd58fe9c56cd8c8c
+/lingxi-ai-cn-dsh-tui/table-of-contents:
+  en: 46fab98b6cb96c21
+  zh: 2ded124284e71242
+/lingxi-ai-cn-dsh-tui/install-and-run:
+  en: 821c917a18d4a905
+  zh: 65664a7c3bcdcc77
+/lingxi-ai-cn-dsh-tui/agent-modes:
+  en: e3a85a374f0ca470
+  zh: d17f91c4522d4417
+/lingxi-ai-cn-dsh-tui/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/lingxi-ai-cn-dsh-tui/model-experience/harness-source-and-tui-surface-context:
+  en: 6414f361fba86dbd
+  zh: 1d3e5a8ff5d47fb8
+/lingxi-ai-cn-dsh-tui/model-experience/harness-source-and-tui-surface-context/what-the-model-sees:
+  en: e277dded8743b00c
+  zh: 7a832f6eff7f5839
+/lingxi-ai-cn-dsh-tui/model-experience/harness-source-and-tui-surface-context/token-effect:
+  en: a6496a29b30e8f94
+  zh: e8ccce4f9a400186
+/lingxi-ai-cn-dsh-tui/model-experience/harness-source-and-tui-surface-context/kv-cache-effect:
+  en: 9708e47298b7517f
+  zh: 767b8c27bbf8ae4a
+/lingxi-ai-cn-dsh-tui/known-limitations-and-deferred-work:
+  en: 364e403642d5ecd6
+  zh: 3e1674b8b2771eca
+/lingxi-ai-cn-dsh-tui/known-limitations-and-deferred-work/dev-note:
+  en: 0a1253c6f7b5e8b9
+  zh: 9f56528562c7c914

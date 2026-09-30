@@ -1,6 +1,31 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/boot/profile-plugin-manager/README.md
-README.md: 44adcf631653a269b93da408a8fc1b34c28fbb99
-README.zh.md: 1864b0526c4fa07d378f4d847f5248f28fdd050b
+/:
+  en: cf4fbfa28fd19896
+  zh: 89528a8301262512
+/lingxi-ai-cn-dsh-profile-plugin-manager:
+  en: adf352b46406ac46
+  zh: e1b06a8392702ced
+/lingxi-ai-cn-dsh-profile-plugin-manager/summary:
+  en: fd190dadc79eef19
+  zh: d6aafca6016f5fa7
+/lingxi-ai-cn-dsh-profile-plugin-manager/table-of-contents:
+  en: 544cf2461aa2b8b1
+  zh: 195a88b94a00ff73
+/lingxi-ai-cn-dsh-profile-plugin-manager/operations:
+  en: 3e28316dbe40f8e4
+  zh: c2e6dd768833eee3
+/lingxi-ai-cn-dsh-profile-plugin-manager/model-experience:
+  en: 90ae7d42d68890fa
+  zh: 8f3709971644f84a
+/lingxi-ai-cn-dsh-profile-plugin-manager/model-experience/kv-cache-effect:
+  en: e11db98792836d5c
+  zh: d60a29d24f285d83
+/lingxi-ai-cn-dsh-profile-plugin-manager/known-limitations-and-deferred-work:
+  en: 3310ed029c3c3084
+  zh: cb26e5d438c09c85
+/lingxi-ai-cn-dsh-profile-plugin-manager/known-limitations-and-deferred-work/dev-note:
+  en: 0a1253c6f7b5e8b9
+  zh: 9f56528562c7c914

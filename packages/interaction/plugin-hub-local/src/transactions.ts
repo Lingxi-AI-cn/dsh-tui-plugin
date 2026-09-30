@@ -17,7 +17,7 @@ import {
   inspectProfileInstalled,
 } from '@lingxi-ai-cn/dsh-profile-plugin-manager'
 import {
-  composeEntries, loadOverlayPatches, PROFILE_PATCH_FILENAME, resolveBundleDir,
+  bundlePatchPaths, composeEntries, loadOverlayPatches, PROFILE_PATCH_FILENAME, resolveBundleDir,
   type ProfileManifest,
 } from '@deepseek-ai/dsh-app-boot'
 import { LocalPluginInstallLifecycle, mapProfileError } from './install.ts'
@@ -423,9 +423,9 @@ function validateComposition(profileDir: string, bundles: readonly string[], ins
     const layers = bundles.map((packageName) => {
       const packageDir = resolveBundleDir('dsh plugin hub', packageName, installAnchor, profileDir)
       const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as ProfileManifest
-      const patch = manifest.dsh?.bundle?.patch
-      if (patch === undefined) throw new Error(`bundle ${packageName} declares no patch`)
-      return loadOverlayPatches('dsh plugin hub', join(packageDir, patch))
+      const bundle = manifest.dsh?.bundle
+      if (bundle?.patch === undefined) throw new Error(`bundle ${packageName} declares no patch`)
+      return bundlePatchPaths(packageDir, bundle).flatMap(path => loadOverlayPatches('dsh plugin hub', path))
     })
     layers.push(loadOverlayPatches('dsh plugin hub', join(profileDir, PROFILE_PATCH_FILENAME)))
     composeEntries(layers)

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.12-rc.2
+
+- Supports exactly official DeepSeek Harness `0.1.7-rc.2` across all seven packages.
+- Adopts the official Agent Preset registry, revisioned Settings owner, Session V4 persistence, Jobs and Schedule events, and ordered bundle patches.
+- Includes the four official preset declarations in the TUI bundle. Preset defaults use the Settings owner; copy and delete remain unavailable because the official registry has no authoring API.
+- Preserves healthy Session rows beside unreadable records, with explicit refusal reasons and no rewrite of historical Session data.
+- Verifies the exact official npm installation, canonical two-bundle profile, seven-package closure, and PTY startup and exit. Real-account OAuth and native IME preedit remain manual checks.
+
 ## 0.1.11-rc.2
 
 - Keeps exact compatibility with official DeepSeek Harness `0.1.5-rc.2`.

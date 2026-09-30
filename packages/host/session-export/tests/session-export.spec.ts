@@ -182,7 +182,7 @@ describe('prepareSessionLogExport', () => {
 
   it('exports logical logs without a raw-artifact capability and reports missing roots', async () => {
     const exported = await prepareSessionLogExport(contextWithServices(), sid('root'), new AbortController().signal)
-    expect(exported.root).toContain('\"version\":3')
+    expect(exported.root).toContain(`"version":${SESSION_FORMAT_VERSION}`)
 
     const missing = contextWithServices({ readSnapshot: async () => undefined })
     await expect(prepareSessionLogExport(missing, sid('root'), new AbortController().signal))

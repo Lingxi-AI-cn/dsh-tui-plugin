@@ -65,6 +65,11 @@ export interface TuiSettings {
   sessionManager: TuiSessionManagerPreferences
 }
 
+/** Profile fields before the TUI resolves the model effort brand and defaults. */
+export interface TuiSettingsInput extends Omit<TuiSettings, 'defaultModel'> {
+  defaultModel?: { provider: string; model: string; reasoningEffort?: string }
+}
+
 /** Defaults used without a settings provider and below its user layer. */
 export const DEFAULT_TUI_SETTINGS: TuiSettings = Object.freeze({
   theme: 'auto',
@@ -75,7 +80,7 @@ export const DEFAULT_TUI_SETTINGS: TuiSettings = Object.freeze({
   sessionManager: DEFAULT_TUI_SESSION_MANAGER_PREFERENCES,
 })
 
-const TUI_SETTINGS_FIELDS = z.object({
+export const TUI_SETTINGS_FIELDS: { readonly [K in keyof TuiSettingsInput]-?: z<TuiSettingsInput[K]> } = {
   defaultModel: z.union([z.const(undefined), z.object({
     provider: z.string().required(),
     model: z.string().required(),
@@ -95,10 +100,10 @@ const TUI_SETTINGS_FIELDS = z.object({
       .default(DEFAULT_TUI_SESSION_MANAGER_PREFERENCES.sort),
     groupByWorkspace: z.boolean().default(DEFAULT_TUI_SESSION_MANAGER_PREFERENCES.groupByWorkspace),
   }).default(DEFAULT_TUI_SESSION_MANAGER_PREFERENCES),
-})
+} as const
 
 /** Persisted native-TUI settings schema, including effective-binding validation. */
-export const TUI_SETTINGS_SCHEMA = z.transform(TUI_SETTINGS_FIELDS, (settings) => {
+export const TUI_SETTINGS_SCHEMA = z.transform(z.object(TUI_SETTINGS_FIELDS), (settings) => {
   const keybindings = settings.keybindings ?? DEFAULT_TUI_SETTINGS.keybindings
   validateTuiKeybindingOverrides(keybindings)
   const themeFile = settings.themeFile?.trim()
@@ -124,7 +129,7 @@ export const TUI_SETTINGS_SCHEMA = z.transform(TUI_SETTINGS_FIELDS, (settings) =
       ? {}
       : { providerOnboardingVersion: settings.providerOnboardingVersion },
   }
-}, true) as unknown as z<TuiSettings>
+}, true) as unknown as z<TuiSettingsInput, TuiSettings>
 
 /** Colors available to every native-TUI renderer. */
 export interface TuiSemanticThemeTokens {

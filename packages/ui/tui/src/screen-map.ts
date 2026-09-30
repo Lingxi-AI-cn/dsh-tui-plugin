@@ -1,4 +1,4 @@
-/** Bounded terminal-cell provenance for selectable TUI text projections. */
+/** Bounded terminal-cell source for selectable TUI text projections. */
 
 import stringWidth from 'string-width'
 import { tuiBidiGraphemes, type TuiBidiGrapheme } from './bidi.ts'
@@ -30,7 +30,7 @@ export interface TuiScreenMapOptions {
   bidi?: 'logical' | 'visual' | undefined
 }
 
-/** One physical terminal cell with its semantic and wrapping provenance. */
+/** One physical terminal cell with its semantic and wrapping origin. */
 export interface TuiScreenCell {
   /** Grapheme rendered at the first cell of an atomic cluster; empty for continuation/padding. */
   grapheme: string
@@ -280,7 +280,7 @@ function projectBidiRow(
  * retaining each cell's logical index for copy semantics.
  * @param lines - bounded semantic rows from transcript or detail projection.
  * @param options - terminal width and optional physical-row cap.
- * @returns immutable cell provenance for the retained rows.
+ * @returns immutable cell source for the retained rows.
  */
 export function projectTuiScreenMap(
   lines: readonly TuiScreenMapLine[],

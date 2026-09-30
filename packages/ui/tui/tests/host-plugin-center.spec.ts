@@ -26,6 +26,7 @@ function entry(overrides: Partial<PluginInventoryEntry> & { entryId: PluginEntry
 function descriptor(ns: string, overrides: Partial<SettingsDescriptor> = {}): SettingsDescriptor {
   return {
     ns: ns as SettingsNamespace,
+    autoGenerate: true,
     schema: {},
     value: {},
     revision: 1,

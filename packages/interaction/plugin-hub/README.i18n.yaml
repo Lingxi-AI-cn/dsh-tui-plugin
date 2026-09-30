@@ -1,6 +1,31 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/interaction/plugin-hub/README.md
-README.md: f3f7ff6e688c211bc94cd1cccd97e8929d7caee5
-README.zh.md: ee09b40b65255e02eed4cd2802a34b9ea22cd6f0
+/:
+  en: 7677e67037bfb8a4
+  zh: 199e0cab14050acb
+/lingxi-ai-cn-dsh-plugin-hub:
+  en: e956764972c43bbd
+  zh: 864e88c42cebf5c3
+/lingxi-ai-cn-dsh-plugin-hub/summary:
+  en: cd35bf0f9cb68e9e
+  zh: 081b69a77999d898
+/lingxi-ai-cn-dsh-plugin-hub/catalog-contract:
+  en: cf9fe6ee9b650ecf
+  zh: 6a16429a17fb171d
+/lingxi-ai-cn-dsh-plugin-hub/table-of-contents:
+  en: 638dd73bc5b9dc7a
+  zh: b194c13488101726
+/lingxi-ai-cn-dsh-plugin-hub/model-experience:
+  en: fd42a72005ee12b6
+  zh: 30e80e5fe2c056bd
+/lingxi-ai-cn-dsh-plugin-hub/model-experience/kv-cache-effect:
+  en: 57573f720595ccbe
+  zh: 222cdcb9e3cfe231
+/lingxi-ai-cn-dsh-plugin-hub/known-limitations-and-deferred-work:
+  en: 6f5a50f480450fe0
+  zh: efba9413e8d9c993
+/lingxi-ai-cn-dsh-plugin-hub/known-limitations-and-deferred-work/dev-note:
+  en: 0a1253c6f7b5e8b9
+  zh: 9f56528562c7c914

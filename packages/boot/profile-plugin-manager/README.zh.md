@@ -26,7 +26,7 @@ kind: "package-reference"
 - `installExact()` 和 `updateExact()` 只接受绝对本地 artifact 路径及精确 package identity。在把路径交给 pnpm 之前，会立即检查可选 SHA-512 digest 和字节大小；这些 API 不接受 mutable package spec。
 - 类型化安装在 profile 的 `.dsh-artifacts/` 目录保存经过摘要复核的 tarball，并使用短相对依赖路径。切换 generation 后该路径仍然有效，也避免外部缓存长路径触发 pnpm 存储文件名限制。保留的 tarball 随 profile 一同复制。
 - `removePackage()` 接受一个经过校验的 package name。每次 mutation 成功后都会通过与 CLI passthrough 相同的 installed-state 算法协调 bundle list。
-- `materializeProfile()` 在不跟随 symlink 的情况下复制完整 profile；`validateProfile()` 检查 dependency、lockfile 事实、bundle entry、bundle patch 和 profile patch 层。
+- `materializeProfile()` 在不跟随 symlink 的情况下复制完整 profile；`validateProfile()` 依声明顺序检查 dependency、lockfile 事实、bundle entry、全部 bundle patch 和 profile patch 层。installed truth 仍以首个声明的补丁作为 `bundlePatch`，供按入口补丁识别 bundle 的调用方使用。
 - `runPnpm()` 保留高级 `dsh plugin` passthrough 约定（包括可选继承 stdin），同时使用异步、无 shell 的 argv spawn、取消、wall-clock timeout 和有界 stdout/stderr retention。
 
 `withProfilePluginLock()` 使用原子创建的目录，并记录 owner PID、process start identity、transaction id、时间戳和 nonce。竞争者只会回收能够证明已 stale 的 owner；owner 存活或无法验证时以 `PROFILE_BUSY` 失败。常规 profile Consumer 使用 `resolveProfilePluginLockPath(profileDir)` 推导唯一 lock 路径。
