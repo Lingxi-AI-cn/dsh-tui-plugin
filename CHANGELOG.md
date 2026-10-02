@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.13-rc.2
+
+- Supports exactly official DeepSeek Harness `0.2.0-rc.2` across all seven packages, with pi-ai `0.87.1`.
+- Adds native timed questions when the Host tool is explicitly configured for timed mode: one batch countdown, editing pause, explicit defer, and empty-answer submission. The shipped presets retain the official legacy default.
+- Adds `/questions` and a pending-question footer entry. Continued questions recover from the durable Session projection; late replies use official root-Agent admission and preserve the original pending tool result.
+- Adapts provider transcript contexts and native launch visibility to the official APIs while preserving Session recovery, schedule ownership, and the canonical two-bundle profile.
+- Real-account OAuth, native IME preedit, and wider terminal/platform checks remain manual.
+
 ## 0.1.12-rc.2
 
 - Supports exactly official DeepSeek Harness `0.1.7-rc.2` across all seven packages.

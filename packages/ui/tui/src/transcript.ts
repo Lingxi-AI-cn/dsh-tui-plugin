@@ -185,7 +185,7 @@ export interface TranscriptQuestionNode {
   key: string
   callId: string
   turn?: number | undefined
-  status: 'answered' | 'cancelled' | 'declined' | 'interrupted' | 'unsubmitted' | 'error'
+  status: 'answered' | 'cancelled' | 'declined' | 'interrupted' | 'unsubmitted' | 'pending' | 'skipped' | 'error'
   questions: readonly TranscriptQuestionItem[]
   omitted: number
 }
@@ -360,7 +360,7 @@ function knownEventText(content: readonly ContentBlock[]): string {
 
 function knownSessionEvent(event: SessionEvent): TuiKnownSessionEvent | undefined {
   if (event.type === 'user/message') {
-    if (!isAppendSurfaceEvent(event) || event.data.source.kind !== 'user') return undefined
+    if (!isAppendSurfaceEvent(event) || (event.data.source.kind !== 'user' && event.data.source.kind !== 'user-question-reply')) return undefined
     return { type: 'user/message', seq: event.seq, text: knownEventText(event.data.content) }
   }
   if (event.type !== 'assistant/message' || !isAppendSurfaceEvent(event)) return undefined
@@ -389,12 +389,15 @@ function parseArguments(raw: string): unknown {
 
 const QUESTION_HISTORY_LIMIT = 16
 
-function questionAnswerMap(output: string | undefined): Map<string, { selected: string[]; custom?: string }> {
-  if (output === undefined) return new Map()
+function questionAnswerMap(output: string | undefined): {
+  answers: Map<string, { selected: string[]; custom?: string }>
+  pending: boolean
+} {
+  if (output === undefined) return { answers: new Map(), pending: false }
   try {
-    const parsed = JSON.parse(output) as { answers?: unknown }
-    if (!Array.isArray(parsed.answers)) return new Map()
-    return new Map(parsed.answers.flatMap((value): [string, { selected: string[]; custom?: string }][] => {
+    const parsed = JSON.parse(output) as { answers?: unknown; pending?: unknown }
+    if (!Array.isArray(parsed.answers)) return { answers: new Map(), pending: parsed.pending === true }
+    return { pending: false, answers: new Map(parsed.answers.flatMap((value): [string, { selected: string[]; custom?: string }][] => {
       if (typeof value !== 'object' || value === null) return []
       const record = value as Record<string, unknown>
       if (typeof record['id'] !== 'string' || !Array.isArray(record['selected'])
@@ -403,9 +406,11 @@ function questionAnswerMap(output: string | undefined): Map<string, { selected: 
         selected: record['selected'],
         ...typeof record['custom'] === 'string' ? { custom: record['custom'] } : {},
       }]]
-    }))
-  } catch {
-    return new Map()
+    })) }
+  } catch (error: unknown) {
+    // Tool output without a readable answer batch has no human answer summary.
+    void error
+    return { answers: new Map(), pending: false }
   }
 }
 
@@ -413,7 +418,7 @@ function questionHistoryNode(tool: TranscriptToolNode): TranscriptQuestionNode |
   if (tool.name !== 'ask_user_question' || tool.state === 'queued' || tool.state === 'running') return undefined
   const input = typeof tool.args === 'object' && tool.args !== null ? tool.args as Record<string, unknown> : undefined
   const rawQuestions = Array.isArray(input?.['questions']) ? input['questions'] : []
-  const answers = questionAnswerMap(tool.output)
+  const { answers, pending } = questionAnswerMap(tool.output)
   const questions = rawQuestions.slice(0, QUESTION_HISTORY_LIMIT).flatMap((value): TranscriptQuestionItem[] => {
     if (typeof value !== 'object' || value === null) return []
     const record = value as Record<string, unknown>
@@ -437,9 +442,10 @@ function questionHistoryNode(tool: TranscriptToolNode): TranscriptQuestionNode |
     : tool.state === 'error' && failure.includes('cancel') ? 'cancelled'
       : tool.state === 'error' && failure.includes('declin') ? 'declined'
         : tool.state === 'error' ? 'error'
-          : questions.length > 0 && questions.every(question => question.answer === undefined && !question.secret)
-            ? 'unsubmitted'
-            : 'answered'
+          : pending ? 'pending'
+            : questions.length > 0 && questions.every(question => question.answer === undefined && !question.secret)
+              ? answers.size > 0 ? 'skipped' : 'unsubmitted'
+              : 'answered'
   return Object.freeze({
     kind: 'question', key: `question:${tool.callId}`, callId: tool.callId,
     ...tool.turn === undefined ? {} : { turn: tool.turn },
@@ -834,7 +840,7 @@ class TranscriptFoldState {
       return
     }
     if (event.type === 'user/message') {
-      if (!isAppendSurfaceEvent(event) || event.data.source.kind !== 'user') return
+      if (!isAppendSurfaceEvent(event) || (event.data.source.kind !== 'user' && event.data.source.kind !== 'user-question-reply')) return
       const rendered = this.renderKnownEvent?.(knownSessionEvent(event) ?? {
         type: 'user/message', seq: event.seq, text: '',
       })

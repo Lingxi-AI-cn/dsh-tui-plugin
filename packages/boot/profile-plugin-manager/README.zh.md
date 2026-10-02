@@ -33,7 +33,10 @@ kind: "package-reference"
 
 每次 typed mutation 都会在 lock 内重新检查 detached plan revision。profile 已变化时返回 `PROFILE_CHANGED`，plan 过期时返回 `PLAN_EXPIRED`，本地 artifact 缺失或变化时返回 `INVALID_ARTIFACT`。pnpm failure 分别保留 exit、signal、timeout、cancellation 和 output truncation 事实；build policy 诊断映射为 `BUILD_NOT_ALLOWED`，且不会修改 `pnpm-workspace.yaml`。
 
+原生进程身份探针明确请求隐藏 Windows 启动窗口；命令 runner 在其他平台忽略该可见性选项。
+
 <a id="model-experience"></a>
+
 ## 模型体验
 
 无，因为 profile 检查和 package manager 执行不注册 prompt、tool、message 或 provider request。

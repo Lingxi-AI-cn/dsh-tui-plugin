@@ -22,6 +22,8 @@ Provider-owned ChatGPT OAuth and dynamic account model discovery for the `lingxi
 
 ## Configuration
 
+The adapter targets pi-ai `0.87.1`. `DynamicCodexProvider` forwards the already-converted `TranscriptContext` to the underlying provider so replay normalization stays with the official pi-ai adapter; its dynamic catalog changes no transcript data.
+
 ```yaml
 - id: llm-openai-codex
   name: '@lingxi-ai-cn/dsh-llm-openai-codex'

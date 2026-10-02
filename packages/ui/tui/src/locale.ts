@@ -5,7 +5,7 @@ import type { CommandDescriptor, CommandCompletionNode } from './host.ts'
 import { terminalSafe } from './sanitize.ts'
 
 /** Catalog version persisted in source and included in generated release evidence. */
-export const TUI_LOCALE_CATALOG_VERSION = 18 as const
+export const TUI_LOCALE_CATALOG_VERSION = 19 as const
 
 /** Runtime locales shipped by the native TUI. */
 export const TUI_LOCALES = ['en', 'zh'] as const
@@ -19,6 +19,22 @@ export type TuiMessageKey = keyof typeof EN_MESSAGES
 type TuiMessageParams = Readonly<Record<string, string | number>>
 
 const EN_MESSAGES = Object.freeze({
+  'command.questions': 'Browse pending questions and answer after continuation',
+  'questions.title': 'Questions',
+  'questions.empty': 'No timed questions in this Session.',
+  'questions.closed': 'Question list closed.',
+  'questions.select': 'Select a listed question.',
+  'questions.state.open': 'waiting',
+  'questions.state.continued': 'pending',
+  'questions.state.settled': 'answered',
+  'questions.open': 'This question is still waiting in its foreground panel.',
+  'questions.expired': 'This question is no longer answerable.',
+  'questions.queued': 'Reply queued; it will settle when the Agent admits it.',
+  'questions.pending': '{count} pending · /questions',
+  'question.timed.countdown': '{seconds}s remaining · Esc answer later · Ctrl+S skip item',
+  'question.timed.paused': 'Editing · countdown paused · Esc answer later · Ctrl+S skip item',
+  'question.skippable': 'Enter submit · Ctrl+S skip item · Esc close',
+
   'command.plugins': 'Browse the Plugin Hub catalog',
   'command.rename': 'Rename the current Session',
   'command.models': 'Select and configure a model',
@@ -671,6 +687,9 @@ const EN_MESSAGES = Object.freeze({
   'question.history.status.declined': 'declined',
   'question.history.status.interrupted': 'interrupted',
   'question.history.status.unsubmitted': 'not submitted',
+  'question.history.status.pending': 'awaiting a later reply',
+  'question.history.status.skipped': 'submitted without an answer',
+  'questions.usage': 'Usage: /questions',
   'question.history.status.error': 'failed',
   'question.history.detail.status': 'Status: {status}',
   'question.history.detail.answer': '   Answer: {answer}',
@@ -1358,6 +1377,22 @@ const EN_MESSAGES = Object.freeze({
 } as const)
 
 const ZH_MESSAGES: Record<TuiMessageKey, string> = Object.freeze({
+  'command.questions': '查看待答问题并在继续后补充回答',
+  'questions.title': '问题',
+  'questions.empty': '当前 Session 没有限时问题。',
+  'questions.closed': '问题列表已关闭。',
+  'questions.select': '请选择列表中的问题。',
+  'questions.state.open': '等待中',
+  'questions.state.continued': '待回答',
+  'questions.state.settled': '已回答',
+  'questions.open': '此问题仍在前台面板中等待回答。',
+  'questions.expired': '此问题已无法回答。',
+  'questions.queued': '回复已排队，Agent 接纳后才会完成问题。',
+  'questions.pending': '{count} 个待答问题 · /questions',
+  'question.timed.countdown': '剩余 {seconds} 秒 · Esc 稍后回答 · Ctrl+S 跳过此项',
+  'question.timed.paused': '编辑中 · 计时已暂停 · Esc 稍后回答 · Ctrl+S 跳过此项',
+  'question.skippable': 'Enter 提交 · Ctrl+S 跳过此项 · Esc 关闭',
+
   'command.plugins': '浏览 Plugin Hub 插件目录',
   'command.rename': '重命名当前 Session',
   'command.models': '选择并配置模型',
@@ -2010,6 +2045,9 @@ const ZH_MESSAGES: Record<TuiMessageKey, string> = Object.freeze({
   'question.history.status.declined': '已拒绝',
   'question.history.status.interrupted': '已中断',
   'question.history.status.unsubmitted': '未提交',
+  'question.history.status.pending': '等待稍后回答',
+  'question.history.status.skipped': '已提交空答案',
+  'questions.usage': '用法：/questions',
   'question.history.status.error': '失败',
   'question.history.detail.status': '状态：{status}',
   'question.history.detail.answer': '   回答：{answer}',

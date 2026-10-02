@@ -23,6 +23,8 @@ kind: "package-reference"
 <a id="configuration"></a>
 ## 配置
 
+适配器对应 pi-ai `0.87.1`。`DynamicCodexProvider` 将已转换的 `TranscriptContext` 传给底层 provider，replay 规范化仍由官方 pi-ai adapter 负责；动态模型目录不修改转录数据。
+
 ```yaml
 - id: llm-openai-codex
   name: '@lingxi-ai-cn/dsh-llm-openai-codex'

@@ -14,10 +14,10 @@ export async function openExternalUrl(value: string, signal: AbortSignal): Promi
     throw new TypeError(`TUI refuses to open non-HTTP authentication URL protocol ${JSON.stringify(url.protocol)}`)
   }
   if (process.platform === 'darwin') {
-    await runNativeCommand('open', [url.toString()], signal)
+    await runNativeCommand('open', [url.toString()], signal, 'visible')
   } else if (process.platform === 'win32') {
-    await runNativeCommand('rundll32', ['url.dll,FileProtocolHandler', url.toString()], signal)
+    await runNativeCommand('rundll32', ['url.dll,FileProtocolHandler', url.toString()], signal, 'visible')
   } else {
-    await runNativeCommand('xdg-open', [url.toString()], signal)
+    await runNativeCommand('xdg-open', [url.toString()], signal, 'visible')
   }
 }

@@ -304,6 +304,7 @@ export interface TuiAppProps {
   presetManager: ValueStore<TuiPresetManagerSnapshot | undefined>
   onClosePresetManager(): void
   onRefreshPresetManager(): Promise<void>
+  questions: ValueStore<import('./host.ts').UserQuestionProjectionView>
   schedules: ValueStore<TuiScheduleSnapshot>
   scheduleDialog: ValueStore<TuiScheduleSnapshot | undefined>
   onCloseScheduleDialog(): void
@@ -1110,6 +1111,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const resumeDialog = useSyncExternalStore(props.resumeDialog.subscribe, props.resumeDialog.getSnapshot)
   const sessionManager = useSyncExternalStore(props.sessionManager.subscribe, props.sessionManager.getSnapshot)
   const presetManager = useSyncExternalStore(props.presetManager.subscribe, props.presetManager.getSnapshot)
+  const questions = useSyncExternalStore(props.questions.subscribe, props.questions.getSnapshot)
   const schedules = useSyncExternalStore(props.schedules.subscribe, props.schedules.getSnapshot)
   const scheduleDialog = useSyncExternalStore(props.scheduleDialog.subscribe, props.scheduleDialog.getSnapshot)
   const hostPluginCenter = useSyncExternalStore(props.hostPluginCenter.subscribe, props.hostPluginCenter.getSnapshot)
@@ -1198,6 +1200,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
   const [screenSelection, setScreenSelection] = useState<TuiSelectionState | undefined>()
   const [workOpen, setWorkOpen] = useState(false)
   const [workSelection, setWorkSelection] = useState(0)
+  const [questionClock, setQuestionClock] = useState(Date.now)
   const [workClock, setWorkClock] = useState(Date.now)
   const [workingFrameTick, setWorkingFrameTick] = useState(0)
   const [resumeScope, setResumeScope] = useState<TuiResumeScope>('workspace')
@@ -1361,7 +1364,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     setQuestionCursor(0)
     setHistorySearch(undefined)
     setApprovalOffset(0)
-  }, [interaction])
+  }, [interaction?.request])
   useEffect(() => {
     if (composerPrefill === undefined || composerPrefill.revision <= appliedComposerPrefill.current
       || props.view.kind !== 'root') return
@@ -1526,6 +1529,14 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     }
     setWorkSelection(previous => Math.min(previous, work.items.length - 1))
   }, [work.items])
+
+  const questionTiming = interaction?.kind === 'question' ? interaction.timing : undefined
+  useEffect(() => {
+    if (questionTiming === undefined || questionTiming.pausedRemainingMs !== undefined) return
+    setQuestionClock(Date.now())
+    const interval = setInterval(() => { setQuestionClock(Date.now()) }, 1000)
+    return () => { clearInterval(interval) }
+  }, [questionTiming])
 
   useEffect(() => {
     if (!workOpen || work.summary.running === 0) return
@@ -2600,6 +2611,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       ? projectTuiLatestSpeed(eventSnapshot, Date.now(), liveStream) ?? projectTuiSettledSpeed(sessionStats)
       : undefined,
     work: work.summary,
+    questions: props.view.kind === 'root' ? questions.active.length : undefined,
     schedules: props.view.kind === 'root' ? schedules : undefined,
     goalPlan: compactGoalPlan ? goalPlanSurface : undefined,
     workspace,
@@ -2720,14 +2732,16 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       const questionDetailRows = question.detail === undefined ? 0 : Math.max(1, terminalWrappedLines(
         terminalSafe(question.detail), Math.max(1, columns - 4),
       ).length)
-      const questionBodyRows = 3 + questionTextRows + questionDetailRows
+      const questionMetaRows = interaction?.kind === 'question'
+        && (interaction.timing !== undefined || interaction.allowEmptyAnswer === true) ? 1 : 0
+      const questionBodyRows = 3 + questionMetaRows + questionTextRows + questionDetailRows
         + visibleOptions.length + (questionOptions.length > optionLimit ? 1 : 0)
         + composerRows
       const questionTop = terminalRows - 2 - questionBodyRows + 1
       return Object.freeze([
         ...tuiQuestionPointerRegions({
           columns,
-          optionTop: questionTop + 2 + questionTextRows + questionDetailRows,
+          optionTop: questionTop + 2 + questionMetaRows + questionTextRows + questionDetailRows,
           optionStart,
           visibleCount: visibleOptions.length,
           rowHeight: 1,
@@ -2735,7 +2749,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
         }),
         ...tuiAttachmentRailPointerRegions({
           columns,
-          startRow: questionTop + 2 + questionTextRows + questionDetailRows
+          startRow: questionTop + 2 + questionMetaRows + questionTextRows + questionDetailRows
             + visibleOptions.length + (questionOptions.length > optionLimit ? 1 : 0)
             + composerLayout.lines.length,
           count: attachmentRail.count,
@@ -3681,7 +3695,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
 
   const commitQuestionAnswer = (answer: AskUserQuestionAnswerItem): void => {
     if (interaction?.kind !== 'question') return
-    if (answer.selected.length === 0 && answer.custom === undefined) {
+    if (answer.selected.length === 0 && answer.custom === undefined && interaction.allowEmptyAnswer !== true) {
       setNotice(tuiMessage(locale, 'question.answer.required'))
       return
     }
@@ -3703,7 +3717,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
     if (interaction?.kind !== 'question') return
     const question = interaction.request.questions[questionIndex]
     if (question === undefined) return
-    commitQuestionAnswer(answerFor(question, composer.text))
+    commitQuestionAnswer(answerFor(question, materializeComposerText(composer)))
   }
 
   const selectQuestionOption = (index: number): void => {
@@ -7322,7 +7336,13 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       else if (agentStatus === 'running') props.onCancel()
       return
     }
+    if (interaction?.kind === 'question' && interaction.allowEmptyAnswer === true
+      && matchAction('Dialog', input, key) === 'dialog.skipQuestion' && question !== undefined) {
+      commitQuestionAnswer({ id: question.id, selected: [] })
+      return
+    }
     if (composerAction === 'composer.newline') {
+      if (question !== undefined) props.interactions.pauseQuestion()
       updateComposer(previous => insertComposerText(previous, '\n'))
       return
     }
@@ -7377,6 +7397,9 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       return
     }
     if (input !== '' && acceptsCommittedText(key)) {
+      if (question !== undefined && answerFor(question, insertComposerText(composer, input).text).custom !== undefined) {
+        props.interactions.pauseQuestion()
+      }
       const pastedPaths = key.paste === true && terminalInput.truncated !== true
         && inputContext === 'Composer' && interaction === undefined && focus === undefined && !busy
         ? parseTuiTerminalPathPaste(input)
@@ -9241,6 +9264,15 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       }))}
     >
       <Text>{terminalSafe(question.question)}</Text>
+      {questionTiming !== undefined ? <TuiHintLine>
+        {questionTiming.pausedRemainingMs !== undefined
+          ? tuiMessage(locale, 'question.timed.paused')
+          : tuiMessage(locale, 'question.timed.countdown', {
+            seconds: Math.max(0, Math.ceil((questionTiming.deadline - questionClock) / 1000)),
+          })}
+      </TuiHintLine> : interaction?.kind === 'question' && interaction.allowEmptyAnswer === true
+        ? <TuiHintLine>{tuiMessage(locale, 'question.skippable')}</TuiHintLine> : undefined}
+
       {question.detail !== undefined && <TuiHintLine subtle>{terminalSafe(question.detail)}</TuiHintLine>}
       {visibleOptions.map((option, index) => <TuiListRow
         key={`${question.id}:${optionStart + index}`}

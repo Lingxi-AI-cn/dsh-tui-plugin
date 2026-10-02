@@ -13,6 +13,8 @@ kind: "package-reference"
 
 ## 交互行为
 
+限时问答只在显式配置 `tool-ask-user` 时启用；发布预设仍使用 legacy 阻塞问答，plan review 也保持阻塞。TUI 先认领官方前台等待，再显示来自 Host 的单个批次倒计时。自定义输入编辑暂停计时；Escape 返回 pending，Ctrl+S 明确提交空答案项，取消会释放等待。`/questions` 与待答 footer 读取官方 Session projection：continued 问题通过精确 live root 接受稍后回答，settled 问题显示已记录答案。冷 Session 先通过 `/resume` 或 `--resume` 恢复。已排队回复在 Agent admission 前仍为 pending；重复提交由 owner 以 `REPLY_QUEUED` 拒绝。耐久 pending 工具结果保持原样，已接纳的 `user-question-reply` 显示为人类消息。草稿与计时状态只保存在进程内。 官方 projection 从 pending 子调用结果建立 PTC 问题项。窗口内 PTC 答案保留在耐久 `tool/ptc-dispatch` 事件中，不生成 settled 列表项。参见[原生限时问答决策](../../../.agents/notes/implemented/feature/2026-10-01-native-tui-timed-questions.zh.md)。
+
 `Ctrl+X` 会通过不经过 shell 的 argv 解析，把当前 draft 交给 `$VISUAL`、再回退到 `$EDITOR` 或明确的平台 fallback。编辑器接管 TTY 时 TUI 会释放 terminal transaction，退出后重新取得并完整重绘；只有零退出、未超过上限且为有效 UTF-8 的文件内容才替换 draft。取消、非零退出、非法编码、超限输出、启动失败或清理失败都会保留原 draft。
 
 斜杠补全使用有效 agent 的 `ctx.commands.list(agent)` 描述符。根命令别名和命令拥有的嵌套元数据可以补全 `/goal edit` 这样的路径，显示本地化描述回退、参数提示和禁用原因，并且只接受规范文本。注册表的有界元数据可以暴露子路径但不包含处理器；接受后仍调用 `ctx.commands.execute(agent, completeRawLine, blocks, signal)` 提交，因此嵌套补全不会注册 shadow command，也不会产生第二条审计路径。
@@ -29,7 +31,7 @@ root Agent running 时，非空 draft 使用 Enter steer 当前 turn，Tab 排�
 
 在创建或恢复 Agent 之前，TUI 会通过已挂载的 Session persistence owner 执行仅元数据 preflight。存储不可读或 header 不符合确切 `SESSION_FORMAT_VERSION` 时，会在任何 TUI 自有写入前 fail closed，并报告有界的备份／导出修复提示；preflight 不加载消息正文、不修复 tail，也不改写存储。Persistence owner 只会跳过耐久 envelope 标记为 `ignorable: true` 的未知 event；未知 required event 会在 TUI 投影前拒绝重建。其 backend 名称、预期逻辑格式、兼容 Session 数量和 raw-artifact capability 只作为进程内诊断事实保留。
 
-TUI 对应官方 DSH `0.1.7-rc.2`。持久化列表返回当前逻辑格式的 header，其中也包括从受支持的历史格式转换的 header。Preflight 只读取这些元数据快照；写入所有权与迁移由持久化后端负责。冷 Session 改名先取得写入句柄，按精确继承边界恢复 Session，再由标题 owner 提交标题，刷新追加后缀并关闭句柄。ZIP 导出通过官方导出 owner 序列化已经验证的逻辑日志。
+TUI 对应官方 DSH `0.2.0-rc.2`。持久化列表返回当前逻辑格式的 header，其中也包括从受支持的历史格式转换的 header。Preflight 只读取这些元数据快照；写入所有权与迁移由持久化后端负责。冷 Session 改名先取得写入句柄，按精确继承边界恢复 Session，再由标题 owner 提交标题，刷新追加后缀并关闭句柄。ZIP 导出通过官方导出 owner 序列化已经验证的逻辑日志。
 
 实时 Assistant 输出使用独立的进程内通道。Start、有序 chunk 与 end frame 属于同一次 attempt；重试与放弃会清除临时文本。完整消息提交时清空该通道，并贡献一个耐久 transcript 节点。历史推理耗时与已完成的输出速度读取内嵌的紧凑流记录。实时输出与速度采样都不会虚构 Session 事件。
 

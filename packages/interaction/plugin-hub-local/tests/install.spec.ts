@@ -37,7 +37,7 @@ describe('trusted Plugin Hub installation planning', () => {
       operation: 'install', packageName: '@fixture/plugin', restartRequired: true,
       target: {
         version: '1.2.3', sourceCommit: 'abc123', artifactSizeBytes: fixture.artifact.byteLength,
-        dshRange: '^0.1.0-rc.5', validationLevel: 'manifest-valid',
+        dshRange: '=0.2.0-rc.2', validationLevel: 'manifest-valid',
       },
       afterBundles: ['@deepseek-ai/dsh-base', '@lingxi-ai-cn/dsh-tui', '@fixture/plugin'],
     })
@@ -166,7 +166,7 @@ describe('trusted Plugin Hub installation planning', () => {
     ['expired', { expiresAt: '2026-08-18T11:59:59.000Z' }, 'DESCRIPTOR_EXPIRED'],
     ['wrong surface', { surfaces: ['headless'] }, 'SURFACE_INCOMPATIBLE'],
     ['incompatible DSH', { dsh: '>=9.0.0' }, 'DSH_INCOMPATIBLE'],
-    ['TUI version is not the Host version', { dsh: '=0.1.12-rc.2' }, 'DSH_INCOMPATIBLE'],
+    ['TUI version is not the Host version', { dsh: '=0.1.13-rc.2' }, 'DSH_INCOMPATIBLE'],
   ] as const)('rejects a %s descriptor before profile mutation', async (_label, overrides, code) => {
     const fixture = await createFixture({ descriptorOverrides: overrides })
     const ctx = await createContext(fixture)
@@ -276,7 +276,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<Fixture> {
     artifact: { kind: 'npm-tarball', url: `http://127.0.0.1:${port}/artifact.tgz`,
       digest: { algorithm: 'sha512', value: (options.signedDigest ?? digest).toString('base64') },
       sizeBytes: artifact.byteLength + (options.signedSizeOffset ?? 0) },
-    requirements: { surfaces: overrides?.surfaces ?? ['tui'], dsh: overrides?.dsh ?? '^0.1.0-rc.5', lifecycleScripts: [] },
+    requirements: { surfaces: overrides?.surfaces ?? ['tui'], dsh: overrides?.dsh ?? '=0.2.0-rc.2', lifecycleScripts: [] },
     validation: { level: 'manifest-valid', validatorVersion: 'fixture' }, catalogRevision: 1,
     issuedAt: '2026-08-18T11:59:00.000Z', expiresAt: overrides?.expiresAt ?? '2026-08-18T12:05:00.000Z',
   }

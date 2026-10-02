@@ -22,7 +22,7 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 /** Stable action targets exposed by the native TUI footer. */
 export type TuiFooterItemId = 'model' | 'mode' | 'permission' | 'goalPlan' | 'work' | 'schedules'
-  | 'speed' | 'context' | 'workspace' | 'transcript'
+  | 'questions' | 'speed' | 'context' | 'workspace' | 'transcript'
 
 /** One actionable status item derived from authoritative runtime state. */
 export interface TuiFooterItemDescriptor {
@@ -33,7 +33,7 @@ export interface TuiFooterItemDescriptor {
   /** Compact current value shown in the status row. */
   readonly value: string
   /** Enter behavior for this item. */
-  readonly action: 'models' | 'modes' | 'permissions' | 'goalPlan' | 'work' | 'schedules' | 'detail' | 'bottom'
+  readonly action: 'models' | 'modes' | 'permissions' | 'goalPlan' | 'work' | 'schedules' | 'questions' | 'detail' | 'bottom'
   /** Complete read-only detail shown for local status items. */
   readonly detailLines: readonly string[]
 }
@@ -90,6 +90,8 @@ export interface TuiFooterSources {
   readonly work?: TuiWorkSummary | undefined
   /** Official active Schedule projection; unavailable is distinct from an empty ready list. */
   readonly schedules?: TuiScheduleSnapshot | undefined
+  /** Count of active questions from the official Session projection. */
+  readonly questions?: number | undefined
   /** Compact durable Goal/Plan state used only when the full strip is folded. */
   readonly goalPlan?: TuiGoalPlanSurface | undefined
   /** Full Session workspace path. */
@@ -242,6 +244,11 @@ export function tuiFooterItems(
     ))
   }
 
+  if ((sources.questions ?? 0) > 0) {
+    items.push(item('questions', tuiMessage(locale, 'questions.title'), String(sources.questions),
+      'questions', [tuiMessage(locale, 'questions.pending', { count: sources.questions ?? 0 })]))
+  }
+
   const speed = sources.speed
   if (speed !== undefined) {
     items.push(item(
@@ -340,10 +347,10 @@ export function visibleTuiFooterItems(
   columns: number,
 ): readonly TuiFooterItemDescriptor[] {
   const allowed: readonly TuiFooterItemId[] = columns < 56
-    ? ['model', 'mode', 'work', 'permission']
+    ? ['model', 'mode', 'work', 'questions', 'permission']
     : columns < 78
-      ? ['model', 'mode', 'work', 'permission', 'context', 'transcript']
-      : ['model', 'mode', 'work', 'permission', 'speed', 'context', 'workspace', 'transcript']
+      ? ['model', 'mode', 'work', 'questions', 'permission', 'context', 'transcript']
+      : ['model', 'mode', 'work', 'questions', 'permission', 'speed', 'context', 'workspace', 'transcript']
   const visible = items.filter(candidate => allowed.includes(candidate.id))
   return Object.freeze(visible.length === 0 ? items.slice(0, 1) : visible)
 }

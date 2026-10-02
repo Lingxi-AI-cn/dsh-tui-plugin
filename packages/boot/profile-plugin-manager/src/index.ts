@@ -987,7 +987,7 @@ async function defaultProcessIdentity(pid: number): Promise<string | undefined> 
   }
   if (process.platform === 'darwin') {
     try {
-      const result = await runNativeCommand('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], new AbortController().signal)
+      const result = await runNativeCommand('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], new AbortController().signal, 'hidden')
       const value = result.stdout.trim()
       return value === '' ? undefined : `darwin:${value}`
     } catch { return undefined }

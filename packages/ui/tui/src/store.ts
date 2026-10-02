@@ -91,6 +91,10 @@ export interface PendingQuestion {
   kind: 'question'
   /** Borrowed structured-question request. */
   request: AskUserQuestionRequest
+  /** One batch deadline from the Host claim; editing freezes the remaining display. */
+  timing?: { readonly deadline: number; readonly pausedRemainingMs?: number } | undefined
+  /** Timed calls distinguish an explicitly skipped item from an unanswered batch. */
+  allowEmptyAnswer?: boolean | undefined
 }
 
 /** The one FIFO interaction visible to the component tree, or no takeover. */
@@ -107,6 +111,7 @@ interface QueuedQuestion extends PendingQuestion {
   reject(error: Error): void
   signal?: AbortSignal
   onAbort?: () => void
+  timer?: ReturnType<typeof setTimeout> | undefined
 }
 
 type QueuedInteraction = QueuedApproval | QueuedQuestion
@@ -141,15 +146,26 @@ export class InteractionStore extends ValueStore<TuiPendingInteraction | undefin
   /**
    * Queue one structured human-question wait.
    * @param request - validated request from `ctx.userQuestions`.
+   * @param options - Host-claimed remaining duration and explicit skipped-answer support.
    * @returns structured answers after every question is completed.
    */
-  askQuestion(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> {
+  askQuestion(
+    request: AskUserQuestionRequest,
+    options: { readonly remainingMs?: number; readonly allowEmptyAnswer?: boolean } = {},
+  ): Promise<AskUserQuestionAnswer> {
     if (this.disposed || request.signal?.aborted === true) {
       return Promise.reject(new UserQuestionError(
         'TUI user question was aborted before the user answered', 'ASK_ABORTED'))
     }
     return new Promise<AskUserQuestionAnswer>((resolve, reject) => {
-      const entry: QueuedQuestion = { kind: 'question', request, resolve, reject }
+      const entry: QueuedQuestion = {
+        kind: 'question', request, resolve, reject,
+        allowEmptyAnswer: options.allowEmptyAnswer ?? request.wait !== undefined,
+      }
+      if (options.remainingMs !== undefined) {
+        entry.timing = { deadline: Date.now() + options.remainingMs }
+        entry.timer = setTimeout(() => { this.defer(entry) }, options.remainingMs)
+      }
       if (request.signal !== undefined) {
         entry.signal = request.signal
         entry.onAbort = () => {
@@ -184,11 +200,26 @@ export class InteractionStore extends ValueStore<TuiPendingInteraction | undefin
     entry.resolve(answer)
   }
 
+  /** Keep a timed batch waiting while the human edits a custom answer. */
+  pauseQuestion(): void {
+    const entry = this.queue[0]
+    if (entry?.kind !== 'question' || entry.timing === undefined
+      || entry.timing.pausedRemainingMs !== undefined) return
+    clearTimeout(entry.timer)
+    entry.timer = undefined
+    entry.timing = {
+      deadline: entry.timing.deadline,
+      pausedRemainingMs: Math.max(0, entry.timing.deadline - Date.now()),
+    }
+    this.publish()
+  }
+
   /** Reject or abort the interaction currently owning input. */
   cancelCurrent(): void {
     const entry = this.queue[0]
     if (entry === undefined) return
     if (entry.kind === 'approval') this.settle(entry, 'rejected')
+    else if (entry.timing !== undefined) this.defer(entry)
     else {
       this.remove(entry)
       entry.reject(new UserQuestionError('TUI user question was cancelled', 'ASK_CANCELLED'))
@@ -218,10 +249,16 @@ export class InteractionStore extends ValueStore<TuiPendingInteraction | undefin
     entry.resolve(outcome)
   }
 
+  private defer(entry: QueuedQuestion): void {
+    if (!this.remove(entry)) return
+    entry.reject(new UserQuestionError('TUI foreground question wait ended', 'ASK_TIMED_OUT'))
+  }
+
   private remove(entry: QueuedInteraction): boolean {
     const index = this.queue.indexOf(entry)
     if (index < 0) return false
     this.queue.splice(index, 1)
+    if (entry.kind === 'question') clearTimeout(entry.timer)
     if (entry.signal !== undefined && entry.onAbort !== undefined) {
       entry.signal.removeEventListener('abort', entry.onAbort)
     }
@@ -231,7 +268,9 @@ export class InteractionStore extends ValueStore<TuiPendingInteraction | undefin
 
   private publish(): void {
     const entry = this.queue[0]
-    this.set(entry === undefined ? undefined : { kind: entry.kind, request: entry.request } as TuiPendingInteraction)
+    this.set(entry === undefined ? undefined : entry.kind === 'approval'
+      ? { kind: entry.kind, request: entry.request }
+      : { kind: entry.kind, request: entry.request, timing: entry.timing, allowEmptyAnswer: entry.allowEmptyAnswer })
   }
 }
 

@@ -3,7 +3,7 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type {
-  Api, ApiStreamOptions, Context as PiContext, Credential, Model, Models, Provider,
+  Api, ApiStreamOptions, TranscriptContext as PiContext, Credential, Model, Models, Provider,
   SimpleStreamOptions, ThinkingLevelMap,
 } from '@earendil-works/pi-ai'
 import { attributionHeaders, LlmError } from '@deepseek-ai/dsh-llm'

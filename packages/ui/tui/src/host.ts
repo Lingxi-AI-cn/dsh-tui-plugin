@@ -189,6 +189,10 @@ export type {
   AskUserQuestionAnswerItem,
   AskUserQuestionItem,
   AskUserQuestionRequest,
+  PendingUserQuestion,
+  SettledUserQuestion,
+  UserQuestionProjectionView,
+  UserQuestionService,
 } from '@deepseek-ai/dsh-user-questions'
 export type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 

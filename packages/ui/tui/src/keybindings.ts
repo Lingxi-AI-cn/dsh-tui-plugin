@@ -96,6 +96,7 @@ export type TuiInteractionActionId =
   | 'dialog.next'
   | 'dialog.accept'
   | 'dialog.cancel'
+  | 'dialog.skipQuestion'
   | 'dialog.previousPage'
   | 'dialog.nextPage'
   | 'work.previous'
@@ -353,6 +354,7 @@ export const TUI_INTERACTION_REGISTRY: readonly TuiInteractionDescriptor[] = Obj
   descriptor('dialog.nextPage', 'Dialog', 'Next help page', [key('pagedown', 'PageDown')]),
   descriptor('dialog.accept', 'Dialog', 'Accept selected option', [key('enter', 'Enter')]),
   descriptor('dialog.cancel', 'Dialog', 'Close or cancel dialog', [key('escape', 'Escape')]),
+  descriptor('dialog.skipQuestion', 'Dialog', 'Submit an empty timed-question item', [key('ctrl+s', 'Ctrl+S')]),
 
   descriptor('work.previous', 'Work', 'Select previous work item', [key('up', 'Up')]),
   descriptor('work.next', 'Work', 'Select next work item', [key('down', 'Down')]),
@@ -458,6 +460,7 @@ const TUI_INTERACTION_DESCRIPTIONS_ZH: Readonly<Record<TuiInteractionActionId, s
   'dialog.nextPage': '帮助下一页',
   'dialog.accept': '接受当前选项',
   'dialog.cancel': '关闭或取消对话框',
+  'dialog.skipQuestion': '提交空的限时问答项',
   'work.previous': '选择上一个工作项',
   'work.next': '选择下一个工作项',
   'work.cancel': '停止所选运行中工作',

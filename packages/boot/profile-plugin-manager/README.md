@@ -32,6 +32,8 @@ Host-side profile plugin management shared by command-line and trusted local con
 
 Every typed mutation checks the detached plan revision again under that lock. A changed profile fails with `PROFILE_CHANGED`, an expired plan with `PLAN_EXPIRED`, and a missing or changed local artifact with `INVALID_ARTIFACT`. Pnpm failures retain independent exit, signal, timeout, cancellation, and output-truncation facts; build-policy diagnostics map to `BUILD_NOT_ALLOWED` without changing `pnpm-workspace.yaml`.
 
+Native process-identity probes request hidden Windows startup visibility explicitly; the command runner ignores that visibility choice on other platforms.
+
 ## Model Experience
 
 None, as profile inspection and package-manager execution register no prompt, tool, message, or provider request.

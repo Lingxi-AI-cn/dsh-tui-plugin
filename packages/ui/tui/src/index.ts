@@ -4,6 +4,7 @@
  */
 
 import { collectTuiResumeActivity } from './resume-activity.ts'
+import { askTuiQuestion, EMPTY_TUI_QUESTIONS } from './questions.ts'
 import { requestTuiExit } from './exit.ts'
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
@@ -46,6 +47,7 @@ import {
   type AgentCreateSource,
   type AgentHandle,
   type AskUserQuestionItem,
+  type UserQuestionProjectionView,
   type EncodedImageAttachment,
   type ContextBreakdownProjection,
   type CommandInvocation,
@@ -309,6 +311,7 @@ interface RuntimeDisposers {
   workspaceCommand?: () => void
   sessionsCommand?: () => void
   presetsCommand?: () => void
+  questionsCommand?: () => void
   schedulesCommand?: () => void
   scheduleChanged?: () => void
   hostPluginsCommand?: () => void
@@ -441,6 +444,7 @@ class TuiController {
   private readonly resumeDialog = new ValueStore<TuiResumeDialogSnapshot | undefined>(undefined)
   private readonly sessionManager = new ValueStore<TuiSessionManagerDialogSnapshot | undefined>(undefined)
   private readonly presetManagerStore = new ValueStore<TuiPresetManagerSnapshot | undefined>(undefined)
+  private readonly questionsStore = new ValueStore<UserQuestionProjectionView>(EMPTY_TUI_QUESTIONS)
   private readonly schedulesStore = new ValueStore<TuiScheduleSnapshot>(TUI_SCHEDULES_UNAVAILABLE)
   private readonly scheduleDialogStore = new ValueStore<TuiScheduleSnapshot | undefined>(undefined)
   private readonly hostPluginCenterStore = new ValueStore<TuiHostPluginCenterSnapshot | undefined>(undefined)
@@ -717,6 +721,7 @@ class TuiController {
       presetManager: this.presetManagerStore,
       onClosePresetManager: () => { this.closePresetManager() },
       onRefreshPresetManager: () => this.refreshPresetManager(root),
+      questions: this.questionsStore,
       schedules: this.schedulesStore,
       scheduleDialog: this.scheduleDialogStore,
       onCloseScheduleDialog: () => { this.closeScheduleDialog() },
@@ -1210,6 +1215,7 @@ class TuiController {
     this.tokenUsage.set(values?.tokenUsage)
     this.contextBreakdown.set(values?.contextBreakdown)
     this.sessionStats.set(values?.sessionStats)
+    this.questionsStore.set(values?.userQuestions ?? EMPTY_TUI_QUESTIONS)
     void this.refreshScheduleRows(agent)
     const frame = createTuiGoalPlanProjectionFrame(
       agent.session,
@@ -1316,6 +1322,7 @@ class TuiController {
           if (key === 'tokenUsage') this.tokenUsage.set(value as TokenUsageProjection)
           if (key === 'contextBreakdown') this.contextBreakdown.set(value as ContextBreakdownProjection)
           if (key === 'sessionStats') this.sessionStats.set(value as SessionStatsProjection)
+          if (key === 'userQuestions') this.questionsStore.set(value as UserQuestionProjectionView)
           if (key === 'goal' || key === 'plan') {
             const frame = this.goalPlanProjectionFrame
             if (frame !== undefined) {
@@ -1414,7 +1421,7 @@ class TuiController {
       const root = this.handle?.agent
       if (root === undefined || request.agent !== root) return next()
       this.showRootView(root)
-      return this.interactions.askQuestion(request)
+      return askTuiQuestion(this.ctx.userQuestions, this.interactions, request)
     })
     this.disposers.approval = this.ctx.on('approval/request', (request, next) => {
       if (request.agent !== this.handle?.agent) return next()
@@ -1547,6 +1554,14 @@ class TuiController {
         void this.openPresetManager(invocation.agent)
         return { kind: 'success' }
       },
+    })
+    this.disposers.questionsCommand = this.commandCatalog.register({
+      name: 'questions',
+      description: tuiMessage(this.locale, 'command.questions'),
+      completion: { descriptions: tuiCommandDescriptions('command.questions') },
+      handler: invocation => this.executeQuestionCommand(
+        'questions.closed', () => this.executeQuestions(invocation),
+      ),
     })
     this.disposers.schedulesCommand = this.commandCatalog.register({
       name: 'schedules',
@@ -3111,6 +3126,47 @@ class TuiController {
     } finally {
       if (this.externalNotice.getSnapshot() === notice) this.externalNotice.set('')
     }
+  }
+
+  private async executeQuestions(invocation: CommandInvocation): Promise<CommandResult> {
+    if (invocation.rawInput.trim() !== '') return { kind: 'error', text: tuiMessage(this.locale, 'questions.usage') }
+    const agent = invocation.agent
+    if (!this.ownsAgent(agent)) return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
+    const read = (): UserQuestionProjectionView =>
+      this.ctx.get('sessionProjections')?.snapshot(agent.session).values.userQuestions ?? EMPTY_TUI_QUESTIONS
+    const view = read()
+    const rows = [
+      ...view.active.map(item => ({
+        callId: item.callId,
+        label: `${tuiMessage(this.locale, `questions.state.${item.state}`)} · ${item.questions[0]?.question ?? item.callId}`,
+      })),
+      ...view.settled.map(item => ({
+        callId: item.callId,
+        label: `${tuiMessage(this.locale, 'questions.state.settled')} · ${item.callId}`,
+      })),
+    ].map((row, index) => ({ ...row, label: `${index + 1}. ${row.label}` }))
+    if (rows.length === 0) return { kind: 'success', text: tuiMessage(this.locale, 'questions.empty') }
+    const selected = await this.interactions.askQuestion({
+      agent, signal: invocation.signal,
+      questions: [{ id: 'native-questions', question: tuiMessage(this.locale, 'questions.title'),
+        options: rows.map(row => ({ label: row.label })) }],
+    })
+    const row = rows.find(item => selected.answers[0]?.selected.includes(item.label))
+    if (row === undefined) return { kind: 'error', text: tuiMessage(this.locale, 'questions.select') }
+    if (!this.ownsAgent(agent)) return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
+    const latest = read()
+    const settled = latest.settled.find(item => item.callId === row.callId)
+    if (settled !== undefined) return { kind: 'success', text: JSON.stringify({ callId: row.callId, answers: settled.answers }) }
+    const question = latest.active.find(item => item.callId === row.callId)
+    if (question?.state === 'open') return { kind: 'success', text: tuiMessage(this.locale, 'questions.open') }
+    if (question === undefined) return { kind: 'error', text: tuiMessage(this.locale, 'questions.expired') }
+    const answer = await this.interactions.askQuestion({
+      agent, signal: invocation.signal, questions: [...question.questions],
+    }, { allowEmptyAnswer: true })
+    if (!this.ownsAgent(agent)) return { kind: 'error', text: tuiMessage(this.locale, 'system.session.changed') }
+    const accepted = this.ctx.userQuestions.answer(agent, question.callId, answer)
+    return { kind: accepted ? 'success' : 'error', text: tuiMessage(this.locale,
+      accepted ? 'questions.queued' : 'questions.expired') }
   }
 
   private async executeQuestionCommand(
@@ -4953,6 +5009,10 @@ class TuiController {
     }
     if (itemId === 'mode') {
       await this.submit(agent, '/mode')
+      return
+    }
+    if (itemId === 'questions') {
+      await this.submit(agent, '/questions')
       return
     }
     if (itemId === 'schedules') {

@@ -34,18 +34,18 @@ export function canOpenExternalPath(internals: TuiPathOpenerInternals = {}): boo
 export async function openExternalPath(path: string, signal: AbortSignal): Promise<void> {
   if (path.trim() === '' || path.includes('\0')) throw new TypeError('TUI refuses to open an empty or NUL path')
   if (process.platform === 'darwin') {
-    await runNativeCommand('open', [path], signal)
+    await runNativeCommand('open', [path], signal, 'visible')
   } else if (process.platform === 'win32') {
-    await runNativeCommand('explorer.exe', [path], signal)
+    await runNativeCommand('explorer.exe', [path], signal, 'visible')
   } else {
     if (isWsl(process.env)) {
-      const translated = await runNativeCommand('wslpath', ['-w', path], signal)
+      const translated = await runNativeCommand('wslpath', ['-w', path], signal, 'hidden')
       signal.throwIfAborted()
       const windowsPath = translated.stdout.replace(/[\r\n]+$/u, '')
       if (windowsPath === '') throw new Error('wslpath returned no Windows path')
-      await runNativeCommand('explorer.exe', [windowsPath], signal)
+      await runNativeCommand('explorer.exe', [windowsPath], signal, 'visible')
       return
     }
-    await runNativeCommand('xdg-open', [path], signal)
+    await runNativeCommand('xdg-open', [path], signal, 'visible')
   }
 }
