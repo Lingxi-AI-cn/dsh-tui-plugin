@@ -231,7 +231,10 @@ async function bootPty(official: string, dshScript: string, home: string, env: R
   writeFileSync(join(home, 'clean-room-path.txt'), 'official rc8 workspace fixture\n')
   const hubPatch = join(home, 'clean-room-hub.patch.yml')
   writeFileSync(hubPatch, `- id: plugin-hub-local\n  config:\n    registryUrl: ${JSON.stringify(hubOrigin)}\n    allowLoopbackHttp: true\n    profileMutations: false\n`)
-  const child = pty.spawn(process.execPath, [dshScript, '--profile', 'tui', '--patch', hubPatch], { cwd: home, cols: 100, rows: 30, env })
+  // Ink suppresses live terminal frames under CI; only the interactive PTY child
+  // advertises an ordinary terminal while the surrounding checks remain in CI.
+  const terminalEnv = { ...env, CI: 'false' }
+  const child = pty.spawn(process.execPath, [dshScript, '--profile', 'tui', '--patch', hubPatch], { cwd: home, cols: 100, rows: 30, env: terminalEnv })
   let output = ''
   let probe = ''
   const data = child.onData((chunk) => {
