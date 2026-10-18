@@ -3,7 +3,7 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type {
-  Api, ApiStreamOptions, TranscriptContext as PiContext, Credential, Model, Models, Provider,
+  Api, ApiStreamOptions, TranscriptContext as PiContext, Credential, Model, ModelThinkingLevel, Models, Provider,
   SimpleStreamOptions, ThinkingLevelMap,
 } from '@earendil-works/pi-ai'
 import { attributionHeaders, LlmError } from '@deepseek-ai/dsh-llm'
@@ -13,7 +13,10 @@ import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 export const OPENAI_CODEX_PROVIDER = 'openai-codex'
 const MODELS_URL = 'https://chatgpt.com/backend-api/codex/models'
 const MAX_CATALOG_BYTES = 2 * 1024 * 1024
-const THINKING_LEVELS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+const THINKING_LEVEL_GATE = {
+  off: true, minimal: true, low: true, medium: true, high: true, xhigh: true, max: true,
+} as const satisfies Record<ModelThinkingLevel, true>
+const THINKING_LEVELS = Object.keys(THINKING_LEVEL_GATE) as ModelThinkingLevel[]
 
 /** Validated provider response metadata retained in the derivative catalog cache. */
 export interface RemoteCodexModel {
@@ -116,9 +119,12 @@ function piModel(
   template: Model<Api>,
 ): Model<Api> {
   const known = fallback.get(remote.slug)
+  const advertised = (remote.reasoning ?? []).filter(level => Object.hasOwn(THINKING_LEVEL_GATE, level.effort))
   const thinkingLevelMap: ThinkingLevelMap = {}
-  for (const level of remote.reasoning ?? []) {
-    if (THINKING_LEVELS.has(level.effort)) thinkingLevelMap[level.effort as keyof ThinkingLevelMap] = level.effort
+  if (advertised.length > 0) {
+    // pi-ai treats absent ordinary levels as supported, so exclusions must be explicit.
+    for (const level of THINKING_LEVELS) thinkingLevelMap[level] = null
+    for (const level of advertised) thinkingLevelMap[level.effort as ModelThinkingLevel] = level.effort
   }
   const base = known ?? template
   return {
@@ -280,7 +286,7 @@ export class CodexCatalog {
   async refresh(force = false, signal?: AbortSignal): Promise<void> {
     await this.loadCache()
     if (!force && this.metadata.size > 0) return
-    let raw = await this.models.getAuth(OPENAI_CODEX_PROVIDER)
+    let raw = await this.models.getAuth(OPENAI_CODEX_PROVIDER, signal === undefined ? undefined : { signal })
     if (raw === undefined) return
     const persisted = await this.credentialReader()
     if (persisted?.type !== 'oauth' || typeof persisted.accountId !== 'string'
@@ -290,7 +296,7 @@ export class CodexCatalog {
       response = await this.request(raw.auth.apiKey, persisted.accountId, signal)
       if (response.status === 401) {
         await this.forceRefresh(signal)
-        raw = await this.models.getAuth(OPENAI_CODEX_PROVIDER)
+        raw = await this.models.getAuth(OPENAI_CODEX_PROVIDER, signal === undefined ? undefined : { signal })
         const refreshed = await this.credentialReader()
         if (raw?.auth.apiKey !== undefined && refreshed?.type === 'oauth' && typeof refreshed.accountId === 'string') {
           response = await this.request(raw.auth.apiKey, refreshed.accountId, signal)

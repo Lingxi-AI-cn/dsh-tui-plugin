@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DynamicCodexProvider } from '../src/catalog.ts'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import {
   FileCredentialStore,
   installOpenAICodexRc8AuthenticationBridge,
@@ -49,6 +49,7 @@ describe('OpenAICodexAdapter', () => {
     const fetchImpl = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ models: [{
       slug: 'gpt-account', display_name: 'GPT Account', description: 'Account-visible model',
       visibility: 'list', priority: 1, context_window: 123_456, input_modalities: ['text'],
+      supported_reasoning_levels: [{ effort: 'high' }],
     }] }), { status: 200 })))
     const adapter = new OpenAICodexAdapter(spec, fetchImpl)
 
@@ -64,10 +65,36 @@ describe('OpenAICodexAdapter', () => {
     }])
     expect(await adapter.resolveModel('lingxi-openai-codex', 'gpt-account')).toMatchObject({
       provider: 'lingxi-openai-codex', id: 'gpt-account', context: { contextWindow: 123_456 },
+      reasoning: { efforts: [{ id: 'high', name: 'High' }] },
+      systemPromptUpdate: 'in-history', toolUpdate: 'addition-only',
     })
+    const drain = async (): Promise<void> => {
+      for await (const _chunk of adapter.stream({
+        provider: 'lingxi-openai-codex', model: 'gpt-account', messages: [], reasoningEffort: ReasoningEffortId('low'),
+      })) { /* drain */ }
+    }
+    await expect(drain()).rejects.toMatchObject({ code: 'UNSUPPORTED_REASONING_EFFORT' })
     expect(fetchImpl).toHaveBeenCalled()
     await adapter.logout('lingxi-openai-codex')
     expect(await adapter.authentication('lingxi-openai-codex')).toMatchObject({ configured: false })
+  })
+
+  it('maps image targets through the enhanced route and retains official conversation capabilities', async () => {
+    const adapter = new OpenAICodexAdapter(resolveSpec({ dshHome: await home() }))
+    const image = {
+      attachmentId: AttachmentId(`sha256:${'b'.repeat(64)}`),
+      mediaType: 'image/png' as const, bytes: 2 * 1024 * 1024, width: 4096, height: 4096,
+    }
+    expect(adapter.imageRequestTarget('lingxi-openai-codex', 'gpt-5.6-terra', image)).toEqual({
+      width: 2048, height: 2048, maxBytes: 1024 * 1024,
+    })
+    expect(() => adapter.imageRequestTarget('openai-codex', 'gpt-5.6-terra', image))
+      .toThrow('Codex adapter does not own provider')
+    expect(() => adapter.imageRequestTarget('lingxi-openai-codex', 'missing', image))
+      .toThrow('has no configured model')
+    expect(await adapter.resolveModel('lingxi-openai-codex', 'gpt-5.6-terra')).toMatchObject({
+      provider: 'lingxi-openai-codex', systemPromptUpdate: 'in-history', toolUpdate: 'addition-only',
+    })
   })
 
   it('resolves durable image attachments at request time', async () => {

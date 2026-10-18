@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Credential, Models } from '@earendil-works/pi-ai'
+import { getSupportedThinkingLevels, type Credential, type Models } from '@earendil-works/pi-ai'
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex'
 import { CodexCatalog, DynamicCodexProvider, parseRemoteModels } from '../src/catalog.ts'
 
@@ -50,6 +50,7 @@ describe('Codex account model catalog', () => {
     const getAuth = vi.fn(() => Promise.resolve({ auth: { apiKey: key }, source: 'OAuth' }))
     const models = { getAuth } as unknown as Models
     const provider = new DynamicCodexProvider(openaiCodexProvider())
+    const template = provider.getModels().find(model => model.id === 'gpt-5.6-terra')!
     const requests: RequestInit[] = []
     const fetchImpl = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
       requests.push(init ?? {})
@@ -66,14 +67,19 @@ describe('Codex account model catalog', () => {
     const refresh = vi.fn(() => { key = 'new-access'; return Promise.resolve() })
     catalog.bindCredentials(credential, refresh)
 
-    await catalog.refresh(true)
+    const controller = new AbortController()
+    await catalog.refresh(true, controller.signal)
 
+    expect(getAuth).toHaveBeenNthCalledWith(1, 'openai-codex', { signal: controller.signal })
+    expect(getAuth).toHaveBeenNthCalledWith(2, 'openai-codex', { signal: controller.signal })
     expect(refresh).toHaveBeenCalledOnce()
     expect(provider.getModels().map(model => model.id)).toEqual(['gpt-visible-one', 'gpt-visible-two'])
     expect(provider.getModels()[1]).toMatchObject({
       name: 'GPT Visible Two', contextWindow: 222, input: ['text', 'image'],
-      thinkingLevelMap: { high: 'high' },
+      thinkingLevelMap: { off: null, minimal: null, low: null, medium: null, high: 'high', xhigh: null, max: null },
     })
+    expect(getSupportedThinkingLevels(provider.getModels()[1]!)).toEqual(['high'])
+    expect(getSupportedThinkingLevels(provider.getModels()[0]!)).toEqual(getSupportedThinkingLevels(template))
     expect(catalog.description('gpt-visible-two')).toBe('second')
     const firstHeaders = new Headers(requests[0]?.headers)
     const secondHeaders = new Headers(requests[1]?.headers)

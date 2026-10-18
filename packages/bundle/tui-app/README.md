@@ -24,7 +24,7 @@ Install this bundle after official DSH to run its Agent in a full-screen native 
 Install the exact TUI release into a profile owned by an already installed matching DSH release, then launch that profile through the existing `dsh` binary:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.13-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.14-rc.2
 dsh --profile tui
 ```
 
@@ -33,14 +33,14 @@ This install contract assumes that official DSH initializes a fresh `tui` profil
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.13-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.14-rc.2
 ```
 
 Sessions and credentials are stored outside the profile directory and are not removed by this migration. Review and reapply any user-authored profile patch instead of copying the old profile directory back wholesale.
 
 The package checks every declared official Host peer before command parsing and terminal negotiation. The official `@deepseek-ai/dsh-agent-preset-registry` owns preset selection and validates contributed definitions; the TUI does not guess an application-relative preset path. The packed package requires exact DSH package versions, rejects Host packages resolved from the `tui` profile, and prints the installed DSH version, supported DSH version, TUI version, profile, and exact recovery command on mismatch. Upgrade DSH and the TUI as a tested pair.
 
-The published manifests retain exact Host peer ranges but mark those peers optional for package-manager resolution because the official launcher supplies the complete Host graph from outside the isolated profile. A normal `dsh plugin` install therefore does not report those external packages as missing or duplicate them inside `$DSH_HOME/profiles/tui`; startup still requires and validates their exact external versions and paths.
+The published manifests retain exact official Host peer ranges; the third-party pi-ai peer alone follows the official provider's `^1.1.0` range. They mark these peers optional for package-manager resolution because the official launcher supplies the complete Host graph from outside the isolated profile. A normal `dsh plugin` install therefore does not report those external packages as missing or duplicate them inside `$DSH_HOME/profiles/tui`; startup still requires their external paths, exact official Host versions, and the compatible pi-ai version.
 
 The public bundle includes [`@lingxi-ai-cn/dsh-llm-openai-codex`](../../llm/llm-openai-codex/README.md). `/models` offers ChatGPT sign-in before the provider has credentials and lists the signed-in account catalog afterward. Current Hosts store the OAuth grant through the official scoped credential-record owner at `llm-openai-codex/openai-codex`; `$DSH_HOME/oauth/openai-codex.json` remains only the direct-construction and older-Host fallback. Installation and upgrades never sign a user in or rewrite either credential store.
 
@@ -59,9 +59,11 @@ The TUI consumes the same dynamic `ctx.agentPresets` roster and durable Session 
 | Minimal | `minimal` | The official fixed prompt and persistent `bash`; Host Schedule also adds four reminder tools to root Agents. |
 | Creator | `cordis` | Standard capabilities plus runtime inspection, plugin experiments, and preset-authoring guidance. |
 
-The TUI keeps the Host-owned Web registry plus DeepSeek search and HTTP fetch providers process-wide, while the preset owns model visibility of `tool-web`. Standard, PTC, and Creator therefore expose the official search/fetch capability without leaking it into Minimal. The PTC preset also keeps the workflow worker and Ralph active but disables the duplicate model-facing `tool-workflow` entry, so workflow execution remains available through Code Mode without presenting two competing interfaces.
+The TUI keeps the Host-owned Web registry plus DeepSeek search and HTTP fetch providers process-wide, while the preset owns model visibility of `tool-web`. Standard, PTC, and Creator therefore expose the official search/fetch capability without leaking it into Minimal. The PTC preset keeps the workflow worker active but disables the duplicate model-facing `tool-workflow` entry, so workflow execution remains available through Code Mode without presenting two competing interfaces.
 
 `/mode` and the actionable footer list these four declarations plus other healthy presets declared by the active Profile composition. A blank Session switches in place through the official recompose transaction and records `agent-preset/selected` only after the new composition commits. Once a `turn/start` exists, selecting another mode opens the existing fresh-Session confirmation; cancellation keeps the current Agent, transcript, draft, and footer unchanged, while confirmation creates a new Session under the selected preset and leaves the old Session resumable. `/new`, `/clear`, and `/rewind` inherit the current Session's effective preset. `/presets` adds structured owner-supplied composition rows and read-only declaration inspection. When Settings is available, it writes the future default to `agent-preset-registry.selectedDefault` at the observed revision; copy, delete, and source-file opening are hidden because the official registry exposes no such operations. Missing or broken presets remain visible but disabled. The Schedule owner supplies model-facing create/list/delete/update tools to root Agents in every mode, while `/schedules` and the footer expose its active projection as a read-only terminal panel.
+
+Ralph is now owned by the official optional `@deepseek-ai/dsh-experimental-ralph-bundle`. The TUI no longer declares its disabled legacy row or Host peer. Users with an explicit Ralph overlay must migrate it to the official optional bundle before enabling it; the TUI does not enable experimental capabilities automatically.
 
 ## Model Experience
 
@@ -69,17 +71,19 @@ The TUI keeps the Host-owned Web registry plus DeepSeek search and HTTP fetch pr
 
 #### What the model sees
 
-The shared `harness:source` section identifies the on-disk Harness implementation, and one static `app:tui-surface` paragraph states that the user is interacting through the native terminal UI, terminal/pasted content is untrusted, and the surface supports follow-up, steering, slash commands, approvals, and structured questions.
+The TUI-owned `harness:source` section explains source inspection, while its runtime context identifies the on-disk Harness implementation separately from the execution directory. A Session that already admitted the earlier path-bearing source paragraph retains that paragraph verbatim; the runtime context supplies the current checkout path. One static `app:tui-surface` paragraph states that the user is interacting through the native terminal UI, terminal/pasted content is untrusted, and the surface supports follow-up, steering, slash commands, approvals, and structured questions.
 
 #### Token effect
 
-One source line and one fixed prompt paragraph per Session; constant for the life of the process.
+One source-guidance section, one runtime source-path line, and one fixed terminal paragraph per Session. The execution directory comes from the Host working-directory service.
 
 #### KV Cache effect
 
-The static section sits near the system prompt head and remains unchanged across turns, so it stays in the reusable prefix.
+New Sessions keep stable guidance in the reusable system prefix and emit the checkout path as runtime context. On resume, a Host-only Session projection preserves a previously admitted source paragraph matching the frozen earlier template, so this source-context migration does not rewrite that paragraph. Other prompt sections remain independently updateable.
 
 ## Known Limitations and Deferred Work
+
+On an unmodified official Host without browser file uploads, `session-controller` and its dependent Schedule owner remain inactive. `/schedules` explicitly reports that the Schedule projection is unavailable; it does not create or dispatch scheduled tasks. The enhanced downstream Host retains its optional-file-upload controller seam. This boundary already existed with official 0.2.0-rc.2; installing the TUI does not add browser authentication or an upload server.
 
 - **Preset source editing uses the Host** — the manager handles default selection, copy, inspection, and deletion but opens composition files through the Host instead of embedding a YAML editor.
 - **TUI-only Codex login** — the public bundle adds native ChatGPT OAuth and account model discovery; the Web Models page does not run this login flow.

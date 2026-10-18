@@ -6,8 +6,8 @@
 
 - id: system-prompt
   config:
-    persona: >-
-      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+    personaPrefix: >-
+      You are a coding agent powered by the {{model}} model.
 
 - id: hmr
   disabled: true
@@ -78,9 +78,6 @@
   disabled: true
 
 - id: tool-workflow
-  disabled: true
-
-- id: tool-ralph
   disabled: true
 
 - id: agent-instructions

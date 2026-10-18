@@ -702,8 +702,8 @@ describe('foldTranscript', () => {
 
   it('replays one structured delegation activity without duplicating its tool row', () => {
     const callId = ToolCallId('delegate-1')
-    const result = createToolResultMessage({ callId, content: [{ type: 'text', text: 'child accepted' }], isError: false })
-    const nodes = foldTranscript([
+    const result = createToolResultMessage({ callId, content: [{ type: 'text', text: 'started subagent child-1' }], isError: false })
+    const events: SessionEvent[] = [
       event(0, 'tool/execution-group', {
         turn: 1, step: 1, group: 0, mode: 'parallel',
         members: [{ callId, name: 'subagent', arguments: '{}' }], closed: true,
@@ -718,7 +718,15 @@ describe('foldTranscript', () => {
         runId: 'run-1' as never, stopReason: 'completed',
         lastAssistantMessage: [{ type: 'text', text: 'Scheduler facts found' }],
       }),
-    ])
+    ]
+    const pending = foldTranscript(events.slice(0, -1))
+    expect(pending).toHaveLength(1)
+    const pendingGroup = pending[0]
+    if (pendingGroup?.kind !== 'tool-activity') throw new Error('expected pending activity')
+    expect(pendingGroup.tools[0]?.state).toBe('success')
+    expect(toolStateMark(pendingGroup.tools[0]!)).toBe('○')
+
+    const nodes = foldTranscript(events)
     expect(nodes).toHaveLength(1)
     const group = nodes[0]
     expect(group).toMatchObject({
@@ -3160,11 +3168,11 @@ describe('TUI background work', () => {
   const rootId = SessionId('root')
   const childId = SessionId('child')
 
-  it('deduplicates job-managed one-shot children and retains authoritative live states', () => {
+  it('projects jobs and managed children without resurfacing historical one-shot children', () => {
     const job: JobView = {
-      id: JobId('subagent-1'),
-      kind: 'subagent',
-      label: 'one-shot research',
+      id: JobId('bash-1'),
+      kind: 'bash',
+      label: 'background build',
       owner: rootId,
       status: 'running',
       startedAt: 1_000,
@@ -3201,7 +3209,7 @@ describe('TUI background work', () => {
       }],
     })
     expect(snapshot.items.map(item => item.key)).toEqual([
-      'job:subagent-1', 'subagent:child', 'remote-subagent:remote-1',
+      'job:bash-1', 'subagent:child', 'remote-subagent:remote-1',
     ])
     expect(snapshot.items[0]).toMatchObject({ ownerSession: rootId, action: 'cancel-job' })
     expect(snapshot.items[1]).toMatchObject({
@@ -3250,6 +3258,52 @@ describe('TUI background work', () => {
     expect(inactive.items[0] === undefined ? undefined : formatTuiWorkRoute(inactive.items[0])).toContain(
       'source durable catalog (route not exposed)',
     )
+  })
+
+  it('retains external catalog identity and uses observed execution state without duplicate rows', () => {
+    const externalId = SessionId('external-child')
+    const catalog = {
+      kind: 'child', id: externalId, mode: 'external', label: 'remote review', activity: 'running',
+      hasChildren: false, parentId: childId, depth: 2,
+    } as const
+    const input = { jobs: [], subagents: [catalog], liveAgents: new Map() }
+    const cold = projectTuiWork({ ...input, remoteRuns: [] })
+    expect(cold.items).toMatchObject([{
+      key: 'subagent:external-child', id: externalId, label: 'remote review', ownerSession: childId,
+      state: 'inactive', depth: 2, inspectable: false, action: 'none',
+      route: { source: 'durable-catalog' },
+    }])
+    expect(cold.items[0]?.route).toEqual({ source: 'durable-catalog' })
+    expect(cold.items[0]).not.toHaveProperty('startedAt')
+    expect(cold.items[0]).not.toHaveProperty('finishedAt')
+    expect(cold.items[0]).not.toHaveProperty('detail')
+    expect(cold.summary).toEqual({ running: 0, queued: 0, failed: 0, total: 1 })
+
+    const run = {
+      info: { runId: SubagentRunId('external-run'), provider: 'acp', id: externalId, local: false },
+      observedAt: 1_000,
+    }
+    const running = projectTuiWork({ ...input, remoteRuns: [run] })
+    expect(running.items).toMatchObject([{
+      key: 'remote-subagent:external-run', id: externalId, label: 'remote review', ownerSession: childId,
+      state: 'running', depth: 2, inspectable: false, action: 'none', startedAt: 1_000,
+      route: { provider: 'acp', source: 'remote-lifecycle' },
+    }])
+    expect(running.summary).toEqual({ running: 1, queued: 0, failed: 0, total: 1 })
+
+    const settled = projectTuiWork({
+      ...input,
+      remoteRuns: [{ ...run, outcome: { ...run.info, stopReason: 'error' }, finishedAt: 2_000 }],
+    })
+    expect(settled.items).toMatchObject([{
+      key: 'remote-subagent:external-run', label: 'remote review', ownerSession: childId,
+      state: 'failed', detail: 'error', depth: 2, inspectable: false, action: 'none', finishedAt: 2_000,
+    }])
+    expect(settled.summary).toEqual({ running: 0, queued: 0, failed: 1, total: 1 })
+
+    const { label: _label, ...unlabeled } = catalog
+    const withoutLabel = projectTuiWork({ ...input, subagents: [unlabeled], remoteRuns: [] })
+    expect(withoutLabel.items[0]?.label).toBe(externalId)
   })
 
   it('formats frozen job duration and durable open-turn timing', () => {

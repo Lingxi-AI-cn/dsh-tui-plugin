@@ -4,6 +4,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import semver from 'semver'
 import type {
   TuiHostDiagnosticSnapshot,
   TuiHostPackageDiagnostic,
@@ -168,8 +169,9 @@ function compatibilityMessage(
  * Validate already-resolved packages against one packed TUI manifest.
  * The `@deepseek-ai/dsh-app-boot` `workspace:*` marker makes the checked-out
  * workspace graph authoritative during source development. `pnpm pack`
- * replaces that marker with an exact version, after which every peer must
- * match the independently installed official graph exactly.
+ * replaces that marker with an exact version, after which official Host peers must
+ * match the independently installed graph exactly. The third-party pi-ai peer
+ * follows the official provider's declared compatible range.
  * @param tuiManifest - source or packed top-level manifest.
  * @param packages - resolved official package facts.
  * @param activeProfileRoot - profile directory whose packages cannot own Host peers.
@@ -200,12 +202,15 @@ export function validateTuiHostCompatibility(
         `Required Host package ${name} is missing.`,
       ))
     }
-    if (!sourceCheckout && actual.version !== expected) {
+    const matches = name === '@earendil-works/pi-ai'
+      ? semver.satisfies(actual.version, expected)
+      : actual.version === expected
+    if (!sourceCheckout && !matches) {
       throw new TuiHostCompatibilityError(compatibilityMessage(
         installedDsh,
         supportedDshText,
         tuiVersion,
-        `Host package ${name} is ${actual.version}; expected exactly ${expected}.`,
+        `Host package ${name} is ${actual.version}; expected ${name === '@earendil-works/pi-ai' ? 'compatible range' : 'exactly'} ${expected}.`,
       ))
     }
     if (isInside(activeProfileRoot, actual.manifestPath)) {

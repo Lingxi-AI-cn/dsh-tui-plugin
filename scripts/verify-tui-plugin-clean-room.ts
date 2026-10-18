@@ -12,8 +12,8 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.13-rc.2'
-const DSH_VERSION = '0.2.0-rc.2'
+const TUI_VERSION = '0.1.14-rc.2'
+const DSH_VERSION = '0.2.1-rc.2'
 const TOP_PACKAGE = '@lingxi-ai-cn/dsh-tui'
 const PACKAGE_DIRS = Object.freeze([
   'packages/boot/profile-plugin-manager',
@@ -118,10 +118,25 @@ function packFamily(destination: string): readonly PackedRelease[] {
   })
 }
 
-function registry(releases: readonly PackedRelease[]): Promise<{ readonly server: Server; readonly origin: string }> {
+function registry(releases: readonly PackedRelease[]): Promise<{
+  readonly server: Server
+  readonly origin: string
+  readonly hubRequests: ReadonlySet<string>
+}> {
   const byName = new Map(releases.map(release => [release.name, release]))
+  const hubRequests = new Set<string>()
   const server = createServer((request, response) => {
     const path = request.url === undefined ? '' : new URL(request.url, 'http://registry.invalid').pathname
+    // This is an explicit loopback Hub fixture, not a probe of the production Registry.
+    if (request.method === 'GET' && (path === '/v1/meta' || path === '/v1/plugins')) {
+      hubRequests.add(path)
+      response.setHeader('content-type', 'application/json')
+      response.end(JSON.stringify({
+        apiVersion: 'dsh.plugin-hub/v1', catalogRevision: 1,
+        ...(path === '/v1/meta' ? { generatedAt: '2026-10-18T00:00:00Z' } : { data: { items: [] } }),
+      }))
+      return
+    }
     if (request.method === 'POST' || path === '/-/ping') {
       response.setHeader('content-type', 'application/json')
       response.end('{}')
@@ -169,7 +184,7 @@ function registry(releases: readonly PackedRelease[]): Promise<{ readonly server
       server.off('error', reject)
       const address = server.address()
       if (address === null || typeof address === 'string') fail('local Registry did not bind TCP')
-      resolve({ server, origin: `http://127.0.0.1:${address.port}` })
+      resolve({ server, hubRequests, origin: `http://127.0.0.1:${address.port}` })
     })
   })
 }
@@ -206,7 +221,7 @@ async function waitFor(read: () => string, expected: string, timeoutMs = 30_000)
   }
 }
 
-async function bootPty(official: string, dshScript: string, home: string, env: Record<string, string>): Promise<void> {
+async function bootPty(official: string, dshScript: string, home: string, env: Record<string, string>, hubOrigin: string): Promise<void> {
   const store = join(official, 'node_modules/.pnpm')
   const nodePtyEntry = readdirSync(store).find(entry => entry.startsWith('node-pty@'))
   if (nodePtyEntry === undefined) fail('official installation contains no node-pty package for the clean-room PTY')
@@ -214,13 +229,9 @@ async function bootPty(official: string, dshScript: string, home: string, env: R
   const requireFromOfficial = createRequire(join(nodePtyRoot, 'package.json'))
   const pty = requireFromOfficial(nodePtyRoot) as NodePty
   writeFileSync(join(home, 'clean-room-path.txt'), 'official rc8 workspace fixture\n')
-  // Ink intentionally withholds live frames when CI=true. The PTY is the
-  // interactive user boundary under test, so make only its child environment
-  // advertise an ordinary terminal while the surrounding workflow stays CI.
-  const terminalEnv = { ...env, CI: 'false' }
-  const child = pty.spawn(process.execPath, [dshScript, '--profile', 'tui'], {
-    cwd: home, cols: 100, rows: 30, env: terminalEnv,
-  })
+  const hubPatch = join(home, 'clean-room-hub.patch.yml')
+  writeFileSync(hubPatch, `- id: plugin-hub-local\n  config:\n    registryUrl: ${JSON.stringify(hubOrigin)}\n    allowLoopbackHttp: true\n    profileMutations: false\n`)
+  const child = pty.spawn(process.execPath, [dshScript, '--profile', 'tui', '--patch', hubPatch], { cwd: home, cols: 100, rows: 30, env })
   let output = ''
   let probe = ''
   const data = child.onData((chunk) => {
@@ -239,7 +250,7 @@ async function bootPty(official: string, dshScript: string, home: string, env: R
   })
   try {
     await waitFor(() => output, 'Start a conversation')
-    await waitFor(() => output, '/models change model · /plugins browse · /help commands')
+    await waitFor(() => output, '/plugins browse · /help commands')
     // The banner can render one tick before the input loop has entered raw
     // mode; wait briefly so the first command cannot be consumed by startup.
     await new Promise(resolve => setTimeout(resolve, 50))
@@ -277,6 +288,14 @@ async function bootPty(official: string, dshScript: string, home: string, env: R
     const beforeClose = output.length
     child.write('\u001b')
     await waitFor(() => output.slice(beforeClose), 'Ready')
+    child.write('/schedules')
+    await waitFor(() => output, 'prompt › /schedules')
+    child.write('\r')
+    await new Promise(resolve => setTimeout(resolve, 100))
+    child.write('\r')
+    await waitFor(() => output, 'The current Host composition does not provide the Schedule projection.')
+    child.write('\u001b')
+    await new Promise(resolve => setTimeout(resolve, 100))
     child.write('/plugins')
     await waitFor(() => output, 'prompt › /plugins')
     child.write('\r')
@@ -285,6 +304,7 @@ async function bootPty(official: string, dshScript: string, home: string, env: R
     await waitFor(() => output, 'Plugin Hub')
     await waitFor(() => output, 'Installed · Registry · GitHub repositories')
     await waitFor(() => output, 'All Registry entries')
+    await waitFor(() => output, 'No matching Registry entries.')
     child.write('\u001b')
     await new Promise(resolve => setTimeout(resolve, 100))
     child.write('/quit')
@@ -400,10 +420,13 @@ try {
   if (!help.includes('Usage: dsh --profile tui') || !help.includes('--resume <session-id>')) {
     fail('packed startup provider did not own profile help')
   }
-  await bootPty(official, join(official, 'node_modules/@deepseek-ai/dsh/lib/bin.js'), dshHome, environment)
+  await bootPty(official, join(official, 'node_modules/@deepseek-ai/dsh/lib/bin.js'), dshHome, environment, local.origin)
+  if (!local.hubRequests.has('/v1/meta') || !local.hubRequests.has('/v1/plugins')) {
+    fail('PTY did not complete its local Hub fixture reads')
+  }
   const after = treeDigest(official)
   if (before !== after) fail('TUI installation or boot mutated the official DSH installation tree')
-  process.stdout.write(`verify-tui-plugin-clean-room: official DSH ${DSH_VERSION} with TUI ${TUI_VERSION}, exact install, composition, and PTY passed\n`)
+  process.stdout.write(`verify-tui-plugin-clean-room: official DSH ${DSH_VERSION} with TUI ${TUI_VERSION}, exact install, composition, and PTY with local Hub fixture passed\n`)
 } finally {
   const activeServer = server
   if (activeServer !== undefined) {

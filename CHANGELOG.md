@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.14-rc.2
+
+- Supports exactly official DeepSeek Harness `0.2.1-rc.2` across all seven packages and follows the official pi-ai `^1.1.0` provider interface.
+- Gives the independent ChatGPT OAuth provider its own `lingxi-openai-codex` route and migrates existing provider-owned credential records when that provider is loaded.
+- Adds startup guidance for provider authentication, empty model catalogs, and Host diagnostics, while preserving admitted source guidance when resuming a Session.
+- Adopts official command metadata for nested slash completion and removes inactive legacy Ralph rows from preset composition.
+- On an unmodified official Host, `/schedules` reports the unavailable Schedule projection. The release does not add browser authentication or an upload server.
+- Real-account OAuth, native IME preedit, and wider terminal/platform checks remain manual.
+
 ## 0.1.13-rc.2
 
 - Supports exactly official DeepSeek Harness `0.2.0-rc.2` across all seven packages, with pi-ai `0.87.1`.

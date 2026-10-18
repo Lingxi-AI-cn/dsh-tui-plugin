@@ -3,8 +3,8 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const tuiVersion = '0.1.13-rc.2'
-const dshVersion = '0.2.0-rc.2'
+const tuiVersion = '0.1.14-rc.2'
+const dshVersion = '0.2.1-rc.2'
 const repository = 'git+https://github.com/Lingxi-AI-cn/dsh-tui-plugin.git'
 const packages = [
   'packages/boot/profile-plugin-manager',
@@ -16,11 +16,11 @@ const packages = [
   'packages/bundle/tui-app',
 ]
 const externalVersions = new Map([
-  ['@deepseek-ai/cordis', '4.0.4'],
-  ['@deepseek-ai/cordis-plugin-loader', '1.0.5'],
-  ['@deepseek-ai/cordis-plugin-include', '1.0.9'],
-  ['@deepseek-ai/schemastery', '3.18.4'],
-  ['@earendil-works/pi-ai', '0.87.1'],
+  ['@deepseek-ai/cordis', '4.0.5'],
+  ['@deepseek-ai/cordis-plugin-loader', '1.0.6'],
+  ['@deepseek-ai/cordis-plugin-include', '1.0.10'],
+  ['@deepseek-ai/schemastery', '3.18.5'],
+  ['@earendil-works/pi-ai', '^1.1.0'],
 ])
 const violations = []
 
@@ -79,16 +79,16 @@ for (const directory of packages) {
   if ((manifest.files ?? []).some((entry) => entry.startsWith('src/') || entry.endsWith('.map'))) {
     violations.push(`${directory}: published payload includes source or source maps`)
   }
-  for (const [name, spec] of Object.entries({ ...manifest.dependencies, ...manifest.peerDependencies, ...manifest.devDependencies })) {
-    if (name.startsWith('@lingxi-ai-cn/dsh-') && spec !== 'workspace:*') {
-      violations.push(`${directory}: ${name} must use workspace:* in public source`)
-    }
-    if (name.startsWith('@deepseek-ai/')) {
-      const expected = externalVersions.get(name) ?? dshVersion
-      if (spec !== expected) violations.push(`${directory}: ${name} must be pinned to ${expected}`)
-    }
-    if (externalVersions.has(name) && spec !== externalVersions.get(name)) {
-      violations.push(`${directory}: ${name} must be pinned to ${externalVersions.get(name)}`)
+  for (const [section, dependencies] of Object.entries({ dependencies: manifest.dependencies, peerDependencies: manifest.peerDependencies, devDependencies: manifest.devDependencies })) {
+    for (const [name, spec] of Object.entries(dependencies ?? {})) {
+      if (name.startsWith('@lingxi-ai-cn/dsh-') && spec !== 'workspace:*') {
+        violations.push(`${directory}: ${name} must use workspace:* in public source`)
+      }
+      const expected = name === '@earendil-works/pi-ai' && section === 'devDependencies'
+        ? '1.3.0' : externalVersions.get(name) ?? (name.startsWith('@deepseek-ai/') ? dshVersion : undefined)
+      if (expected !== undefined && spec !== expected) {
+        violations.push(`${directory}: ${name} must be pinned to ${expected}`)
+      }
     }
   }
 }

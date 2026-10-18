@@ -2,7 +2,7 @@
 
 import { mkdir, readFile, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { Credential, CredentialInfo, CredentialStore } from '@earendil-works/pi-ai'
+import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from '@earendil-works/pi-ai'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import {
   credentialKey, credentialKeyId, credentialKeyScope,
@@ -122,8 +122,12 @@ export class HarnessCredentialStore implements CredentialStore {
   async modify(
     providerId: string,
     fn: (current: Credential | undefined) => Promise<Credential | undefined>,
+    options?: AuthOperationOptions,
   ): Promise<Credential | undefined> {
+    options?.signal?.throwIfAborted()
     const next = await this.provider.modifyRecord(openAICodexCredentialKey(providerId), async (current) => {
+      // Cancellation can abandon a queued login, but never a grant already rotated by fn.
+      options?.signal?.throwIfAborted()
       const replacement = await fn(fromRecord(current, providerId))
       return replacement === undefined ? undefined : toRecord(replacement, providerId)
     })
@@ -164,9 +168,12 @@ export class FileCredentialStore implements CredentialStore {
 
   constructor(readonly filename: string) {}
 
-  private enqueue<T>(provider: string, operation: () => Promise<T>): Promise<T> {
+  private enqueue<T>(provider: string, operation: () => Promise<T>, options?: AuthOperationOptions): Promise<T> {
     const previous = this.chains.get(provider) ?? Promise.resolve()
-    const next = previous.catch(() => undefined).then(operation)
+    const next = previous.catch(() => undefined).then(() => {
+      options?.signal?.throwIfAborted()
+      return operation()
+    })
     this.chains.set(provider, next.catch(() => undefined))
     return next
   }
@@ -200,19 +207,25 @@ export class FileCredentialStore implements CredentialStore {
   }
 
   /** @inheritdoc */
-  modify(providerId: string, fn: (current: Credential | undefined) => Promise<Credential | undefined>): Promise<Credential | undefined> {
+  modify(
+    providerId: string,
+    fn: (current: Credential | undefined) => Promise<Credential | undefined>,
+    options?: AuthOperationOptions,
+  ): Promise<Credential | undefined> {
     return this.enqueue(providerId, async () => {
       await mkdir(dirname(this.filename), { recursive: true, mode: 0o700 })
       return withFileLock(this.filename, async () => {
         const document = await this.load()
         const current = document.credentials[providerId]
+        // The mutation owns its result once started, including a rotated refresh token.
+        options?.signal?.throwIfAborted()
         const next = await fn(current === undefined ? undefined : structuredClone(current))
         if (next === undefined) return current === undefined ? undefined : structuredClone(current)
         document.credentials[providerId] = credentialOf(next, providerId)
         await this.write(document)
         return structuredClone(document.credentials[providerId])
-      })
-    })
+      }, options)
+    }, options)
   }
 
   /** @inheritdoc */

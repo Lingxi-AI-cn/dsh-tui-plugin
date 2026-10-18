@@ -46,6 +46,7 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-user-questions'
 import type {} from '@deepseek-ai/dsh-tool-todo'
 import type {} from '@deepseek-ai/dsh-authorization'
+import type {} from '@deepseek-ai/dsh-working-directory'
 
 export type { Context } from '@deepseek-ai/cordis'
 export type { Volatile }
@@ -57,7 +58,6 @@ export type {
 } from '@deepseek-ai/dsh-attachment'
 export { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 export { dshHomePath } from '@deepseek-ai/dsh-home-paths'
-export type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 export { default as z } from '@deepseek-ai/schemastery'
 export {
   assembleContextFor, installModelSelection,

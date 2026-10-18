@@ -41,7 +41,7 @@ export interface TuiObservedSubagentRun {
   readonly finishedAt?: number | undefined
 }
 
-/** State vocabulary shared by jobs and continuable subagent rows. */
+/** State vocabulary shared by jobs and local or external subagent rows. */
 export type TuiWorkItemState = JobStatus | 'waiting' | 'inactive'
 
 /** One deduplicated row in the native TUI work panel. */
@@ -113,7 +113,7 @@ export const EMPTY_TUI_WORK_SNAPSHOT: TuiWorkSnapshot = Object.freeze({
 export interface TuiWorkProjectionInput {
   /** Jobs visible to the root and its currently live descendants. */
   readonly jobs: readonly JobView[]
-  /** Durable local child catalog below the TUI root. */
+  /** Durable local and external child catalog below the TUI root. */
   readonly subagents: readonly SubagentDescendantListEntry[]
   /** Exact live Agent facts keyed by child Session id. */
   readonly liveAgents: ReadonlyMap<SessionId, TuiWorkAgentSnapshot>
@@ -126,15 +126,37 @@ export interface TuiWorkProjectionInput {
 }
 
 /**
- * Project jobs, continuable local children, and summary-only remote runs into
- * one stable panel without duplicating job-managed one-shot subagents.
+ * Project jobs, continuable local children, and external executions without
+ * duplicating catalog rows and observed runs. Historical one-shot children
+ * remain hidden; external catalog membership alone supplies no execution state.
  * @param input - current snapshots from the owning services and event streams.
  * @returns an immutable panel snapshot and counters.
  */
 export function projectTuiWork(input: TuiWorkProjectionInput): TuiWorkSnapshot {
   const items: TuiWorkItemView[] = input.jobs.map(jobView)
+  const externalCatalog = new Map<SessionId, Extract<SubagentDescendantListEntry, { mode: 'external' }>>()
+  const observedExternalIds = new Set(input.remoteRuns.map(run => run.info.id))
   for (const entry of input.subagents) {
-    if (entry.kind !== 'child' || entry.mode !== 'continuable') continue
+    if (entry.kind !== 'child' || entry.mode === 'one-shot') continue
+    if (entry.mode === 'external') {
+      externalCatalog.set(entry.id, entry)
+      if (!observedExternalIds.has(entry.id)) {
+        items.push(Object.freeze({
+          key: `subagent:${entry.id}`,
+          source: 'subagent',
+          id: entry.id,
+          label: entry.label ?? entry.id,
+          ownerSession: entry.parentId,
+          state: 'inactive',
+          depth: entry.depth,
+          inspectable: false,
+          readOnlyReason: 'Remote provider exposed a summary only; no local Session transcript is available.',
+          action: 'none',
+          route: freezeRoute({ source: 'durable-catalog' }),
+        }))
+      }
+      continue
+    }
     const live = input.liveAgents.get(entry.id)
     const state: TuiWorkItemState = entry.activity === 'inactive'
       ? 'inactive'
@@ -157,17 +179,19 @@ export function projectTuiWork(input: TuiWorkProjectionInput): TuiWorkSnapshot {
     }))
   }
   for (const run of input.remoteRuns) {
+    const catalog = externalCatalog.get(run.info.id)
     const state = remoteRunState(run.outcome)
     items.push(Object.freeze({
       key: `remote-subagent:${run.info.runId}`,
       source: 'subagent',
       id: run.info.id,
-      label: `${run.info.provider} subagent`,
+      label: catalog?.label ?? `${run.info.provider} subagent`,
+      ...catalog === undefined ? {} : { ownerSession: catalog.parentId },
       state,
       ...run.outcome === undefined ? {} : { detail: run.outcome.stopReason },
       startedAt: run.observedAt,
       ...run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt },
-      depth: 1,
+      depth: catalog?.depth ?? 1,
       inspectable: false,
       readOnlyReason: 'Remote provider exposed a summary only; no local Session transcript is available.',
       action: 'none',

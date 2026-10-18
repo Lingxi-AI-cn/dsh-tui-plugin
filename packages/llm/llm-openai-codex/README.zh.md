@@ -23,7 +23,7 @@ kind: "package-reference"
 <a id="configuration"></a>
 ## 配置
 
-适配器对应 pi-ai `0.87.1`。`DynamicCodexProvider` 将已转换的 `TranscriptContext` 传给底层 provider，replay 规范化仍由官方 pi-ai adapter 负责；动态模型目录不修改转录数据。
+`0.1.14-rc.2` 候选版本精确适配官方 DSH `0.2.1-rc.2`，并遵循官方 provider 的 pi-ai `^1.1.0` peer 范围。`DynamicCodexProvider` 将已转换的 `TranscriptContext` 传给底层 provider，replay 规范化仍由官方 pi-ai adapter 负责；动态模型目录不修改转录数据。
 
 ```yaml
 - id: llm-openai-codex
@@ -39,14 +39,14 @@ kind: "package-reference"
 
 常规 Host 组合会通过官方 scoped credential-record owner，把 OAuth grant 存在 `llm-openai-codex/openai-codex`；只有衍生的 last-good 目录默认位于 `$DSH_HOME/model-catalogs/openai-codex.json`。`credentialsPath` 只保留给直接构造 adapter、测试与旧版 Host 使用的 legacy file-store fallback；存在 `ctx.credentials` 时，它不是生产凭据 owner。`clientVersion` 是固定的兼容性 header 与查询值，不是模型白名单；部署可在不重新构建的情况下覆盖它。`streamIdleTimeoutMs` 限制单次 provider 读取的停滞时间，`maxRequestImageBytes` 限制经官方 pi-ai adapter 传递的 Base64 图片历史大小。
 
-插件会在每次请求时解析当前 Host 的耐久附件服务，并将其传给 `PiAiAdapter`。支持图片的 Codex route 因此可以读取 Session log 中确切 `ImageAttachmentRef` 所指向的字节；服务缺失或对象不可用时会在 provider I/O 前失败，而不会静默丢弃图片内容。
+插件会在每次请求时解析当前 Host 的耐久附件服务，并将其传给 `PiAiAdapter`。`imageRequestTarget()` 在转换增强路由后复用同一官方图片投影，使截图坐标与请求尺寸保持一致。支持图片的 Codex route 因此可以读取 Session log 中确切 `ImageAttachmentRef` 所指向的字节；服务缺失或对象不可用时会在 provider I/O 前失败，而不会静默丢弃图片内容。
 
 公开 TUI bundle 会挂载这条路由，但不会代用户登录。在当前 Host 上，adapter 会向 `ctx.authorization` 注册 `oauth` flow，通过官方 authorization-session vocabulary 运行 provider 登录，并且只经 `ctx.credentials` 读取或删除 grant；TUI 通过 `/models` 与 `/provider` 暴露该 owner。旧的 `ctx.llm.authentication()`、`login()` 与 `logout()` bridge 只在 authorization owner 缺失时作为有界兼容 fallback。本适配器有意不接受 API key 或粘贴的 access token。
 
 <a id="dynamic-model-catalog"></a>
 ## 动态模型目录
 
-每次已认证的 `listModels('lingxi-openai-codex')` 调用都会带账户 access token、account id 与兼容性 header 查询 `https://chatgpt.com/backend-api/codex/models`，保留 `visibility` 为 `list` 的行，按账户优先级排序，再把目录公布的 context、输入模态与推理级别映射到 LLM seam。解析未知模型时，也会在返回 `UNKNOWN_MODEL` 前刷新一次。
+每次已认证的 `listModels('lingxi-openai-codex')` 调用都会带账户 access token、account id 与兼容性 header 查询 `https://chatgpt.com/backend-api/codex/models`，保留 `visibility` 为 `list` 的行，按账户优先级排序，再把目录公布的 context、输入模态与推理级别映射到 LLM seam。解析未知模型时，也会在返回 `UNKNOWN_MODEL` 前刷新一次。账户公布的推理级别中，只要存在 pi-ai 可识别的级别，就排除未公布的级别；元数据缺失或完全无法识别时，保留已安装模型的能力。对话更新使用官方适配器的模型能力与序列化。
 
 该 URL 与响应形状是从当前 Codex client 及所参考 `pa_mac` 实现中观察到的**实现兼容性事实**，并非 OpenAI 公共 API 契约。OpenAI 的公开产品文档确认 ChatGPT 登录与交互式模型选择，但没有记录这个目录端点。因此适配器会验证有大小上限的不受信任响应；遇到 401 时只刷新一次凭据并重试；只写入验证后的数据；发现失败时保留 last-good 缓存或 pi-ai baseline。
 
@@ -57,7 +57,7 @@ kind: "package-reference"
 <a id="credential-safety"></a>
 ## 凭据安全
 
-`HarnessCredentialStore` 会把 pi-ai 凭据无损映射到官方 scoped credential-record owner，并以其原子 `modifyRecord()` transaction 完成刷新。`FileCredentialStore` 继续作为直接构造与旧版 Host fallback；它在进程内串行执行 read-modify-write，并通过跨进程文件锁保护同一操作；使用原子替换；创建仅 owner 可访问的父目录；还会拒绝 POSIX 下 group/other 带任何权限位的既有凭据文件。目录文件永不包含 token。登录通知可在实时终端里显示提供方授权 URL 与 device code，但不会追加进耐久 Session transcript。
+`HarnessCredentialStore` 会把 pi-ai 凭据无损映射到官方 scoped credential-record owner，并以其原子 `modifyRecord()` transaction 完成刷新。`FileCredentialStore` 继续作为直接构造与旧版 Host fallback；它在进程内串行执行 read-modify-write，并通过跨进程文件锁保护同一操作；使用原子替换；创建仅 owner 可访问的父目录；还会拒绝 POSIX 下 group/other 带任何权限位的既有凭据文件。凭据变更会在取得排他权、开始回调前检查取消；回调已经轮换 grant 后仍会持久化结果。目录认证会把调用方取消信号传给 pi-ai。目录文件永不包含 token。登录通知可在实时终端里显示提供方授权 URL 与 device code，但不会追加进耐久 Session transcript。
 
 <a id="model-experience"></a>
 ## 模型体验

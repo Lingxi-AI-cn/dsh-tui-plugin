@@ -54,7 +54,7 @@ describe('post-install TUI package surface', () => {
   const top = manifests[0]!
 
   it('publishes one same-version Lingxi package family without install hooks or source exports', () => {
-    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.13-rc.2']))
+    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.14-rc.2']))
     for (const entry of manifests) {
       expect(entry.name).toMatch(/^@lingxi-ai-cn\/dsh-/u)
       expect(entry.repository?.url).toBe(REPOSITORY)
@@ -142,7 +142,7 @@ describe('post-install TUI package surface', () => {
       'skill-filesystem', 'tool-skill', 'tool-goal', 'command-goal',
       'plan-mode', 'compaction-basic', 'command-compact', 'tool-result-pruner',
       'tool-subagent-control', 'tool-subagent-list-agents', 'tool-subagent',
-      'tool-subagent-fork', 'workflow-ptc', 'tool-workflow', 'tool-ralph',
+      'tool-subagent-fork', 'workflow-ptc', 'tool-workflow',
       'agent-instructions', 'tool-todo', 'tool-web',
     ]))
     const closure = new Set([top.name, ...Object.keys(top.dependencies ?? {}), ...Object.keys(top.peerDependencies ?? {})])

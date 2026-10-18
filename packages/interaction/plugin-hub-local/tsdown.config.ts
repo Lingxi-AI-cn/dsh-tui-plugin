@@ -13,6 +13,5 @@ const common = {
 
 export default defineConfig([
   { ...common, entry: ['lib/types/index.js'] },
-  { ...common, entry: ['lib/types/invariant.js'] },
   { ...common, entry: ['lib/types/maintenance-bin.js'] },
 ])

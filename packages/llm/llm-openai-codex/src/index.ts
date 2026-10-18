@@ -23,7 +23,7 @@ import type {
   AuthorizationNotice, AuthorizationPrompt, AuthorizationSession,
 } from '@deepseek-ai/dsh-authorization'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { access } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
@@ -276,7 +276,7 @@ export class OpenAICodexAdapter extends PiAiAdapter {
           const oauth = provider.auth.oauth
           if (oauth === undefined) throw new LlmError('OpenAI Codex OAuth implementation is unavailable', 'AUTH_UNSUPPORTED')
           return oauth.refresh(current, signal ?? new AbortController().signal)
-        })
+        }, signal === undefined ? undefined : { signal })
       },
     )
     super({
@@ -412,6 +412,10 @@ export class OpenAICodexAdapter extends PiAiAdapter {
 
   override stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     return this.streamOwned(options, mapped => super.stream(mapped))
+  }
+
+  override imageRequestTarget(provider: string, model: string, image: ImageAttachmentRef) {
+    return super.imageRequestTarget(internalProvider(provider), model, image)
   }
 
   override providerInfo(provider: string) {

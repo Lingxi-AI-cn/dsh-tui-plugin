@@ -61,6 +61,91 @@ describe('FileCredentialStore', () => {
   })
 })
 
+describe('queued credential cancellation', () => {
+  it('does not persist a file-store login cancelled while waiting for another mutation', async () => {
+    const credentials = await store()
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const first = credentials.modify('openai-codex', async () => {
+      entered.resolve(undefined)
+      await release.promise
+      return { type: 'api_key', key: 'original' }
+    })
+    await entered.promise
+    const controller = new AbortController()
+    const cancelled = new Error('login cancelled')
+    const mutate = vi.fn(async () => ({ type: 'api_key' as const, key: 'cancelled' }))
+    const queued = credentials.modify('openai-codex', mutate, { signal: controller.signal })
+    const rejected = expect(queued).rejects.toBe(cancelled)
+    controller.abort(cancelled)
+    release.resolve(undefined)
+    await first
+    await rejected
+    expect(mutate).not.toHaveBeenCalled()
+    expect(await credentials.read('openai-codex')).toEqual({ type: 'api_key', key: 'original' })
+  })
+
+  it('does not start a Harness mutation after cancellation while its record owner was busy', async () => {
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    let saved: CredentialRecord | undefined
+    const provider = {
+      async modifyRecord(
+        _key: CredentialKey,
+        mutate: (current: CredentialRecord | undefined) => Promise<CredentialRecord | undefined>,
+      ) {
+        entered.resolve(undefined)
+        await release.promise
+        saved = await mutate(undefined)
+        return saved
+      },
+    } as CredentialProvider
+    const credentials = new HarnessCredentialStore(provider)
+    const controller = new AbortController()
+    const cancelled = new Error('login cancelled')
+    const mutate = vi.fn(async () => ({ type: 'api_key' as const, key: 'cancelled' }))
+    const pending = credentials.modify('openai-codex', mutate, { signal: controller.signal })
+    const rejected = expect(pending).rejects.toBe(cancelled)
+    await entered.promise
+    controller.abort(cancelled)
+    release.resolve(undefined)
+    await rejected
+    expect(mutate).not.toHaveBeenCalled()
+    expect(saved).toBeUndefined()
+  })
+
+  it('persists a rotated file-store grant when its mutation has already started', async () => {
+    const credentials = await store()
+    const controller = new AbortController()
+    const rotated = { type: 'oauth' as const, access: 'next-access', refresh: 'next-refresh', expires: 123 }
+    await credentials.modify('openai-codex', async () => {
+      controller.abort(new Error('caller stopped waiting'))
+      return rotated
+    }, { signal: controller.signal })
+    expect(await credentials.read('openai-codex')).toEqual(rotated)
+  })
+
+  it('persists a rotated Harness grant when its mutation has already started', async () => {
+    let saved: CredentialRecord | undefined
+    const provider = {
+      async modifyRecord(
+        _key: CredentialKey,
+        mutate: (current: CredentialRecord | undefined) => Promise<CredentialRecord | undefined>,
+      ) {
+        saved = await mutate(undefined)
+        return saved
+      },
+    } as CredentialProvider
+    const controller = new AbortController()
+    const rotated = { type: 'oauth' as const, access: 'next-access', refresh: 'next-refresh', expires: 123 }
+    await new HarnessCredentialStore(provider).modify('openai-codex', async () => {
+      controller.abort(new Error('caller stopped waiting'))
+      return rotated
+    }, { signal: controller.signal })
+    expect(saved).toEqual({ kind: 'grant', payload: rotated })
+  })
+})
+
 describe('HarnessCredentialStore', () => {
   it('stores OAuth and API-key values in the official scoped record owner', async () => {
     const records = new Map<CredentialKey, CredentialRecord>()

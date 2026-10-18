@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-plugin-hub",
   "description": "Provider-neutral Plugin Hub catalog and profile transaction capability for native TUI consumers",
-  "version": "0.1.13-rc.2",
+  "version": "0.1.14-rc.2",
   "publishConfig": {
     "access": "public"
   },
@@ -18,28 +18,19 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./invariant": {
-      "types": "./lib/types/invariant.d.ts",
-      "default": "./lib/invariant.js"
-    },
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
-    "lib/invariant.js",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-invariants": "0.2.0-rc.2",
-    "@deepseek-ai/cordis": "4.0.4"
+    "@deepseek-ai/dsh-brand": "0.2.1-rc.2",
+    "@deepseek-ai/cordis": "4.0.5"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-brand": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-invariants": {
       "optional": true
     },
     "@deepseek-ai/cordis": {
@@ -47,8 +38,10 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-brand": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-invariants": "0.2.0-rc.2",
-    "@deepseek-ai/cordis": "4.0.4"
+    "@deepseek-ai/dsh-brand": "0.2.1-rc.2",
+    "@deepseek-ai/cordis": "4.0.5"
+  },
+  "engines": {
+    "dsh": "0.2.1-rc.2"
   }
 }

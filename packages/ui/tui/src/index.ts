@@ -207,7 +207,7 @@ export const inject = [
   'agentPresets',
   'sessionQuery', 'workspaceRegistry', 'commands', 'userQuestions', 'approval', 'llm', 'tools',
   'fs', 'fileReferences', 'sessionReferenceResolver', 'sessionLogExporter', 'jobs', 'subagents',
-  'attachments', 'subprocess',
+  'attachments', 'subprocess', 'workingDirectory',
 ]
 
 const IMAGE_EXTENSIONS: Readonly<Record<string, ImageMediaType>> = {
@@ -831,7 +831,7 @@ class TuiController {
     if (mediaType === undefined) {
       throw new Error(tuiMessage(this.locale, 'attachment.path.unsupported', { path }))
     }
-    const cwd = agent.session.header.cwd ?? process.cwd()
+    const cwd = this.ctx.workingDirectory.get(agent.session)
     const target = await this.ctx.fs.resolve(path, { cwd })
     const info = await this.ctx.fs.stat(target)
     if (info === undefined) throw new Error(tuiMessage(this.locale, 'attachment.path.notFound', { path }))
@@ -883,7 +883,7 @@ class TuiController {
     fallbackToText: boolean,
   ): Promise<TuiClipboardInsert | undefined> {
     if (!this.ownsView(root, agent)) throw new Error('TUI Agent view changed before path intake')
-    const cwd = agent.session.header.cwd ?? process.cwd()
+    const cwd = this.ctx.workingDirectory.get(agent.session)
     const analyzed: Array<{
       readonly path: string
       readonly mediaType?: ImageMediaType
@@ -932,7 +932,7 @@ class TuiController {
 
   private async pasteClipboard(root: Agent, agent: Agent): Promise<TuiClipboardInsert> {
     if (!this.ownsView(root, agent)) throw new Error('TUI Agent view changed before clipboard read')
-    const cwd = agent.session.header.cwd ?? process.cwd()
+    const cwd = this.ctx.workingDirectory.get(agent.session)
     const result = await readTuiClipboard(this.ctx.subprocess, {
       cwd,
       environment: {
@@ -976,7 +976,7 @@ class TuiController {
   }
 
   private async openTuiPath(agent: Agent, value: string): Promise<void> {
-    const path = resolve(agent.session.header.cwd ?? process.cwd(), value)
+    const path = resolve(this.ctx.workingDirectory.get(agent.session), value)
     if (!canOpenExternalPath()) {
       this.externalNotice.set(tuiMessage(this.locale, 'path.open.unavailable', { path }))
       return
@@ -1048,7 +1048,7 @@ class TuiController {
     const handoff = this.terminal.handoff()
     this.externalEditorHandoff = handoff
     const controller = new AbortController()
-    const cwd = agent.session.header.cwd ?? process.cwd()
+    const cwd = this.ctx.workingDirectory.get(agent.session)
     const completion = runTuiExternalEditor({ draft, cwd, signal: controller.signal }).finally(() => {
       if (this.externalEditorHandoff === handoff) this.externalEditorHandoff = undefined
       handoff.resume()
@@ -2886,22 +2886,56 @@ class TuiController {
       ?? subagents.list().find(candidate => candidate === 'spawn')
     if (provider === undefined) return { kind: 'error', text: tuiMessage(this.locale, 'btw.unavailable') }
     const selection = this.selection?.current ?? this.modelSelection.getSnapshot()
-    const run = await subagents.start(provider, {
-      parent: invocation.agent,
-      prompt: [{ type: 'text', text: question }],
-      label: tuiMessage(this.locale, 'btw.label'),
-      signal: invocation.signal,
-      toolFilter: { allow: [] },
-      persona: this.locale === 'zh'
-        ? '只回答用户的临时侧问。不要调用工具，不要提出后续任务，给出简洁、独立的回答。'
-        : 'Answer only the user\'s side question. Use no tools, create no follow-up work, and give a concise standalone answer.',
-      ...selection === undefined ? {} : { agentOptions: selection },
+    const childId = SessionId(randomUUID())
+    const persona = this.locale === 'zh'
+      ? '只回答用户的临时侧问。不要调用工具，不要提出后续任务，给出简洁、独立的回答。'
+      : 'Answer only the user\'s side question. Use no tools, create no follow-up work, and give a concise standalone answer.'
+    const disposeSetup = this.ctx.on('agent/created', ({ agent }) => {
+      if (agent.id !== childId) return
+      agent.ctx.tools.presentAs('native')
+      agent.ctx.tools.restrict({ allow: [] })
+      agent.ctx.tools.guard(() => persona)
+      // Restrictions retain child-owned tools such as its delegation entrypoint.
+      agent.ctx.on('system-prompt/assemble', async (_assembly, _context, next) => ({
+        ...await next(), tools: [],
+      }))
+      agent.ctx.systemPrompt.section({
+        name: 'deployment:persona-prefix',
+        order: agent.ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX'),
+        text: persona,
+      })
     })
+    let run: Awaited<ReturnType<typeof subagents.startActivation>>
+    try {
+      run = await subagents.startActivation({
+        provider,
+        childId,
+        label: tuiMessage(this.locale, 'btw.label'),
+        signal: invocation.signal,
+        delivery: 'caller',
+        request: {
+          parent: invocation.agent,
+          prompt: [{ type: 'text', text: question }],
+          ...selection === undefined ? {} : { agentOptions: selection },
+        },
+      })
+    } finally {
+      disposeSetup()
+    }
+    let disposal: Promise<void> | undefined
+    const dispose = (): Promise<void> => disposal ??= run.dispose()
+    const onAbort = (): void => {
+      // The command's finally awaits this same disposal and reports its failure.
+      void dispose().catch(() => undefined)
+    }
     let result: SubagentResult
     try {
+      invocation.signal.addEventListener('abort', onAbort, { once: true })
+      if (invocation.signal.aborted) onAbort()
       result = await run.result
     } finally {
-      await run.dispose()
+      invocation.signal.removeEventListener('abort', onAbort)
+      await dispose()
     }
     const text = result.output.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n').trim()
     if (result.stopReason !== 'completed') {

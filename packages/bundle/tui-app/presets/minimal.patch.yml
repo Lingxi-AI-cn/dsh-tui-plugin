@@ -14,6 +14,8 @@
               prefix: You are a helpful software engineer assistant.
               complete: true
               includeRuntimeContext: false
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
           - id: persistent-shell
             name: cordis:group
             group: true

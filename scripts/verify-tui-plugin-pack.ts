@@ -1,14 +1,15 @@
 /** Pack and audit the complete independently published TUI package family. */
 
 import { execFileSync } from 'node:child_process'
+import semver from 'semver'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.13-rc.2'
-const DSH_VERSION = '0.2.0-rc.2'
+const TUI_VERSION = '0.1.14-rc.2'
+const DSH_VERSION = '0.2.1-rc.2'
 const PACKAGE_DIRS = Object.freeze([
   'packages/boot/profile-plugin-manager',
   'packages/llm/llm-openai-codex',
@@ -44,8 +45,12 @@ function assertExactSpecs(manifest: PackedManifest): void {
       : name.startsWith('@deepseek-ai/dsh-')
         ? DSH_VERSION
         : name === '@earendil-works/pi-ai'
-          ? '0.87.1'
+          ? '^1.1.0'
           : undefined
+    if (name === '@earendil-works/pi-ai'
+      && (!semver.satisfies('1.1.0', spec) || !semver.satisfies('1.3.0', spec) || semver.satisfies('2.0.0', spec))) {
+      fail(`${manifest.name} must preserve the verified pi-ai 1.x compatibility boundary`)
+    }
     if (expected !== undefined && spec !== expected) {
       fail(`${manifest.name} must pin ${name} exactly to ${expected}, got ${spec}`)
     }

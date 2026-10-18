@@ -15,11 +15,11 @@
   en: 46fab98b6cb96c21
   zh: 2ded124284e71242
 /lingxi-ai-cn-dsh-tui/install-and-run:
-  en: 821c917a18d4a905
-  zh: 65664a7c3bcdcc77
+  en: f919b7e623f37b09
+  zh: 08f89f122f2c06c7
 /lingxi-ai-cn-dsh-tui/agent-modes:
-  en: e3a85a374f0ca470
-  zh: d17f91c4522d4417
+  en: f6feccfd1505d62c
+  zh: ac50aace24d4568c
 /lingxi-ai-cn-dsh-tui/model-experience:
   en: 215e7ba838619b7b
   zh: a311da3843709f90
@@ -27,17 +27,17 @@
   en: 6414f361fba86dbd
   zh: 1d3e5a8ff5d47fb8
 /lingxi-ai-cn-dsh-tui/model-experience/harness-source-and-tui-surface-context/what-the-model-sees:
-  en: e277dded8743b00c
-  zh: 7a832f6eff7f5839
+  en: ee4fd073fb45fc3b
+  zh: 1e2702f56c430455
 /lingxi-ai-cn-dsh-tui/model-experience/harness-source-and-tui-surface-context/token-effect:
-  en: a6496a29b30e8f94
-  zh: e8ccce4f9a400186
+  en: 1144d2ea1c285892
+  zh: 0cb9b4898c503fa0
 /lingxi-ai-cn-dsh-tui/model-experience/harness-source-and-tui-surface-context/kv-cache-effect:
-  en: 9708e47298b7517f
-  zh: 767b8c27bbf8ae4a
+  en: c451e5fabd2f8ab3
+  zh: 32c56c41b0f4dd22
 /lingxi-ai-cn-dsh-tui/known-limitations-and-deferred-work:
-  en: 364e403642d5ecd6
-  zh: 3e1674b8b2771eca
+  en: 8eb9a799e55807d3
+  zh: 6d0d3bb635ce3b0b
 /lingxi-ai-cn-dsh-tui/known-limitations-and-deferred-work/dev-note:
   en: 0a1253c6f7b5e8b9
   zh: 9f56528562c7c914

@@ -22,7 +22,7 @@ Provider-owned ChatGPT OAuth and dynamic account model discovery for the `lingxi
 
 ## Configuration
 
-The adapter targets pi-ai `0.87.1`. `DynamicCodexProvider` forwards the already-converted `TranscriptContext` to the underlying provider so replay normalization stays with the official pi-ai adapter; its dynamic catalog changes no transcript data.
+The `0.1.14-rc.2` candidate targets official DSH `0.2.1-rc.2` exactly and follows the official provider's pi-ai `^1.1.0` peer range. `DynamicCodexProvider` forwards the already-converted `TranscriptContext` to the underlying provider so replay normalization stays with the official pi-ai adapter; its dynamic catalog changes no transcript data.
 
 ```yaml
 - id: llm-openai-codex
@@ -38,13 +38,13 @@ The adapter targets pi-ai `0.87.1`. `DynamicCodexProvider` forwards the already-
 
 The normal Host composition stores the OAuth grant through the official scoped credential-record owner at `llm-openai-codex/openai-codex`; only the derivative last-good catalog defaults to `$DSH_HOME/model-catalogs/openai-codex.json`. `credentialsPath` retains the legacy file-store fallback used by direct adapter construction, tests, and older Hosts, but it is not the production credential owner when `ctx.credentials` is available. `clientVersion` is a pinned compatibility header and query value, not a model allowlist; deployments can override it without rebuilding. `streamIdleTimeoutMs` bounds one stalled provider read, while `maxRequestImageBytes` bounds encoded image history passed through the official pi-ai adapter.
 
-The plugin resolves the active Host's durable attachment service at request time and passes it to `PiAiAdapter`. Image-capable Codex routes can therefore read the exact `ImageAttachmentRef` bytes retained by the Session log; a missing service or unavailable object fails before provider I/O instead of silently dropping image content.
+The plugin resolves the active Host's durable attachment service at request time and passes it to `PiAiAdapter`. Its `imageRequestTarget()` uses the same official image projection after translating the enhanced route, so screenshot coordinates and request sizing agree. Image-capable Codex routes can therefore read the exact `ImageAttachmentRef` bytes retained by the Session log; a missing service or unavailable object fails before provider I/O instead of silently dropping image content.
 
 The public TUI bundle mounts this route without signing a user in. On current Hosts, the adapter registers an `oauth` flow with `ctx.authorization`, runs provider login through the official authorization-session vocabulary, and reads or removes the grant only through `ctx.credentials`; the TUI exposes that owner through `/models` and `/provider`. The older `ctx.llm.authentication()`, `login()`, and `logout()` bridge remains a bounded compatibility fallback when the authorization owner is absent. API keys and pasted access tokens are deliberately not accepted by this adapter.
 
 ## Dynamic model catalog
 
-Each authenticated `listModels('lingxi-openai-codex')` call queries `https://chatgpt.com/backend-api/codex/models` with the account access token, account id, and compatibility headers, retains rows whose `visibility` is `list`, sorts by account priority, and maps advertised context, input modalities, and supported reasoning levels into the LLM seam. An unknown model resolution also refreshes once before returning `UNKNOWN_MODEL`.
+Each authenticated `listModels('lingxi-openai-codex')` call queries `https://chatgpt.com/backend-api/codex/models` with the account access token, account id, and compatibility headers, retains rows whose `visibility` is `list`, sorts by account priority, and maps advertised context, input modalities, and supported reasoning levels into the LLM seam. An unknown model resolution also refreshes once before returning `UNKNOWN_MODEL`. A nonempty set of account-advertised reasoning levels understood by pi-ai excludes unadvertised levels; absent or unrecognized reasoning metadata retains the installed model's capabilities. Conversation updates use the official adapter's model capabilities and serializer.
 
 This URL and response shape are implementation compatibility facts observed in the current Codex clients and the referenced `pa_mac` implementation; they are **not** a public OpenAI API contract. OpenAI's public product documentation confirms ChatGPT sign-in and interactive model selection, but does not document this catalog endpoint. The adapter therefore validates an untrusted bounded response, retries exactly once after a 401 credential refresh, writes only validated data, and retains its last-good cache or pi-ai baseline on discovery failure.
 
@@ -54,7 +54,7 @@ Concurrent requests in one Session reserve distinct adapter-owned WebSocket cach
 
 ## Credential safety
 
-`HarnessCredentialStore` maps pi-ai credentials losslessly onto the official scoped credential-record owner and uses its atomic `modifyRecord()` transaction for refresh. `FileCredentialStore` remains the direct-construction and older-Host fallback; it serializes read-modify-write operations in-process and under a cross-process file lock, uses atomic replacement, creates parent directories owner-only, and rejects an existing POSIX credential file with group/other permission bits. Catalog files never contain tokens. Login notifications may expose the provider authorization URL and device code in the live terminal but never append them to the durable Session transcript.
+`HarnessCredentialStore` maps pi-ai credentials losslessly onto the official scoped credential-record owner and uses its atomic `modifyRecord()` transaction for refresh. `FileCredentialStore` remains the direct-construction and older-Host fallback; it serializes read-modify-write operations in-process and under a cross-process file lock, uses atomic replacement, creates parent directories owner-only, and rejects an existing POSIX credential file with group/other permission bits. Credential mutations check cancellation before their exclusive callback starts; a callback that already rotated a grant still persists its result. Catalog authentication passes caller cancellation to pi-ai. Catalog files never contain tokens. Login notifications may expose the provider authorization URL and device code in the live terminal but never append them to the durable Session transcript.
 
 ## Model Experience
 
