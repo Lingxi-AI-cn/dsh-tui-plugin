@@ -8548,16 +8548,22 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
       <TuiSection paddingX={2} height={2}>
         <Text bold>{tuiMessage(locale, 'schedules.header')}</Text>
         <TuiHintLine>{scheduleDialog.sourceState === 'ready'
-          ? tuiMessage(locale, 'footer.schedules.active', { count: scheduleRows.length })
+          ? tuiMessage(locale, 'schedules.page', {
+            shown: scheduleDialog.page?.shown ?? scheduleRows.length,
+            total: scheduleDialog.page?.total ?? scheduleRows.length,
+          })
           : tuiMessage(locale, scheduleDialog.sourceState === 'unavailable'
             ? 'schedules.unavailable' : 'schedules.error', { reason: scheduleDialog.error ?? '' })}</TuiHintLine>
       </TuiSection>
       {currentScheduleDetail !== undefined
         ? <TuiScrollablePanel framed marginX={1} paddingX={2}>
-          <TuiSection title={terminalSafe(currentScheduleDetail.prompt)} tone="accent" paddingX={0}>
+          <TuiSection title={currentScheduleDetail.title} tone="accent" paddingX={0}>
             <Text>{tuiMessage(locale, 'schedules.detail.id', { id: currentScheduleDetail.id })}</Text>
             <Text>{tuiMessage(locale, 'schedules.detail.kind', {
               kind: tuiMessage(locale, `schedules.kind.${currentScheduleDetail.kind}`),
+            })}</Text>
+            <Text>{tuiMessage(locale, `schedules.destination.${currentScheduleDetail.targetKind}`, {
+              session: currentScheduleDetail.targetSessionId ?? '',
             })}</Text>
             <Text>{tuiMessage(locale, 'schedules.detail.target', { time: currentScheduleDetail.scheduledAt })}</Text>
             <Text bold {...tuiTextStyle(currentScheduleDetail.state === 'overdue'
@@ -8586,7 +8592,7 @@ export function TuiApp(props: TuiAppProps): React.ReactElement {
                     key={row.id}
                     selected={index === effectiveScheduleSelection}
                     height={scheduleRowHeight}
-                    title={row.prompt}
+                    title={row.title}
                     description={tuiMessage(locale, 'schedules.row', {
                       state: tuiMessage(locale, `schedules.state.${row.state}`),
                       kind: tuiMessage(locale, `schedules.kind.${row.kind}`),

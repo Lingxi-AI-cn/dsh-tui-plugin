@@ -3,14 +3,35 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DynamicCodexProvider } from '../src/catalog.ts'
-import { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import { Context } from '@deepseek-ai/cordis'
+import { AttachmentId, AttachmentStore, ImageVariantId } from '@deepseek-ai/dsh-attachment'
+import type { ImageAttachmentRef, ImageAttachmentLimits, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import {
+  Config,
   FileCredentialStore,
   installOpenAICodexRc8AuthenticationBridge,
   OpenAICodexAdapter,
   resolveSpec,
 } from '../src/index.ts'
+
+class RequestImageStore extends AttachmentStore {
+  readonly imageLimits: ImageAttachmentLimits = {
+    maxImageBytes: 1, maxImagesPerMessage: 1, maxMessageImageBytes: 1,
+    maxImagePixels: 1, maxImageDimension: 1, mediaTypes: ['image/png'],
+  }
+
+  validateImage(): Promise<void> { return Promise.reject(new Error('not used')) }
+  saveImage(): Promise<ImageAttachmentRef> { return Promise.reject(new Error('not used')) }
+  readImage(ref: ImageAttachmentRef) { return Promise.resolve({ ref, data: Uint8Array.of(1) }) }
+  override readImageRequest(ref: ImageAttachmentRef): Promise<RequestImageAttachment> {
+    return Promise.resolve({
+      variantId: ImageVariantId(`sha256:${'b'.repeat(64)}`), attachment: ref,
+      data: Uint8Array.of(1), mediaType: ref.mediaType, bytes: 1,
+      width: ref.width, height: ref.height, depth: 'uchar', space: 'srgb', hasAlpha: true,
+    })
+  }
+}
 
 const roots: string[] = []
 
@@ -34,10 +55,82 @@ describe('OpenAICodexAdapter', () => {
       clientVersion: '0.146.0',
       streamIdleTimeoutMs: 300_000,
       maxRequestImageBytes: 20 * 1024 * 1024,
+      maxRequestImages: 50,
+      imageOffloadCountQuantum: 10,
     })
     expect(() => resolveSpec({ dshHome, clientVersion: ' ' })).toThrow('must not be empty')
     expect(() => resolveSpec({ dshHome, streamIdleTimeoutMs: 0 })).toThrow('streamIdleTimeoutMs')
     expect(() => resolveSpec({ dshHome, maxRequestImageBytes: 1.5 })).toThrow('maxRequestImageBytes')
+  })
+
+  it('resolves schema defaults and clamps only an omitted image offload quantum', async () => {
+    const dshHome = await home()
+    expect(resolveSpec(Config({ dshHome }))).toMatchObject({ maxRequestImages: 50, imageOffloadCountQuantum: 10 })
+    expect(resolveSpec(Config({ dshHome, maxRequestImages: 4 }))).toMatchObject({
+      maxRequestImages: 4, imageOffloadCountQuantum: 4,
+    })
+    expect(resolveSpec(Config({ dshHome, maxRequestImages: 60, imageOffloadCountQuantum: 3 })))
+      .toMatchObject({ maxRequestImages: 60, imageOffloadCountQuantum: 3 })
+    for (const value of [0, -1, 1.5]) {
+      expect(() => Config({ dshHome, maxRequestImages: value })).toThrow()
+      expect(() => Config({ dshHome, imageOffloadCountQuantum: value })).toThrow()
+    }
+    expect(() => resolveSpec(Config({ dshHome, maxRequestImages: 4, imageOffloadCountQuantum: 5 })))
+      .toThrow('no greater than maxRequestImages')
+  })
+
+  it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid image count limits (%s) before constructing an adapter', async (value) => {
+      const dshHome = await home()
+      expect(() => resolveSpec({ dshHome, maxRequestImages: value })).toThrow('maxRequestImages')
+      expect(() => resolveSpec({ dshHome, imageOffloadCountQuantum: value })).toThrow('imageOffloadCountQuantum')
+    },
+  )
+
+  it.each([
+    { config: {}, count: 51, offload: 10 },
+    { config: { maxRequestImages: 3, imageOffloadCountQuantum: 2 }, count: 4, offload: 2 },
+    { config: { maxRequestImages: 3 }, count: 3, offload: 0 },
+    { config: { maxRequestImages: 60 }, count: 51, offload: 0 },
+  ])('forwards image count configuration $config to direct and prepared calls', async ({ config, count, offload }) => {
+    const spec = resolveSpec({ dshHome: await home(), ...config })
+    const credentials = new FileCredentialStore(spec.credentialsPath)
+    await credentials.modify('openai-codex', async () => ({
+      type: 'oauth', access: 'access', refresh: 'refresh', expires: Date.now() + 3600_000, accountId: 'acct',
+    }))
+    const ctx = new Context()
+    const attachments = new RequestImageStore(ctx)
+    const adapter = new OpenAICodexAdapter(spec, async () => new Response(JSON.stringify({ models: [{
+      slug: 'gpt-image', visibility: 'list', input_modalities: ['text', 'image'],
+    }] })), undefined, () => attachments)
+    const transport = vi.spyOn(DynamicCodexProvider.prototype, 'streamSimple')
+      .mockImplementation(() => { throw new Error('mock provider transport') })
+    const options = {
+      provider: 'lingxi-openai-codex', model: 'gpt-image',
+      messages: Array.from({ length: count }, () => createUserMessage({
+        content: [{ type: 'image', attachment: {
+          attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`),
+          mediaType: 'image/png', bytes: 1, width: 1, height: 1,
+        } }],
+        source: { kind: 'test' },
+      })),
+    }
+    const drain = async (stream: AsyncIterable<unknown>) => { for await (const _chunk of stream) { /* drain */ } }
+    try {
+      const prepared = await adapter.prepareCall(options.provider, options.model)
+      expect(prepared.model.provider).toBe('lingxi-openai-codex')
+      for (const stream of [adapter.stream(options), prepared.stream(options)]) {
+        if (offload > 0) {
+          await expect(drain(stream)).rejects.toMatchObject({ code: 'IMAGE_OFFLOAD_REQUIRED', failure: { offloadImages: offload } })
+        } else {
+          await drain(stream)
+        }
+      }
+      expect(transport).toHaveBeenCalledTimes(offload > 0 ? 0 : 2)
+    } finally {
+      await adapter.dispose()
+      await ctx.fiber.dispose()
+    }
   })
 
   it('reports persisted OAuth state and enriches its dynamic model list', async () => {

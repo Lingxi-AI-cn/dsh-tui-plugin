@@ -25,7 +25,7 @@ kind: "package-bundle"
 把确切版本的 TUI 安装到已有且版本匹配的 DSH 所管理的 profile 中，再通过现有 `dsh` binary 启动该 profile：
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.14-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.15-rc.1
 dsh --profile tui
 ```
 
@@ -34,14 +34,14 @@ dsh --profile tui
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.14-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.15-rc.1
 ```
 
 Session 与凭据存储在 profile 目录之外，不会被此次迁移删除。对于用户自己编写的 profile patch，应审查后重新应用，而不要把整个旧 profile 目录原样复制回来。
 
 该包会在解析命令行和协商终端之前检查每个已声明的官方 Host peer。官方 `@deepseek-ai/dsh-agent-preset-registry` 拥有 preset 选择并校验插件贡献的定义；TUI 不会猜测相对于应用的 preset 路径。打包后的包要求 DSH package 版本完全一致，并拒绝从 `tui` profile 解析 Host package；版本不匹配时会打印已安装 DSH 版本、支持的 DSH 版本、TUI 版本、profile 和确切恢复命令。DSH 与 TUI 应作为经过测试的组合升级。
 
-发布 manifest 会保留精确的官方 Host peer 版本；仅第三方 pi-ai peer 遵循官方 provider 的 `^1.1.0` 范围。这些 peer 被标记为仅对 package-manager 解析可选，因为官方 launcher 会从隔离 profile 外部提供完整 Host 图。正常执行 `dsh plugin` 安装时，不再把这些外部 package 报为缺失，也不会在 `$DSH_HOME/profiles/tui` 内复制它们；startup 仍会校验外部路径、精确的官方 Host 版本及兼容的 pi-ai 版本。
+发布 manifest 会保留精确的官方 Host peer 版本；仅第三方 pi-ai peer 遵循官方 provider 的 `^1.3.0` 范围。这些 peer 被标记为仅对 package-manager 解析可选，因为官方 launcher 会从隔离 profile 外部提供完整 Host 图。正常执行 `dsh plugin` 安装时，不再把这些外部 package 报为缺失，也不会在 `$DSH_HOME/profiles/tui` 内复制它们；startup 仍会校验外部路径、精确的官方 Host 版本及兼容的 pi-ai 版本。
 
 公开 bundle 包含 [`@lingxi-ai-cn/dsh-llm-openai-codex`](../../llm/llm-openai-codex/README.zh.md)。provider 尚无凭据时，`/models` 会提供 ChatGPT 登录；登录后则列出该账户的模型目录。当前 Host 会通过官方 scoped credential-record owner 把 OAuth grant 存在 `llm-openai-codex/openai-codex`；`$DSH_HOME/oauth/openai-codex.json` 只保留给直接构造 adapter 与旧版 Host 使用。安装和升级不会代用户登录，也不会改写任一凭据存储。
 
@@ -61,9 +61,9 @@ TUI 使用与 Web 相同的动态 `ctx.agentPresets` roster 和耐久 Session id
 | Minimal | `minimal` | 使用官方固定提示词与持久化 `bash`；Host Schedule 还会为根 Agent 提供四个提醒工具。 |
 | Creator | `cordis` | 提供 Standard 的能力，并增加 runtime 检查、plugin 实验与 preset 创作指导。 |
 
-TUI 会把 Host 所有的 Web registry、DeepSeek 搜索 provider 与 HTTP 抓取 provider 保留在进程级，而由 preset 决定是否向模型暴露 `tool-web`。因此 Standard、PTC 与 Creator 都会提供官方搜索／抓取能力，同时不会把它泄漏到 Minimal。PTC preset 会保持 workflow worker 启用，但禁用重复的模型侧 `tool-workflow` 条目，使工作流执行仍可通过 Code Mode 使用，又不会向模型呈现两个相互竞争的入口。
+TUI 会把 Host 所有的 Web registry、DeepSeek 搜索 provider 与 HTTP 抓取 provider 保留在进程级，而由 preset 决定是否向模型暴露 `tool-web`。因此 Standard、PTC 与 Creator 都会提供官方搜索／抓取能力，同时不会把它泄漏到 Minimal。基础组合提供原生工具执行器；PTC preset 选择独立作用域的 PTC 执行器，并按官方 PTC preset 禁用工作流条目。TUI bundle 不再读取旧的 `DSH_TOOLS_MODE` 环境变量。
 
-`/mode` 与可操作 footer 会列出这四份声明，以及活动 Profile 组合中其他健康的插件声明式 preset。空白 Session 会通过官方 recompose transaction 原地切换，并且只在新组装提交后记录 `agent-preset/selected`。一旦存在 `turn/start`，选择另一种模式会打开现有的新 Session 确认；取消会保持当前 Agent、transcript、draft 和 footer 不变，确认则以所选 preset 创建新 Session，并让旧 Session 继续可恢复。`/new`、`/clear` 与 `/rewind` 会继承当前 Session 的实际 preset。`/presets` 增加 owner 提供的结构化组合条目和只读声明检查。Settings 可用时，它按观察到的修订号向 `agent-preset-registry.selectedDefault` 写入未来默认值；官方 registry 不提供复制、删除或打开源文件操作，因此隐藏这些控件。缺失或损坏的 preset 保持可见但不可选择。Schedule owner 会向所有模式的根 Agent 提供面向模型的 create/list/delete/update tool，`/schedules` 与 footer 则把其活动 projection 显示为只读终端 panel。
+`/mode` 与可操作 footer 会列出这四份声明，以及活动 Profile 组合中其他健康的插件声明式 preset。空白 Session 会通过官方 recompose transaction 原地切换，并且只在新组装提交后记录 `agent-preset/selected`。一旦存在 `turn/start`，选择另一种模式会打开现有的新 Session 确认；取消会保持当前 Agent、transcript、draft 和 footer 不变，确认则以所选 preset 创建新 Session，并让旧 Session 继续可恢复。`/new`、`/clear` 与 `/rewind` 会继承当前 Session 的实际 preset。`/presets` 增加 owner 提供的结构化组合条目和只读声明检查。Settings 可用时，它按观察到的修订号向 `agent-preset-registry.selectedDefault` 写入未来默认值；官方 registry 不提供复制、删除或打开源文件操作，因此隐藏这些控件。缺失或损坏的 preset 保持可见但不可选择。Schedule owner 会向所有模式的根 Agent 提供面向模型的 create/list/view/edit tool，`/schedules` 与 footer 则把其 Host 全局 catalog 显示为只读终端 panel。
 
 Ralph 现由官方可选 `@deepseek-ai/dsh-experimental-ralph-bundle` 提供。TUI 不再声明旧的禁用条目或 Host peer。显式配置 Ralph overlay 的用户须先迁移到官方可选 bundle，再启用该能力；TUI 不会自动启用实验能力。
 

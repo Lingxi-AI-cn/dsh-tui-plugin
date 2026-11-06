@@ -16,12 +16,12 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { runNativeCommand } from '@deepseek-ai/dsh-native-command'
 import { TextRetainer } from '@deepseek-ai/dsh-output-retention'
 import {
-  DEFAULT_PROFILE_BUNDLES,
   initProfile,
   readProfileManifest,
   resolveBundleDir,
   type ProfileManifest,
 } from '@deepseek-ai/dsh-app-boot'
+import { DEFAULT_PROFILE_BUNDLES } from '@deepseek-ai/dsh-official-bundles'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import * as yaml from 'js-yaml'
 import type {

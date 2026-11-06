@@ -5,11 +5,11 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { PROFILE_TEMPLATES, resolveProfileDir } from '@deepseek-ai/dsh-app-boot'
+import { resolveProfileDir } from '@deepseek-ai/dsh-app-boot'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type {} from '@lingxi-ai-cn/dsh-plugin-hub'
 import type {
-  InstalledPluginSnapshot, PluginAdvisorySummary, PluginChangePlan, PluginChangePlanId, PluginCurationSummary, PluginDetail,
+  InstalledPluginSnapshot, PluginAdvisorySummary, PluginChangePlan, PluginChangePlanId, PluginCurationSummary, PluginHubDetail,
   PluginCatalogSort, PluginCategory, PluginDiscoveryMetadataSource, PluginDiscoveryRepository, PluginDiscoveryRepositoryPage,
   PluginDiscoverySearchRequest, PluginHubProvider, PluginHubStatus, PluginId,
   PluginMaintenanceHandoff, PluginPackageKind,
@@ -140,7 +140,7 @@ export interface FixtureCatalog {
   /** Optional discovered repository rows shown by the separate discovery view. */
   readonly repositories?: readonly PluginDiscoveryRepository[]
   /** Optional full detail records keyed by opaque plugin id. */
-  readonly details?: Readonly<Record<string, PluginDetail>>
+  readonly details?: Readonly<Record<string, PluginHubDetail>>
 }
 
 /**
@@ -171,7 +171,7 @@ export function createFixturePluginHubProvider(catalog: FixtureCatalog): PluginH
       return Promise.resolve({ apiVersion: PLUGIN_HUB_API_VERSION, catalogRevision: catalog.revision ?? 1,
         items: Object.freeze(items.slice(0, limit)), ...(items.length > limit ? { nextCursor: 'fixture:repositories:next' } : {}) })
     },
-    plugin(pluginId: PluginId): Promise<PluginDetail> {
+    plugin(pluginId: PluginId): Promise<PluginHubDetail> {
       const detail = details.get(pluginId) ?? items.find(item => item.id === pluginId)
       if (detail === undefined) {
         return Promise.reject(new PluginHubError(`Plugin ${pluginId} was not found.`, 'PLUGIN_NOT_FOUND'))
@@ -212,7 +212,7 @@ class LocalRegistryProvider implements PluginHubProvider {
   private readonly cache = new Map<string, { readonly etag?: string; readonly value: unknown }>()
   private readonly lastPages = new Map<string, PluginSearchPage>()
   private lastPage: PluginSearchPage | undefined
-  private readonly details = new Map<string, PluginDetail>()
+  private readonly details = new Map<string, PluginHubDetail>()
 
   constructor(
     private readonly config: Config,
@@ -229,7 +229,7 @@ class LocalRegistryProvider implements PluginHubProvider {
       profileDir: config.profileDir ?? resolveProfileDir(config.profile ?? 'tui', home),
       dataDir: config.dataDir ?? join(home, 'plugin-hub'),
       installAnchor: INSTALL_ANCHOR,
-      initialBundles: PROFILE_TEMPLATES.tui?.bundles ?? ['@deepseek-ai/dsh-base', '@lingxi-ai-cn/dsh-tui'],
+      initialBundles: ['@deepseek-ai/dsh-base', '@lingxi-ai-cn/dsh-tui'],
       dshVersion: DSH_VERSION,
       trustedKeys: config.trustedKeys ?? [],
       maxArtifactBytes: config.maxArtifactBytes ?? DEFAULT_MAX_ARTIFACT_BYTES,
@@ -320,7 +320,7 @@ class LocalRegistryProvider implements PluginHubProvider {
     return parseDiscoveryPage(value)
   }
 
-  async plugin(pluginId: PluginId, signal?: AbortSignal): Promise<PluginDetail> {
+  async plugin(pluginId: PluginId, signal?: AbortSignal): Promise<PluginHubDetail> {
     const cached = this.details.get(pluginId)
     try {
       const value = await this.request(`/v1/plugins/${encodeURIComponent(pluginId)}`, undefined, signal)
@@ -591,7 +591,7 @@ function parseSnapshotPage(value: unknown): PluginSearchPage {
     items: Object.freeze(rawItems.map(parseSummary)) }
 }
 
-function parseDetail(value: unknown): PluginDetail {
+function parseDetail(value: unknown): PluginHubDetail {
   assertApiVersion(value)
   const raw = objectOrEmpty(value.data)
   const summary = parseSummary({ ...raw, verification: raw.verification ?? parseDetailVerification(raw) })
@@ -619,7 +619,7 @@ function parseDetail(value: unknown): PluginDetail {
   })
 }
 
-function parseOs(value: unknown): PluginDetail['os'] {
+function parseOs(value: unknown): PluginHubDetail['os'] {
   if (value === undefined || value === null) return undefined
   const raw = requiredObject(value, 'os')
   return Object.freeze({
@@ -908,12 +908,12 @@ function isDiscoveryScanStatus(value: unknown): value is PluginDiscoveryReposito
   return value === 'never' || value === 'queued' || value === 'running' || value === 'succeeded' || value === 'failed' || value === 'superseded'
 }
 function freezeSummary(summary: PluginSummary): PluginSummary { return Object.freeze(summary) }
-function freezeDetail(detail: PluginDetail): PluginDetail {
+function freezeDetail(detail: PluginHubDetail): PluginHubDetail {
   return Object.freeze({ ...detail, versions: Object.freeze([...detail.versions]) })
 }
 function isAbort(error: unknown): boolean { return error instanceof PluginHubError && error.code === 'OPERATION_ABORTED' }
 function isUnavailable(error: unknown): boolean { return error instanceof PluginHubError && error.code === 'REGISTRY_UNAVAILABLE' }
-function isPluginDetail(value: PluginSummary | PluginDetail): value is PluginDetail { return 'versions' in value }
+function isPluginDetail(value: PluginSummary | PluginHubDetail): value is PluginHubDetail { return 'versions' in value }
 
 function verifySnapshot(value: unknown, trustedKeys: ReadonlyMap<string, string>): void {
   assertApiVersion(value)

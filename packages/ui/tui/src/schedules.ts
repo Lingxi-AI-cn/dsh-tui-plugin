@@ -1,17 +1,20 @@
-/** Read-only terminal projection of the official Session Schedule owner. */
+/** Read-only terminal projection of the official Host-wide Schedule owner. */
 
-import type { ScheduleRecord } from './host.ts'
+import type { ScheduleCatalogEntry, ScheduleListResult } from './host.ts'
 import { terminalSafe } from './sanitize.ts'
 
-/** One active Schedule row, ordered by its next owner-supplied target. */
+/** One Schedule catalog row in owner-supplied page order. */
 export interface TuiScheduleRow {
-  readonly record: ScheduleRecord
+  readonly record: ScheduleCatalogEntry
   readonly id: string
+  readonly title: string
   readonly prompt: string
-  readonly kind: ScheduleRecord['kind']
+  readonly targetKind: ScheduleCatalogEntry['target']['kind']
+  readonly targetSessionId: string | undefined
+  readonly kind: ScheduleCatalogEntry['kind']
   readonly scheduledAt: string
   readonly targetMs: number
-  readonly state: 'scheduled' | 'overdue'
+  readonly state: 'scheduled' | 'overdue' | 'paused' | 'ended'
   readonly intervalSeconds: number | undefined
 }
 
@@ -20,6 +23,7 @@ export interface TuiScheduleSnapshot {
   readonly sourceState: 'ready' | 'unavailable' | 'error'
   readonly rows: readonly TuiScheduleRow[]
   readonly error: string | undefined
+  readonly page?: Pick<ScheduleListResult, 'shown' | 'total' | 'limit' | 'offset'>
 }
 
 /** Frozen initial state used before a compatible projection is observed. */
@@ -30,32 +34,36 @@ export const TUI_SCHEDULES_UNAVAILABLE: TuiScheduleSnapshot = Object.freeze({
 })
 
 /**
- * Project active Schedule records without interpreting or mutating their durable stream.
- * @param records - official `schedule` projection, or undefined when the owner is absent.
+ * Project one bounded Host-wide Schedule page without interpreting or mutating their durable stream.
+ * @param page - official `schedule` list result, or undefined when the owner is absent.
  * @param now - wall-clock decision point used only for the overdue label.
- * @returns bounded, terminal-safe rows in next-target order.
+ * @returns bounded, terminal-safe rows in owner order, with pagination disclosure.
  */
 export function collectTuiSchedules(
-  records: readonly ScheduleRecord[] | undefined,
+  page: ScheduleListResult | undefined,
   now = Date.now(),
 ): TuiScheduleSnapshot {
-  if (records === undefined) return TUI_SCHEDULES_UNAVAILABLE
+  if (page === undefined) return TUI_SCHEDULES_UNAVAILABLE
   try {
-    const rows = records.map((record): TuiScheduleRow => {
+    const rows = page.items.map((record): TuiScheduleRow => {
       const targetMs = Date.parse(record.scheduledAt)
       if (!Number.isFinite(targetMs)) throw new Error('Schedule owner returned an invalid target timestamp')
       return Object.freeze({
         record,
         id: terminalSafe(String(record.id)),
+        title: terminalSafe(record.title),
         prompt: terminalSafe(record.prompt),
+        targetKind: record.target.kind,
+        targetSessionId: record.target.kind === 'new' ? undefined : terminalSafe(record.target.sessionId),
         kind: record.kind,
         scheduledAt: terminalSafe(record.scheduledAt),
         targetMs,
-        state: targetMs <= now ? 'overdue' : 'scheduled',
+        state: record.status === 'active' ? (targetMs <= now ? 'overdue' : 'scheduled') : record.status,
         intervalSeconds: record.kind === 'every' ? record.everySeconds : undefined,
       })
-    }).sort((a, b) => a.targetMs - b.targetMs || a.id.localeCompare(b.id))
-    return Object.freeze({ sourceState: 'ready', rows: Object.freeze(rows), error: undefined })
+    })
+    return Object.freeze({ sourceState: 'ready', rows: Object.freeze(rows), error: undefined,
+      page: { shown: page.shown, total: page.total, limit: page.limit, offset: page.offset } })
   } catch (error) {
     return Object.freeze({
       sourceState: 'error',

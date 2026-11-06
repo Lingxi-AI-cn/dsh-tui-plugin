@@ -28,6 +28,7 @@ function root(ctx: Context, session = Session.create(SessionId('native-question'
   const pending: UserMessage[] = []
   return {
     id: session.id, session, options: {}, ctx, status: 'idle',
+    model: { current: () => undefined, select: vi.fn() },
     inbox: {
       nextTurn: [], nextStep: pending, clear() {}, append() {}, prepend() {},
       replace: () => false, remove: () => false, splice: () => [],

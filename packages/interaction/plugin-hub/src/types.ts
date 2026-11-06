@@ -241,7 +241,7 @@ export interface PluginDiscoveryRepositoryPage {
 }
 
 /** Full read-only plugin description used by the Detail panel. */
-export interface PluginDetail extends PluginSummary {
+export interface PluginHubDetail extends PluginSummary {
   readonly packagePath?: string | undefined
   readonly readme?: string | undefined
   readonly versions: readonly PluginVersionSummary[]
@@ -337,7 +337,7 @@ export interface PluginHubProvider {
   status(signal?: AbortSignal): Promise<PluginHubStatus>
   search(request: PluginSearchRequest, signal?: AbortSignal): Promise<PluginSearchPage>
   searchRepositories(request: PluginDiscoverySearchRequest, signal?: AbortSignal): Promise<PluginDiscoveryRepositoryPage>
-  plugin(pluginId: PluginId, signal?: AbortSignal): Promise<PluginDetail>
+  plugin(pluginId: PluginId, signal?: AbortSignal): Promise<PluginHubDetail>
   installed(signal?: AbortSignal): Promise<InstalledPluginSnapshot>
   planInstall(pluginId: PluginId, versionId: PluginVersionId, signal?: AbortSignal): Promise<PluginChangePlan>
   planRemove(packageName: string, signal?: AbortSignal): Promise<PluginChangePlan>

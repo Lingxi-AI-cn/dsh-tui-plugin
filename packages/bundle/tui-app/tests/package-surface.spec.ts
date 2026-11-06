@@ -5,6 +5,9 @@ import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { composeEntries, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
+import { Context } from '@deepseek-ai/cordis'
+import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import type { Config as PersonaConfig } from '@deepseek-ai/dsh-persona'
 
 const ROOT = new URL('../../../..', import.meta.url)
 const PACKAGE_DIRS = Object.freeze([
@@ -53,8 +56,33 @@ describe('post-install TUI package surface', () => {
   const manifests = PACKAGE_DIRS.map(directory => manifest(directory))
   const top = manifests[0]!
 
+  it('retains Schedule authorization in the Minimal complete persona', async () => {
+    const patches = loadOverlayPatches('TUI Minimal', new URL('../presets/minimal.patch.yml', import.meta.url).pathname)
+    const preset = patches.flatMap(patch => patch.insert ?? []).find(row => row.id === 'preset-minimal')
+    const config = preset?.config as { plugins: { name: string; config?: PersonaConfig }[] }
+    expect(config.plugins.some(row => row.name === '@deepseek-ai/dsh-tool-schedule')).toBe(true)
+    const persona = config.plugins.find(row => row.name === '@deepseek-ai/dsh-persona')?.config
+    expect(persona?.complete).toBe(true)
+    if (persona === undefined) throw new Error('Minimal persona is missing')
+    const instruction = "Only create or modify scheduled tasks at the user's explicit request; "
+      + 'prior explicit user authorization for the running scheduled task remains valid.'
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SystemPrompt)
+      ctx.systemPrompt.section({ name: 'tool:schedule', order: 100, text: instruction })
+      ctx.systemPrompt.section({
+        name: 'minimal-persona', order: 0, text: persona.prefix, complete: persona.complete === true,
+      })
+      const assembly = await ctx.systemPrompt.assemble()
+      expect(assembly.sections.some(section => section.name === 'tool:schedule')).toBe(false)
+      expect(renderPrompt(assembly)).toContain(instruction)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('publishes one same-version Lingxi package family without install hooks or source exports', () => {
-    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.14-rc.2']))
+    expect(new Set(manifests.map(entry => entry.version))).toEqual(new Set(['0.1.15-rc.1']))
     for (const entry of manifests) {
       expect(entry.name).toMatch(/^@lingxi-ai-cn\/dsh-/u)
       expect(entry.repository?.url).toBe(REPOSITORY)
@@ -92,6 +120,12 @@ describe('post-install TUI package surface', () => {
     expect(rows.map(row => (row.config as { id?: string } | undefined)?.id))
       .toEqual(['standard', 'ptc', 'minimal', 'cordis'])
     expect(top.peerDependencies).toHaveProperty('@deepseek-ai/dsh-agent-preset')
+    expect(top.peerDependencies).toHaveProperty('@deepseek-ai/dsh-tool-executor-ptc')
+    expect(top.peerDependencies).not.toHaveProperty('@deepseek-ai/dsh-agent-tool-presentation')
+    const ptc = rows.find(row => row.id === 'preset-ptc')?.config as { plugins?: unknown[] } | undefined
+    expect(ptc?.plugins).toEqual(expect.arrayContaining([
+      { id: 'tool-executor-ptc', name: '@deepseek-ai/dsh-tool-executor-ptc' },
+    ]))
     const base = loadOverlayPatches('TUI base', fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-base/cordis.patch.yml')))
     const composed = composeEntries([base, ...layers])
     expect(composed.filter(row => row.id?.startsWith('preset-')).map(row => row.id))
@@ -137,11 +171,11 @@ describe('post-install TUI package surface', () => {
     const patches = loadOverlayPatches('post-install package surface', new URL('../cordis.patch.yml', import.meta.url).pathname)
     const overrides = new Set(patches.filter(entry => entry.id !== undefined).map(entry => entry.id))
     expect(overrides).toEqual(new Set([
-      'system-prompt', 'hmr', 'tools',
+      'system-prompt', 'hmr',
       'tool-plugin-manager', 'tool-bash', 'tool-pwsh', 'tool-jobs', 'tool-fs', 'tool-fs-search',
       'skill-filesystem', 'tool-skill', 'tool-goal', 'command-goal',
       'plan-mode', 'compaction-basic', 'command-compact', 'tool-result-pruner',
-      'tool-subagent-control', 'tool-subagent-list-agents', 'tool-subagent',
+      'tool-subagent-control', 'tool-subagent',
       'tool-subagent-fork', 'workflow-ptc', 'tool-workflow',
       'agent-instructions', 'tool-todo', 'tool-web',
     ]))

@@ -52,6 +52,7 @@ export type { Context } from '@deepseek-ai/cordis'
 export type { Volatile }
 export { FsError } from '@deepseek-ai/dsh-fs'
 export type { FileSystem } from '@deepseek-ai/dsh-fs'
+export { NativeToolExecutor } from '@deepseek-ai/dsh-tool-executor-native'
 export { AttachmentError } from '@deepseek-ai/dsh-attachment'
 export type {
   EncodedImageAttachment, ImageAttachmentLimits, ImageAttachmentRef, ImageMediaType,
@@ -60,7 +61,7 @@ export { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 export { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 export { default as z } from '@deepseek-ai/schemastery'
 export {
-  assembleContextFor, installModelSelection,
+  assembleContextFor, installModelSelection, modelSelectionProjectionDefinition,
 } from '@deepseek-ai/dsh-agent'
 export type {
   Agent,
@@ -68,7 +69,7 @@ export type {
   AgentStatus,
   AssistantStreamFrame,
   ModelSelection,
-  ModelSelectionRef,
+  ModelSelectionProjectionState,
 } from '@deepseek-ai/dsh-agent'
 /** Preset metadata plus optional legacy source metadata, never required from the official registry. */
 export type AgentPreset = HostAgentPreset & { readonly trust?: 'system' | 'user'; readonly path?: string }
@@ -179,7 +180,7 @@ export type {
 export { deriveTurnTokenUsage } from '@deepseek-ai/dsh-token-meter/client'
 export type { TurnTokenUsage, TurnTokenUsageRoute } from '@deepseek-ai/dsh-token-meter/client'
 export type { SessionStatsProjection } from '@deepseek-ai/dsh-session-stats'
-export type { ScheduleRecord } from '@deepseek-ai/dsh-schedule/client'
+export type { ScheduleRecord, ScheduleCatalogEntry, ScheduleListResult } from '@deepseek-ai/dsh-schedule/client'
 export { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 export type { SubprocessHandle, SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 export type { ToolCallView, ToolDefinition, ToolResultView } from '@deepseek-ai/dsh-tools'

@@ -11,7 +11,10 @@
           - id: persona
             name: '@deepseek-ai/dsh-persona'
             config:
-              prefix: You are a helpful software engineer assistant.
+              prefix: |
+                You are a helpful software engineer assistant.
+
+                Only create or modify scheduled tasks at the user's explicit request; prior explicit user authorization for the running scheduled task remains valid.
               complete: true
               includeRuntimeContext: false
           - id: tool-schedule

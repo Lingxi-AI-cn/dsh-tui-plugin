@@ -226,6 +226,7 @@ export function tuiFooterItems(
   const schedules = sources.schedules
   if (schedules?.sourceState === 'ready' && schedules.rows.length > 0) {
     const overdue = schedules.rows.filter(row => row.state === 'overdue').length
+    const next = schedules.rows.find(row => row.record.status === 'active')
     items.push(item(
       'schedules',
       tuiMessage(locale, 'footer.label.schedules'),
@@ -234,12 +235,15 @@ export function tuiFooterItems(
         : String(schedules.rows.length),
       'schedules',
       [
-        tuiMessage(locale, 'footer.schedules.active', { count: schedules.rows.length }),
-        tuiMessage(locale, 'footer.schedules.overdue', { count: overdue }),
-        tuiMessage(locale, 'footer.schedules.next', {
-          prompt: schedules.rows[0]?.prompt ?? '',
-          time: schedules.rows[0]?.scheduledAt ?? '',
+        tuiMessage(locale, 'schedules.page', {
+          shown: schedules.page?.shown ?? schedules.rows.length,
+          total: schedules.page?.total ?? schedules.rows.length,
         }),
+        tuiMessage(locale, 'footer.schedules.overdue', { count: overdue }),
+        ...next === undefined ? [] : [tuiMessage(locale, 'footer.schedules.next', {
+          prompt: next.prompt,
+          time: next.scheduledAt,
+        })],
       ],
     ))
   }

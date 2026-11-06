@@ -1,12 +1,12 @@
 {
   "name": "@lingxi-ai-cn/dsh-tui-plugin-workspace",
-  "version": "0.1.14-rc.2",
+  "version": "0.1.15-rc.1",
   "private": true,
   "type": "module",
   "license": "MIT",
   "packageManager": "pnpm@11.7.0",
   "engines": {
-    "node": "^22.19.0 || >=24.0.0"
+    "node": ">=24.9.0"
   },
   "scripts": {
     "build": "tsc -b && tsdown",
@@ -24,14 +24,14 @@
   },
   "devDependencies": {
     "semver": "^7.8.5",
-    "@deepseek-ai/cordis-plugin-group": "1.0.5",
-    "@deepseek-ai/dsh-base": "0.2.1-rc.2",
+    "@deepseek-ai/cordis-plugin-group": "1.1.0",
+    "@deepseek-ai/dsh-base": "0.2.2-rc.1",
     "@lingxi-ai-cn/dsh-tui": "workspace:*",
     "@types/node": "^22.20.0",
     "tsdown": "^0.22.2",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8",
-    "@deepseek-ai/dsh": "0.2.1-rc.2"
+    "@deepseek-ai/dsh": "0.2.2-rc.1"
   }
 }

@@ -51,8 +51,8 @@ function foldLegacySource(state: TuiLegacySourcePrompt, event: SessionEvent): Tu
  * Register terminal guidance and the current checkout context, preserving admitted source paragraphs.
  * @param ctx - owning TUI bundle context with the projection registry.
  */
-export function apply(ctx: Context): void {
-  ctx.sessionProjections.register({
+export async function apply(ctx: Context): Promise<void> {
+  const legacyPrompt = await ctx.sessionProjections.register({
     key: LEGACY_PROMPT,
     stateVersion: 1,
     stateSchema: tuiLegacySourcePromptSchema,
@@ -67,7 +67,7 @@ export function apply(ctx: Context): void {
       text: ({ agent }) => {
         if (agent === undefined) return SOURCE_PROMPT
         // This plugin owns the required registry's unit for every Session.
-        const admitted = ctx.sessionProjections.stateOf(agent.session, LEGACY_PROMPT) as TuiLegacySourcePrompt
+        const admitted = legacyPrompt.stateOf(agent.session)
         return admitted.source ?? SOURCE_PROMPT
       },
     })

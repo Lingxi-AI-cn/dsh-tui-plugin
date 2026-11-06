@@ -8,8 +8,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.14-rc.2'
-const DSH_VERSION = '0.2.1-rc.2'
+const TUI_VERSION = '0.1.15-rc.1'
+const DSH_VERSION = '0.2.2-rc.1'
 const PACKAGE_DIRS = Object.freeze([
   'packages/boot/profile-plugin-manager',
   'packages/llm/llm-openai-codex',
@@ -45,10 +45,10 @@ function assertExactSpecs(manifest: PackedManifest): void {
       : name.startsWith('@deepseek-ai/dsh-')
         ? DSH_VERSION
         : name === '@earendil-works/pi-ai'
-          ? '^1.1.0'
+          ? '^1.3.0'
           : undefined
     if (name === '@earendil-works/pi-ai'
-      && (!semver.satisfies('1.1.0', spec) || !semver.satisfies('1.3.0', spec) || semver.satisfies('2.0.0', spec))) {
+      && (semver.satisfies('1.2.0', spec) || !semver.satisfies('1.3.0', spec) || semver.satisfies('2.0.0', spec))) {
       fail(`${manifest.name} must preserve the verified pi-ai 1.x compatibility boundary`)
     }
     if (expected !== undefined && spec !== expected) {

@@ -6,15 +6,15 @@ import {
 } from './host.ts'
 import { terminalSafe } from './sanitize.ts'
 
-/** One completed human turn that can seed a rewound child Session. */
+/** One completed human turn that can seed an independent rewound Session. */
 export interface TuiRewindCandidate {
   /** Append-origin human `user/message` seq used as the fork anchor. */
   readonly eventSeq: number
   /** Sanitized prompt text shown in the selector and confirmation. */
   readonly promptText: string
-  /** Durable source events retained in the child seed. */
+  /** Durable source events retained in the fork seed. */
   readonly retainedEventCount: number
-  /** Later durable source events that remain only in the parent. */
+  /** Later durable source events that remain only in the source. */
   readonly hiddenEventCount: number
 }
 
@@ -22,13 +22,13 @@ export interface TuiRewindCandidate {
 export interface TuiRewindDialogSnapshot {
   /** Monotonic identity for one dialog activation. */
   readonly generation: number
-  /** Command-audit settlement, selection, or child preparation phase. */
+  /** Command-audit settlement, selection, or fork preparation phase. */
   readonly phase: 'opening' | 'browsing' | 'rewinding'
-  /** Source Session whose durable events seed the child. */
+  /** Source Session whose durable events seed the independent fork. */
   readonly currentSessionId: SessionId
   /** Newest-first completed human boundaries, present after audit settlement. */
   readonly candidates?: readonly TuiRewindCandidate[]
-  /** Candidate currently preparing a child Agent. */
+  /** Candidate currently preparing an independent Agent. */
   readonly rewindingSeq?: number
   /** Latest preparation or switch failure while selection remains open. */
   readonly error?: string
@@ -39,7 +39,7 @@ export interface TuiRewindDialogSnapshot {
  * Open turns and model-only replacements are excluded; results are newest first.
  *
  * @param events - Complete current Session log after the rewind command audit settles.
- * @returns Detached candidates with retained and parent-only event counts.
+ * @returns Detached candidates with retained and source-only event counts.
  */
 export function tuiRewindCandidates(events: readonly SessionEvent[]): TuiRewindCandidate[] {
   const candidates: TuiRewindCandidate[] = []

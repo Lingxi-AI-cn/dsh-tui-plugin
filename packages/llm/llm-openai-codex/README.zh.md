@@ -23,7 +23,7 @@ kind: "package-reference"
 <a id="configuration"></a>
 ## 配置
 
-`0.1.14-rc.2` 候选版本精确适配官方 DSH `0.2.1-rc.2`，并遵循官方 provider 的 pi-ai `^1.1.0` peer 范围。`DynamicCodexProvider` 将已转换的 `TranscriptContext` 传给底层 provider，replay 规范化仍由官方 pi-ai adapter 负责；动态模型目录不修改转录数据。
+本适配器适配官方 DSH `0.2.2-rc.1`，并遵循官方 provider 的 pi-ai `^1.3.0` peer 范围。`DynamicCodexProvider` 将已转换的 `TranscriptContext` 传给底层 provider，replay 规范化仍由官方 pi-ai adapter 负责；动态模型目录不修改转录数据。
 
 ```yaml
 - id: llm-openai-codex
@@ -35,9 +35,13 @@ kind: "package-reference"
     clientVersion: '0.146.0'
     streamIdleTimeoutMs: 300000
     maxRequestImageBytes: 20971520
+    maxRequestImages: 50
+    imageOffloadCountQuantum: 10
 ```
 
 常规 Host 组合会通过官方 scoped credential-record owner，把 OAuth grant 存在 `llm-openai-codex/openai-codex`；只有衍生的 last-good 目录默认位于 `$DSH_HOME/model-catalogs/openai-codex.json`。`credentialsPath` 只保留给直接构造 adapter、测试与旧版 Host 使用的 legacy file-store fallback；存在 `ctx.credentials` 时，它不是生产凭据 owner。`clientVersion` 是固定的兼容性 header 与查询值，不是模型白名单；部署可在不重新构建的情况下覆盖它。`streamIdleTimeoutMs` 限制单次 provider 读取的停滞时间，`maxRequestImageBytes` 限制经官方 pi-ai adapter 传递的 Base64 图片历史大小。
+
+`maxRequestImages` 限制保留的图片出现次数，重复引用也计入。`imageOffloadCountQuantum` 将数量超限时的卸载数量向上取整到指定正整数步长，且不得超过图片数量上限；省略时默认为 `min(10, maxRequestImages)`。这两个配置值都必须是正安全整数。直接调用和预备调用均由官方 adapter 负责图片计数与卸载。
 
 插件会在每次请求时解析当前 Host 的耐久附件服务，并将其传给 `PiAiAdapter`。`imageRequestTarget()` 在转换增强路由后复用同一官方图片投影，使截图坐标与请求尺寸保持一致。支持图片的 Codex route 因此可以读取 Session log 中确切 `ImageAttachmentRef` 所指向的字节；服务缺失或对象不可用时会在 provider I/O 前失败，而不会静默丢弃图片内容。
 

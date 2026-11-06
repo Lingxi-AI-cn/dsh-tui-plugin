@@ -1,12 +1,13 @@
 /** TUI app flag parsing through the ordinary launcher command-line provider. */
 
-import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import { internals, provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { createUserMessage, LlmAdapter, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk, type SystemPromptUpdate } from '@deepseek-ai/dsh-llm'
 import { SessionId, type Session } from '@deepseek-ai/dsh-session'
@@ -205,7 +206,48 @@ describe('TUI bundle plugin', () => {
     expect(disposed.sections.some(section => section.name === 'harness:source' || section.name === 'app:tui-surface')).toBe(false)
     expect(disposed.contexts).toEqual([])
     const session = ctx.sessions.create(SessionId('disposed'))
-    expect(ctx.sessionProjections.stateOf(session, 'tuiHarnessSourceLegacyPrompt')).toBeUndefined()
+    expect(ctx.sessionProjections.checkpoint(session)).not.toHaveProperty('tuiHarnessSourceLegacyPrompt')
+  })
+
+  it.each([false, true])('publishes consumers only after projection readiness (cancelled: %s)', async (cancelled) => {
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    await mountAgentLoopTestDependencies(ctx, { systemPrompt: { personaPrefix: '' } })
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    onTestFinished(() => { release() })
+    // oxlint-disable-next-line typescript/unbound-method -- The delayed wrapper calls this method with its original scoped receiver.
+    const register = SessionProjectionRegistry.prototype.register
+    const registration = vi.spyOn(SessionProjectionRegistry.prototype, 'register')
+      .mockImplementation(async function (this: SessionProjectionRegistry, definition) {
+        if (definition.key === 'tuiHarnessSourceLegacyPrompt') await gate
+        return register.call(this, definition)
+      })
+    onTestFinished(() => { registration.mockRestore() })
+    const fiber = ctx.plugin(tuiApp)
+    await vi.waitFor(() => { expect(registration).toHaveBeenCalled() })
+    const pending = await ctx.systemPrompt.assemble()
+    expect(pending.sections.some(section => section.name === 'harness:source' || section.name === 'app:tui-surface')).toBe(false)
+    expect(pending.contexts).toEqual([])
+    const disposal = cancelled ? fiber.dispose() : undefined
+    release()
+    await fiber
+    await disposal
+    if (cancelled) {
+      const stopped = await ctx.systemPrompt.assemble()
+      expect(stopped.sections.some(section => section.name === 'harness:source' || section.name === 'app:tui-surface')).toBe(false)
+      expect(stopped.contexts).toEqual([])
+      const session = ctx.sessions.create(SessionId('cancelled-projection'))
+      expect(ctx.sessionProjections.checkpoint(session)).not.toHaveProperty('tuiHarnessSourceLegacyPrompt')
+      return
+    }
+    const ready = await ctx.systemPrompt.assemble()
+    expect(ready.sections.find(section => section.name === 'harness:source')?.text).toBe(SOURCE_PROMPT)
+    const session = ctx.sessions.create(SessionId('ready-projection'))
+    expect(ctx.sessionProjections.checkpoint(session)).toHaveProperty('tuiHarnessSourceLegacyPrompt')
+    await fiber.dispose()
+    const afterDisposal = ctx.sessions.create(SessionId('after-projection-disposal'))
+    expect(ctx.sessionProjections.checkpoint(afterDisposal)).not.toHaveProperty('tuiHarnessSourceLegacyPrompt')
   })
 
   it.each([

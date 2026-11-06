@@ -12,10 +12,6 @@
 - id: hmr
   disabled: true
 
-- id: tools
-  config:
-    mode: !!js process.env.DSH_TOOLS_MODE
-
 # Keep this ownership list aligned with the official Web preset surface. These
 # rows are Agent-plane consumers in dsh-base; leaving even one enabled leaks a
 # global tool or prompt behavior into Minimal and can collide with a preset's
@@ -63,9 +59,6 @@
   disabled: true
 
 - id: tool-subagent-control
-  disabled: true
-
-- id: tool-subagent-list-agents
   disabled: true
 
 - id: tool-subagent
@@ -126,8 +119,8 @@
     - id: session-controller
       name: '@deepseek-ai/dsh-api-session-controller'
 
-    # The native status row and /schedules panel consume this owner's active
-    # projection. Creation, deletion, persistence, and dispatch remain owned
+    # The native status row and /schedules panel consume this owner's Host-wide
+    # catalog. Creation, deletion, persistence, and dispatch remain owned
     # by the Schedule package and its model-facing tools.
     - id: schedule
       name: '@deepseek-ai/dsh-schedule'

@@ -30,6 +30,8 @@ import {
   formatFileMention,
   assembleContextFor,
   installModelSelection,
+  modelSelectionProjectionDefinition,
+  NativeToolExecutor,
   JobId,
   MessageId,
   resolveSessionForkAnchor,
@@ -61,7 +63,7 @@ import {
   type LlmAuthenticationInteraction,
   type LlmAuthenticationPrompt,
   type ModelSelection,
-  type ModelSelectionRef,
+  type ModelSelectionProjectionState,
   type PermissionSelect,
   type SessionPreviewLine,
   type SessionEvent,
@@ -341,7 +343,7 @@ interface RuntimeDisposers {
 
 interface PreparedTuiAgent {
   handle: AgentHandle
-  selection: ModelSelectionRef
+  selection: Agent['model']
   selectedModel: ModelSelection
   preset: AgentPreset
   legacyPresetMigrated: boolean
@@ -412,7 +414,6 @@ type PrepareTuiAgentRequest =
   }
   | {
     kind: 'rewind'
-    parentSession: SessionId
     cwd: string
     selection: ModelSelection
     seed: readonly SessionEvent[]
@@ -477,7 +478,7 @@ class TuiController {
   private requestedExit = 0
   private closing: Promise<void> | undefined
   private ownerDisposed = false
-  private selection: ModelSelectionRef | undefined
+  private selection: Agent['model'] | undefined
   private activeCommand: ActiveOperation | undefined
   private startupGuidanceRefresh: ActiveOperation | undefined
   private exitAfterCommand: Agent | undefined
@@ -1106,7 +1107,6 @@ class TuiController {
       model: resolvedDefault.model,
       ...resolvedDefault.reasoningEffort === undefined ? {} : { reasoningEffort: resolvedDefault.reasoningEffort },
     }
-    const selected: ModelSelectionRef = { current: defaultSelection, assembled: undefined }
     let mountedPreset: AgentPreset | undefined
     const migration = { legacyPreset: false }
     const setup = async (agentCtx: Context, unpublishedAgent: Agent): Promise<void> => {
@@ -1121,26 +1121,21 @@ class TuiController {
         events: session.snapshotEvents(),
       })
       if (presetId === undefined) throw new Error('TUI Agent setup has no resolved Agent preset')
-      const logged = session.requestHeader()?.config
-      if (logged !== undefined) {
-        selected.current = {
-          provider: logged.provider,
-          model: logged.model,
-          ...logged.reasoningEffort === undefined ? {} : { reasoningEffort: logged.reasoningEffort },
-        }
-      } else if (request.kind === 'resume') {
+      if (request.kind === 'resume' && session.requestHeader() === undefined
+        // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
+        && !session.snapshotEvents().some(event => event.type === 'model/selection')) {
         // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
         const route = resumeRoute(session.snapshotEvents())
-        if (route !== undefined) selected.current = route
+        if (route !== undefined) unpublishedAgent.model.select(route)
       }
-      installModelSelection(agentCtx, selected)
+      installModelSelection(agentCtx)
       mountedPreset = await presets.mount(agentCtx, presetId)
     }
     let handle: AgentHandle
     if (request.kind === 'resume') {
       handle = await agents.resume({
         resumeSessionId: request.sessionId,
-        agentOptions: { provider: defaultSelection.provider, model: defaultSelection.model },
+        agentOptions: defaultSelection,
         setup,
         ...signal === undefined ? {} : { signal },
       })
@@ -1155,13 +1150,12 @@ class TuiController {
             : {
               cwd: request.cwd,
               agentPreset: resolvedPreset.id,
-              parentSession: request.parentSession,
               isSeeded: true,
             },
         ...request.kind === 'rewind'
           ? { seed: request.seed, inheritedEventCount: SessionLogOffset(request.seed.length) }
           : {},
-        agentOptions: { provider: defaultSelection.provider, model: defaultSelection.model },
+        agentOptions: defaultSelection,
         setup,
         ...signal === undefined ? {} : { signal },
       }, request.kind === 'fresh' ? request.source : request.kind === 'rewind' ? 'rewind' : 'startup'))
@@ -1175,8 +1169,8 @@ class TuiController {
     }
     return {
       handle,
-      selection: selected,
-      selectedModel: selected.current ?? defaultSelection,
+      selection: handle.agent.model,
+      selectedModel: handle.agent.model.current() ?? defaultSelection,
       preset: mountedPreset,
       legacyPresetMigrated: migration.legacyPreset,
     }
@@ -2885,14 +2879,14 @@ class TuiController {
     const provider = subagents.list().find(candidate => candidate === 'fork')
       ?? subagents.list().find(candidate => candidate === 'spawn')
     if (provider === undefined) return { kind: 'error', text: tuiMessage(this.locale, 'btw.unavailable') }
-    const selection = this.selection?.current ?? this.modelSelection.getSnapshot()
+    const selection = this.selection?.current() ?? this.modelSelection.getSnapshot()
     const childId = SessionId(randomUUID())
     const persona = this.locale === 'zh'
       ? '只回答用户的临时侧问。不要调用工具，不要提出后续任务，给出简洁、独立的回答。'
       : 'Answer only the user\'s side question. Use no tools, create no follow-up work, and give a concise standalone answer.'
     const disposeSetup = this.ctx.on('agent/created', ({ agent }) => {
       if (agent.id !== childId) return
-      agent.ctx.tools.presentAs('native')
+      agent.ctx.tools.setExecutor(new NativeToolExecutor(agent.ctx))
       agent.ctx.tools.restrict({ allow: [] })
       agent.ctx.tools.guard(() => persona)
       // Restrictions retain child-owned tools such as its delegation entrypoint.
@@ -3144,7 +3138,7 @@ class TuiController {
           signal: invocation.signal,
         })
       invocation.signal.throwIfAborted()
-      const selection = this.selection?.current ?? this.modelSelection.getSnapshot()
+      const selection = this.selection?.current() ?? this.modelSelection.getSnapshot()
       const permission = this.permissions.getSnapshot()?.currentValue
       this.loadedContext.set(projectTuiLoadedContext({
         sections: assembly.sections.map(section => section.name),
@@ -3665,7 +3659,7 @@ class TuiController {
     // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
     const sourceEvents = detached?.events ?? agent.session.snapshotEvents()
     const cwd = detached?.cwd ?? agent.session.header.cwd
-    const selectedModel = detached?.selection ?? this.selection?.current ?? this.modelSelection.getSnapshot()
+    const selectedModel = detached?.selection ?? this.selection?.current() ?? this.modelSelection.getSnapshot()
     const preset = detached?.preset ?? resolveSessionPreset({
       header: agent.session.header,
       // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
@@ -3704,7 +3698,7 @@ class TuiController {
       rewindingSeq: current.eventSeq,
     })
     const completion = this.rewindAgent(
-      agent, sourceId, sourceEvents, cwd, selectedModel, preset, anchor.seedLength, controller.signal,
+      agent, sourceEvents, cwd, selectedModel, preset, anchor.seedLength, controller.signal,
     ).catch((error: unknown) => {
       if (controller.signal.aborted || this.isClosing()) return
       const latest = this.rewindDialog.getSnapshot()
@@ -3726,7 +3720,6 @@ class TuiController {
 
   private async rewindAgent(
     oldAgent: Agent,
-    sourceSessionId: SessionId,
     sourceEvents: readonly SessionEvent[],
     cwd: string,
     selectedModel: ModelSelection,
@@ -3740,7 +3733,6 @@ class TuiController {
     const seed = sourceEvents.slice(0, seedLength)
     const prepared = await this.prepareAgent({
       kind: 'rewind',
-      parentSession: sourceSessionId,
       cwd,
       selection: selectedModel,
       seed,
@@ -4074,7 +4066,7 @@ class TuiController {
     }
     let snapshot: TuiScheduleSnapshot
     try {
-      snapshot = collectTuiSchedules(await owner.list({ sessionId: agent.session.id }))
+      snapshot = collectTuiSchedules(await owner.list())
     } catch (error: unknown) {
       snapshot = {
         sourceState: 'error', rows: [],
@@ -4415,7 +4407,7 @@ class TuiController {
     if (cwd === undefined) throw new Error(tuiMessage(this.locale, 'session.error.workspace'))
     const preset = resolveSessionPreset({ header: source.session, events: source.events })
     if (preset === undefined) throw new Error(tuiMessage(this.locale, 'rewind.error.preset'))
-    const fallback = this.selection?.current ?? this.modelSelection.getSnapshot()
+    const fallback = this.selection?.current() ?? this.modelSelection.getSnapshot()
     const selection = sessionForkSelection(source.events, fallback)
     if (selection === undefined) throw new Error(tuiMessage(this.locale, 'session.error.model'))
     if (!this.ctx.llm.listProviders().some(provider => provider.id === selection.provider)) {
@@ -4839,7 +4831,7 @@ class TuiController {
       return
     }
     const cwd = dialog.workspaceLabel
-    const selectedModel = this.selection?.current ?? this.modelSelection.getSnapshot()
+    const selectedModel = this.selection?.current() ?? this.modelSelection.getSnapshot()
     if (selectedModel === undefined) {
       this.freshSessionDialog.set({ ...dialog, error: tuiMessage(this.locale, 'session.error.model') })
       return
@@ -5270,7 +5262,7 @@ class TuiController {
         if (this.selection === undefined) throw new Error('TUI model selection is unavailable before Agent setup')
         await this.ctx.get('settings')?.update(TUI_SETTINGS_NAMESPACE, { defaultModel: selected })
         invocation.signal.throwIfAborted()
-        this.selection.current = selected
+        this.selection.select(selected)
         this.modelSelection.set(selected)
         this.scheduleStartupGuidanceRefresh(selected)
         return { kind: 'success', text: tuiMessage(this.locale, 'models.selected', { model: chosen.label }) }
@@ -5610,19 +5602,20 @@ function resumeRoute(events: readonly SessionEvent[]): { provider: string; model
     : undefined
 }
 
-function sessionForkSelection(
+/**
+ * Read the next model choice through the official selection fold before legacy fallbacks.
+ * @param events - durable source Session events in order.
+ * @param fallback - current TUI selection when the source records no route.
+ * @returns the pending or last-used choice, or a legacy fallback.
+ */
+export function sessionForkSelection(
   events: readonly SessionEvent[],
   fallback: ModelSelection | undefined,
 ): ModelSelection | undefined {
-  const header = events.findLast(event => event.type === 'request/header')
-  if (header?.type === 'request/header') {
-    const config = header.data.header.config
-    return {
-      provider: config.provider,
-      model: config.model,
-      ...config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort },
-    }
-  }
+  let state: ModelSelectionProjectionState = { lastUsed: null, pending: null }
+  for (const event of events) state = modelSelectionProjectionDefinition.apply(state, event)
+  const selection = modelSelectionProjectionDefinition.wire.view(state).next
+  if (selection !== null) return selection
   const route = resumeRoute(events)
   return route ?? fallback
 }

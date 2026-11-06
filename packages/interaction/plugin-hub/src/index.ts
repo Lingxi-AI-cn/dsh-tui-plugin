@@ -2,7 +2,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
-  InstalledPluginSnapshot, PluginChangePlan, PluginChangePlanId, PluginDetail,
+  InstalledPluginSnapshot, PluginChangePlan, PluginChangePlanId, PluginHubDetail,
   PluginDiscoveryRepositoryPage, PluginDiscoverySearchRequest, PluginHubProgress, PluginHubProvider, PluginHubStatus, PluginId,
   PluginMaintenanceHandoff, PluginSearchPage, PluginSearchRequest,
   PluginTransactionId, PluginVersionId, StagedPluginTransaction,
@@ -96,7 +96,7 @@ export class PluginHubRuntime extends Service {
    * @param signal - optional caller cancellation signal.
    * @returns one provider detail record.
    */
-  async plugin(pluginId: PluginId, signal?: AbortSignal): Promise<PluginDetail> {
+  async plugin(pluginId: PluginId, signal?: AbortSignal): Promise<PluginHubDetail> {
     return this.provider().plugin(pluginId, signal)
   }
 

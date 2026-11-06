@@ -2,7 +2,7 @@
 
 import type {
   InstalledPluginSnapshot, PluginAdvisorySummary, PluginCatalogSort, PluginChangePlan,
-  PluginCategory, PluginDetail, PluginDiscoveryRepository, PluginDiscoveryRepositoryPage,
+  PluginCategory, PluginHubDetail, PluginDiscoveryRepository, PluginDiscoveryRepositoryPage,
   PluginHubProgress, PluginHubStatus, PluginSearchPage, PluginVerification,
 } from '@lingxi-ai-cn/dsh-plugin-hub'
 import { PluginHubError } from '@lingxi-ai-cn/dsh-plugin-hub'
@@ -35,7 +35,7 @@ export interface TuiPluginHubDialogSnapshot {
   readonly discoveryPage?: PluginDiscoveryRepositoryPage | undefined
   readonly discoveryDetail?: PluginDiscoveryRepository | undefined
   readonly installed?: InstalledPluginSnapshot | undefined
-  readonly detail?: PluginDetail | undefined
+  readonly detail?: PluginHubDetail | undefined
   readonly plan?: PluginChangePlan | undefined
   readonly status?: PluginHubStatus | undefined
   readonly progress?: PluginHubProgress | undefined
@@ -528,7 +528,7 @@ export function tuiPluginHubCardLayout(
  */
 export function tuiPluginHubPlanLines(
   plan: PluginChangePlan | undefined,
-  detail: PluginDetail | undefined,
+  detail: PluginHubDetail | undefined,
   columns: number,
   locale: TuiLocale = 'en',
 ): readonly TuiPluginHubDetailLine[] {
@@ -594,7 +594,7 @@ export function tuiPluginHubPlanLines(
  * @returns bounded sanitized physical lines.
  */
 export function tuiPluginHubDetailLines(
-  detail: PluginDetail | undefined,
+  detail: PluginHubDetail | undefined,
   columns: number,
   now = Date.now(),
   locale: TuiLocale = 'en',

@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-plugin-hub",
   "description": "Provider-neutral Plugin Hub catalog and profile transaction capability for native TUI consumers",
-  "version": "0.1.14-rc.2",
+  "version": "0.1.15-rc.1",
   "publishConfig": {
     "access": "public"
   },
@@ -26,8 +26,8 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/dsh-brand": "0.2.1-rc.2",
-    "@deepseek-ai/cordis": "4.0.5"
+    "@deepseek-ai/dsh-brand": "0.2.2-rc.1",
+    "@deepseek-ai/cordis": "4.1.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-brand": {
@@ -38,10 +38,10 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-brand": "0.2.1-rc.2",
-    "@deepseek-ai/cordis": "4.0.5"
+    "@deepseek-ai/dsh-brand": "0.2.2-rc.1",
+    "@deepseek-ai/cordis": "4.1.0"
   },
   "engines": {
-    "dsh": "0.2.1-rc.2"
+    "dsh": "0.2.2-rc.1"
   }
 }

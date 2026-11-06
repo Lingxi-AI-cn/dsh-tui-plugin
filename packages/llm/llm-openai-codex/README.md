@@ -22,7 +22,7 @@ Provider-owned ChatGPT OAuth and dynamic account model discovery for the `lingxi
 
 ## Configuration
 
-The `0.1.14-rc.2` candidate targets official DSH `0.2.1-rc.2` exactly and follows the official provider's pi-ai `^1.1.0` peer range. `DynamicCodexProvider` forwards the already-converted `TranscriptContext` to the underlying provider so replay normalization stays with the official pi-ai adapter; its dynamic catalog changes no transcript data.
+This adapter targets official DSH `0.2.2-rc.1` and follows the official provider's pi-ai `^1.3.0` peer range. `DynamicCodexProvider` forwards the already-converted `TranscriptContext` to the underlying provider so replay normalization stays with the official pi-ai adapter; its dynamic catalog changes no transcript data.
 
 ```yaml
 - id: llm-openai-codex
@@ -34,9 +34,13 @@ The `0.1.14-rc.2` candidate targets official DSH `0.2.1-rc.2` exactly and follow
     clientVersion: '0.146.0'
     streamIdleTimeoutMs: 300000
     maxRequestImageBytes: 20971520
+    maxRequestImages: 50
+    imageOffloadCountQuantum: 10
 ```
 
 The normal Host composition stores the OAuth grant through the official scoped credential-record owner at `llm-openai-codex/openai-codex`; only the derivative last-good catalog defaults to `$DSH_HOME/model-catalogs/openai-codex.json`. `credentialsPath` retains the legacy file-store fallback used by direct adapter construction, tests, and older Hosts, but it is not the production credential owner when `ctx.credentials` is available. `clientVersion` is a pinned compatibility header and query value, not a model allowlist; deployments can override it without rebuilding. `streamIdleTimeoutMs` bounds one stalled provider read, while `maxRequestImageBytes` bounds encoded image history passed through the official pi-ai adapter.
+
+`maxRequestImages` limits retained image occurrences, including repeated references. `imageOffloadCountQuantum` rounds count-overflow offloading to a positive step no greater than that limit; when omitted it defaults to `min(10, maxRequestImages)`. Both values must be positive safe integers. Direct and prepared calls delegate image counting and offloading to the official adapter.
 
 The plugin resolves the active Host's durable attachment service at request time and passes it to `PiAiAdapter`. Its `imageRequestTarget()` uses the same official image projection after translating the enhanced route, so screenshot coordinates and request sizing agree. Image-capable Codex routes can therefore read the exact `ImageAttachmentRef` bytes retained by the Session log; a missing service or unavailable object fails before provider I/O instead of silently dropping image content.
 

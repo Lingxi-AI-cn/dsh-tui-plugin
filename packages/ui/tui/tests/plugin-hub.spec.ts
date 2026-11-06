@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import stringWidth from 'string-width'
 import {
   PluginChangePlanId, PluginId, PluginVersionId,
-  type InstalledPluginSnapshot, type PluginChangePlan, type PluginDetail,
+  type InstalledPluginSnapshot, type PluginChangePlan, type PluginHubDetail,
   type PluginDiscoveryRepositoryPage, type PluginSearchPage,
 } from '@lingxi-ai-cn/dsh-plugin-hub'
 import {
@@ -258,7 +258,7 @@ describe('Plugin Hub TUI projection', () => {
   })
 
   it('neutralizes README terminal controls before rendering detail', () => {
-    const detail: PluginDetail = { ...summary, versions: [summary.latestVersion], readme: 'safe\u001b]8;;https://bad\u0007link' }
+    const detail: PluginHubDetail = { ...summary, versions: [summary.latestVersion], readme: 'safe\u001b]8;;https://bad\u0007link' }
     const text = physicalText(tuiPluginHubDetailLines(detail, 80))
     expect(text).not.toContain('\u001b')
     expect(text).not.toContain('\u0007')
@@ -266,7 +266,7 @@ describe('Plugin Hub TUI projection', () => {
   })
 
   it('projects README Markdown without raw HTML, link targets, or image payloads', () => {
-    const detail: PluginDetail = {
+    const detail: PluginHubDetail = {
       ...summary,
       versions: [summary.latestVersion],
       readme: [
@@ -294,7 +294,7 @@ describe('Plugin Hub TUI projection', () => {
   })
 
   it('projects detail sections, registry metadata, and advisory tones in priority order', () => {
-    const detail: PluginDetail = {
+    const detail: PluginHubDetail = {
       ...summary,
       stars: 60,
       updatedAt: '2026-08-18T00:00:00.000Z',
@@ -336,7 +336,7 @@ describe('Plugin Hub TUI projection', () => {
   })
 
   it('keeps Versions before a long README and marks the README truncation', () => {
-    const detail: PluginDetail = {
+    const detail: PluginHubDetail = {
       ...summary,
       versions: [{ ...summary.latestVersion, installable: false, reason: 'requires a verified artifact' }],
       readme: '## README\n\n' + '一段很长的内容。'.repeat(2_000),

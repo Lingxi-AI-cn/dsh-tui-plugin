@@ -12,8 +12,8 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const TUI_VERSION = '0.1.14-rc.2'
-const DSH_VERSION = '0.2.1-rc.2'
+const TUI_VERSION = '0.1.15-rc.1'
+const DSH_VERSION = '0.2.2-rc.1'
 const TOP_PACKAGE = '@lingxi-ai-cn/dsh-tui'
 const PACKAGE_DIRS = Object.freeze([
   'packages/boot/profile-plugin-manager',
@@ -296,7 +296,9 @@ async function bootPty(official: string, dshScript: string, home: string, env: R
     child.write('\r')
     await new Promise(resolve => setTimeout(resolve, 100))
     child.write('\r')
-    await waitFor(() => output, 'The current Host composition does not provide the Schedule projection.')
+    await waitFor(() => output, 'Host-wide Schedules')
+    await waitFor(() => output, 'Host-wide: showing 0 of 0; first page only')
+    await waitFor(() => output, 'No schedules in this Host.')
     child.write('\u001b')
     await new Promise(resolve => setTimeout(resolve, 100))
     child.write('/plugins')

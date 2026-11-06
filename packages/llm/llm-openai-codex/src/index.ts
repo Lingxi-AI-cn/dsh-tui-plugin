@@ -51,6 +51,10 @@ export const inject = ['llm', 'credentials']
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
 /** Default request-level bound on base64-encoded image history. */
 export const DEFAULT_MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
+/** Default retained image count aligned with the official pi-ai owner. */
+const DEFAULT_MAX_REQUEST_IMAGES = 50
+/** Default count-overflow offload step aligned with the official pi-ai owner. */
+const DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM = 10
 /** Provider request-version pixel budget aligned with the official pi-ai owner. */
 export const DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET = 2048 * 2048
 /** Raw request-version byte target aligned with the official pi-ai owner. */
@@ -88,6 +92,10 @@ export interface Config {
   streamIdleTimeoutMs?: number
   /** Maximum base64-encoded image payload retained in one request. */
   maxRequestImageBytes?: number
+  /** Maximum retained image occurrences in one request; defaults to 50. */
+  maxRequestImages?: number
+  /** Count-overflow offload step; defaults to min(10, maxRequestImages). */
+  imageOffloadCountQuantum?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -97,6 +105,8 @@ export const Config: z<Config> = z.object({
   clientVersion: z.string().default('0.146.0'),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
   maxRequestImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_REQUEST_IMAGE_BYTES),
+  maxRequestImages: z.number().step(1).min(1).default(DEFAULT_MAX_REQUEST_IMAGES),
+  imageOffloadCountQuantum: z.number().step(1).min(1),
 })
 
 interface ResolvedSpec {
@@ -105,6 +115,8 @@ interface ResolvedSpec {
   clientVersion: string
   streamIdleTimeoutMs: number
   maxRequestImageBytes: number
+  maxRequestImages: number
+  imageOffloadCountQuantum: number
 }
 
 type OpenAICodexAuthenticationPrompt = {
@@ -150,9 +162,9 @@ interface OpenAICodexRc8AuthenticationHost {
 }
 
 /**
- * Resolve default paths and reject an empty compatibility version.
+ * Resolve storage paths, compatibility version, and validated request limits.
  * @param config - raw plugin configuration.
- * @returns absolute storage paths and the catalog compatibility version.
+ * @returns absolute storage paths, compatibility version, and request limits.
  */
 export function resolveSpec(config: Config): ResolvedSpec {
   const home = resolveDshHome(config.dshHome)
@@ -166,12 +178,22 @@ export function resolveSpec(config: Config): ResolvedSpec {
   if (!Number.isSafeInteger(maxRequestImageBytes) || maxRequestImageBytes <= 0) {
     throw new TypeError('llm-openai-codex maxRequestImageBytes must be a positive safe integer')
   }
+  const maxRequestImages = config.maxRequestImages ?? DEFAULT_MAX_REQUEST_IMAGES
+  if (!Number.isSafeInteger(maxRequestImages) || maxRequestImages <= 0) {
+    throw new TypeError('llm-openai-codex maxRequestImages must be a positive safe integer')
+  }
+  const imageOffloadCountQuantum = config.imageOffloadCountQuantum ?? Math.min(DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM, maxRequestImages)
+  if (!Number.isSafeInteger(imageOffloadCountQuantum) || imageOffloadCountQuantum <= 0 || imageOffloadCountQuantum > maxRequestImages) {
+    throw new TypeError('llm-openai-codex imageOffloadCountQuantum must be a positive safe integer no greater than maxRequestImages')
+  }
   return {
     credentialsPath: resolve(config.credentialsPath ?? join(home, 'oauth', 'openai-codex.json')),
     modelCachePath: resolve(config.modelCachePath ?? join(home, 'model-catalogs', 'openai-codex.json')),
     clientVersion,
     streamIdleTimeoutMs,
     maxRequestImageBytes,
+    maxRequestImages,
+    imageOffloadCountQuantum,
   }
 }
 
@@ -259,6 +281,8 @@ export class OpenAICodexAdapter extends PiAiAdapter {
       displayName: 'ChatGPT Codex（Lingxi 增强）',
       streamIdleTimeoutMs: spec.streamIdleTimeoutMs,
       maxRequestImageBytes: spec.maxRequestImageBytes,
+      maxRequestImages: spec.maxRequestImages,
+      imageOffloadCountQuantum: spec.imageOffloadCountQuantum,
       requestImagePixelBudget: DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET,
       requestImageMaxBytes: DEFAULT_REQUEST_IMAGE_MAX_BYTES,
       retryPolicy: resolveRetryPolicy(undefined, 'llm-openai-codex.retryPolicy'),

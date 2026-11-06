@@ -77,6 +77,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 
 - `/plugins` separates installed-profile truth, Registry entries, and browse-only GitHub repositories; filters can distinguish all Registry entries from installable versions, while repository details expose scan and publication status before opening GitHub.
 - Profile changes remain on the official `dsh plugin` path; the TUI shows exact install or removal commands rather than creating a second package-management authority.
+- `/schedules` reads the Host-wide Schedule catalog, including paused and ended tasks. The panel and footer disclose the shown and total counts; later pages are not browsable in the TUI.
 - `/doctor` reports Host/TUI capabilities and `/context` shows the loaded model, permission, tools, skills, and prompt contributors.
 - `/presets` inspects registered Agent Presets and selects a future default through revision-checked Settings. Copy, delete, and file opening are unavailable because the official registry has no authoring or source-file API; `/host-plugins` inspects the canonical Loader inventory and owner-defined settings.
 
@@ -90,7 +91,7 @@ DSH TUI brings a focused, full-screen coding-agent experience to the terminal wi
 | `/lang en\|zh` | Switch the TUI language |
 | `/resume` | Search and resume a persisted Session |
 | `/new`, `/clear` | Start a fresh Session in the current workspace |
-| `/rewind` | Create a child Session from an earlier safe turn |
+| `/rewind` | Create an independent Session from an earlier safe turn |
 | `/export` | Export durable Session data |
 | `/plugins` | Browse discoverable and installed plugins |
 | `/doctor` | Inspect runtime health and capabilities |
@@ -111,19 +112,19 @@ The current public TUI release is deliberately pinned to the matching official H
 
 | DSH TUI | DeepSeek Harness | Node.js | Platforms |
 | --- | --- | --- | --- |
-| `0.1.14-rc.2` | exactly `0.2.1-rc.2` | `^22.19.0` or `>=24` | macOS 14 and Ubuntu 24.04 CI |
+| `0.1.15-rc.1` | exactly `0.2.2-rc.1` | `>=24.9.0` | macOS 14 and Ubuntu 24.04 CI |
 
 Support for a newer Harness version is added only after exact-package clean-room installation, profile composition, PTY startup/exit, and terminal-restoration verification.
 
-The TUI core version advances independently (`0.1.14` here), while the final prerelease suffix (`rc.2`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
+The TUI core version advances independently (`0.1.15` here), while the final prerelease suffix (`rc.1`) always names the compatible official Harness prerelease. This avoids presenting a TUI iteration as if it were a newer upstream DSH release.
 
 ## Install
 
 Install the exact supported official Harness, then add DSH TUI to a dedicated `tui` profile:
 
 ```sh
-npm install --global @deepseek-ai/dsh@0.2.1-rc.2
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.14-rc.2
+npm install --global @deepseek-ai/dsh@0.2.2-rc.1
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.15-rc.1
 dsh --profile tui
 ```
 
@@ -146,7 +147,7 @@ The canonical profile contains exactly `@deepseek-ai/dsh-base` followed by `@lin
 ```sh
 export DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 mv "$DSH_HOME/profiles/tui" "$DSH_HOME/profiles/tui.before-lingxi"
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.14-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.15-rc.1
 ```
 
 Sessions and credentials live outside the profile directory. Reapply only reviewed custom patches; do not copy the old profile back wholesale.
@@ -166,7 +167,7 @@ Sessions and credentials live outside the profile directory. Reapply only review
 Install the exact TUI version that declares compatibility with the installed official Harness version:
 
 ```sh
-dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.14-rc.2
+dsh plugin --profile tui add --save-exact @lingxi-ai-cn/dsh-tui@0.1.15-rc.1
 ```
 
 Release tags and npm versions are immutable. Do not mix package versions from different release candidates.

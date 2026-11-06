@@ -47,7 +47,7 @@ import {
   resolveTuiSessionExportDirectory,
   resolveTuiOutputExportPath, tuiOutputMarkdown, writeTuiOutputMarkdown,
   sortTuiResumeCandidates, summarizeTuiResumeCandidate,
-  tuiRewindCandidates,
+  tuiRewindCandidates, sessionForkSelection,
   consumeTuiDoubleEscape, TUI_DOUBLE_ESCAPE_WINDOW_MS,
   formatTuiWorkElapsed, formatTuiWorkOwner, formatTuiWorkRoute, projectTuiWork,
   applyTuiTerminalReply, TuiAgentViewStateCache, TuiTerminalInputDecoder, tuiTerminalMouseReportKind,
@@ -2574,6 +2574,41 @@ describe('TUI composer stash', () => {
 })
 
 describe('TUI Session rewind boundaries', () => {
+  it('chooses a pending available route instead of the unavailable last-used provider', () => {
+    const pending = { provider: 'available', model: 'new-model', reasoningEffort: ReasoningEffortId('high') }
+    const events = [
+      event(0, 'request/header', { header: { config: { provider: 'removed', model: 'old-model' } }, reason: 'initial' }),
+      event(1, 'model/selection', pending),
+    ]
+    const selected = sessionForkSelection(events, { provider: 'fallback', model: 'fallback-model' })
+    expect(selected).toEqual(pending)
+    expect(['available'].includes(selected?.provider ?? '')).toBe(true)
+  })
+
+  it('preserves pending choices across other request routes and retires matching adapter defaults', () => {
+    const pending = { provider: 'available', model: 'next-model' }
+    const events = [
+      event(0, 'model/selection', pending),
+      event(1, 'request/header', { header: { config: { provider: 'other', model: 'other-model' } }, reason: 'initial' }),
+    ]
+    expect(sessionForkSelection(events, undefined)).toEqual(pending)
+    expect(sessionForkSelection([...events, event(2, 'request/header', {
+      header: { config: { ...pending, reasoningEffort: ReasoningEffortId('high') }, adapterDefaults: { reasoningEffort: true } },
+      reason: 'initial',
+    })], undefined)).toEqual(pending)
+  })
+
+  it('retains legacy assistant routes and the empty-history fallback', () => {
+    const fallback = { provider: 'fallback', model: 'fallback-model' }
+    expect(sessionForkSelection([], fallback)).toEqual(fallback)
+    expect(sessionForkSelection([], undefined)).toBeUndefined()
+    const message = createAssistantMessage({
+      content: [{ type: 'text', text: 'legacy reply' }], source: { provider: 'legacy', model: 'legacy-model' },
+    })
+    expect(sessionForkSelection([event(0, 'assistant/message', { turn: 1, step: 1, message, stream: [] })], fallback))
+      .toEqual({ provider: 'legacy', model: 'legacy-model' })
+  })
+
   it('projects completed human turns newest-first with exact retained and parent-only counts', () => {
     const first = createUserMessage({
       content: [{ type: 'text', text: 'first prompt' }], source: { kind: 'user' },
@@ -3104,19 +3139,20 @@ describe('TUI actionable footer', () => {
   })
 
   it('shows only ready non-empty Schedule projections as an actionable item', () => {
-    const schedules = collectTuiSchedules([{
+    const schedules = collectTuiSchedules({ items: [{
       id: 'daily' as never,
+      status: 'active', target: { kind: 'new', create: {} }, involvedSessionIds: [],
       kind: 'every',
       title: 'Review the build',
       prompt: 'Review the build',
       everySeconds: 86_400,
       scheduledAt: '2026-08-31T00:00:00.000Z',
-    }], Date.parse('2026-08-31T01:00:00.000Z'))
+    }], shown: 1, total: 1, limit: 100, offset: 0 }, Date.parse('2026-08-31T01:00:00.000Z'))
     const items = tuiFooterItems({ ...sources, schedules })
     expect(items.find(item => item.id === 'schedules')).toMatchObject({
       label: 'plans', value: '1/1 overdue', action: 'schedules',
     })
-    expect(tuiFooterItems({ ...sources, schedules: collectTuiSchedules([]) })
+    expect(tuiFooterItems({ ...sources, schedules: collectTuiSchedules({ items: [], shown: 0, total: 0, limit: 100, offset: 0 }) })
       .some(item => item.id === 'schedules')).toBe(false)
     expect(tuiFooterItems({ ...sources, schedules: collectTuiSchedules(undefined) })
       .some(item => item.id === 'schedules')).toBe(false)

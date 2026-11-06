@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.15-rc.1
+
+- Supports exactly official DeepSeek Harness `0.2.2-rc.1` across all seven packages, with the official pi-ai `^1.3.0` provider interface and Node.js `>=24.9.0`.
+- Uses the official native/PTC tool executors and preset composition, without consuming the retired `DSH_TOOLS_MODE` setting.
+- Reads the Host-wide Schedule catalog, including paused and ended tasks, with task titles, Session target details, and explicit shown/total counts. Later catalog pages remain unavailable in the TUI.
+- Rewinds into an independent Session with inherited event-count metadata rather than creating a subagent relationship.
+- Adds bounded Codex image counts and offloading while preserving the independent provider route and credential ownership.
+- Real-account OAuth, native IME preedit, and wider terminal/platform checks remain manual.
+
 ## 0.1.14-rc.2
 
 - Supports exactly official DeepSeek Harness `0.2.1-rc.2` across all seven packages and follows the official pi-ai `^1.1.0` provider interface.

@@ -1,7 +1,7 @@
 {
   "name": "@lingxi-ai-cn/dsh-plugin-hub-local",
   "description": "Trusted local Registry, artifact, and profile transaction provider for Plugin Hub",
-  "version": "0.1.14-rc.2",
+  "version": "0.1.15-rc.1",
   "publishConfig": {
     "access": "public"
   },
@@ -28,10 +28,10 @@
   "license": "MIT",
   "peerDependencies": {
     "@lingxi-ai-cn/dsh-plugin-hub": "workspace:*",
-    "@deepseek-ai/dsh-app-boot": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-home-paths": "0.2.1-rc.2",
-    "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/schemastery": "3.18.5"
+    "@deepseek-ai/dsh-app-boot": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-home-paths": "0.2.2-rc.1",
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/schemastery": "3.19.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-app-boot": {
@@ -54,13 +54,13 @@
   },
   "devDependencies": {
     "@lingxi-ai-cn/dsh-plugin-hub": "workspace:*",
-    "@deepseek-ai/dsh-app-boot": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-home-paths": "0.2.1-rc.2",
-    "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/schemastery": "3.18.5",
+    "@deepseek-ai/dsh-app-boot": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-home-paths": "0.2.2-rc.1",
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/schemastery": "3.19.0",
     "@types/semver": "^7.7.1"
   },
   "engines": {
-    "dsh": "0.2.1-rc.2"
+    "dsh": "0.2.2-rc.1"
   }
 }
