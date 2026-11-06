@@ -43,6 +43,6 @@ pnpm run pack:release
 node scripts/publish-release.mjs
 ```
 
-Require the Ubuntu 24.04/macOS 14 CI matrix to pass. Publication is performed by `.github/workflows/release.yml` with npm trusted-publishing permissions; never add a long-lived npm token to the repository. Configure the same Trusted Publisher for the new Codex package before its first publication. After publication, audit all seven registry payloads and dist-tags against the release manifest before updating release documentation.
+Require the Ubuntu 24.04/macOS 15 CI matrix to pass. Publication is performed by `.github/workflows/release.yml` with npm trusted-publishing permissions; never add a long-lived npm token to the repository. Configure the same Trusted Publisher for the new Codex package before its first publication. After publication, audit all seven registry payloads and dist-tags against the release manifest before updating release documentation.
 
 Real OAuth, native macOS IME preedit, SSH/tmux combinations, and additional terminal emulators remain manual checks. Report them only when directly observed.

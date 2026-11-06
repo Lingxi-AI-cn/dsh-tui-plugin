@@ -112,7 +112,7 @@ The current public TUI release is deliberately pinned to the matching official H
 
 | DSH TUI | DeepSeek Harness | Node.js | Platforms |
 | --- | --- | --- | --- |
-| `0.1.15-rc.1` | exactly `0.2.2-rc.1` | `>=24.9.0` | macOS 14 and Ubuntu 24.04 CI |
+| `0.1.15-rc.1` | exactly `0.2.2-rc.1` | `>=24.9.0` | macOS 15 and Ubuntu 24.04 CI |
 
 Support for a newer Harness version is added only after exact-package clean-room installation, profile composition, PTY startup/exit, and terminal-restoration verification.
 

@@ -112,7 +112,7 @@ DSH TUI 在不替换、不修改官方 Harness 安装的前提下，为终端提
 
 | DSH TUI | DeepSeek Harness | Node.js | 平台 |
 | --- | --- | --- | --- |
-| `0.1.15-rc.1` | 精确匹配 `0.2.2-rc.1` | `>=24.9.0` | macOS 14 与 Ubuntu 24.04 CI |
+| `0.1.15-rc.1` | 精确匹配 `0.2.2-rc.1` | `>=24.9.0` | macOS 15 与 Ubuntu 24.04 CI |
 
 只有在精确官方包 clean-room 安装、profile 组合、PTY 启动/退出和终端恢复验证完成后，才会增加对新 Harness 版本的支持。
 
