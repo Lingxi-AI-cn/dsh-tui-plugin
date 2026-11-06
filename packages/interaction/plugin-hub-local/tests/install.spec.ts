@@ -14,6 +14,7 @@ import { canonicalJson } from '../src/signature.ts'
 const NOW = Date.parse('2026-08-18T12:00:00.000Z')
 const fakePnpm = fileURLToPath(new URL('./fixtures/fake-pnpm.mjs', import.meta.url))
 const maintenanceAccept = fileURLToPath(new URL('./fixtures/maintenance-accept.mjs', import.meta.url))
+const maintenanceAcceptProbe = fileURLToPath(new URL('./fixtures/maintenance-accept-probe.mjs', import.meta.url))
 const homes: string[] = []
 const servers: Server[] = []
 
@@ -113,25 +114,33 @@ describe('trusted Plugin Hub installation planning', () => {
     await ctx.fiber.dispose()
   })
 
-  it('hands a staged transaction to the provider-owned maintenance controller', async () => {
+  it.each([
+    { name: 'hands a staged transaction to the provider-owned maintenance controller', helper: maintenanceAccept },
+    { name: 'keeps a complete journal readable while the maintenance fixture prepares its update', helper: maintenanceAcceptProbe },
+  ])('$name', async ({ helper }) => {
     const fixture = await createFixture()
     const ctx = await createContext(fixture, {
-      maintenanceCommand: [process.execPath, maintenanceAccept],
+      maintenanceCommand: [process.execPath, helper],
       relaunch: { executable: process.execPath, args: [fakePnpm], cwd: fixture.home, env: {} },
     })
     const plan = await ctx.pluginHub.planInstall(PluginId('plg_fixture'), PluginVersionId('ver_fixture'))
     const staged = await ctx.pluginHub.stage(plan.id)
     const activeBefore = readFileSync(join(fixture.profileDir, 'package.json'), 'utf8')
 
-    await expect(ctx.pluginHub.createMaintenanceHandoff(staged.id)).resolves.toMatchObject({
-      transactionId: staged.id,
-      state: 'waiting-for-old-process',
-    })
+    try {
+      await expect(ctx.pluginHub.createMaintenanceHandoff(staged.id)).resolves.toMatchObject({
+        transactionId: staged.id,
+        state: 'waiting-for-old-process',
+      })
 
-    expect(readFileSync(join(fixture.profileDir, 'package.json'), 'utf8')).toBe(activeBefore)
-    expect(JSON.parse(readFileSync(join(fixture.dataDir, 'transactions', staged.id, 'journal.json'), 'utf8')))
-      .toMatchObject({ state: 'waiting-for-old-process' })
-    await ctx.fiber.dispose()
+      expect(readFileSync(join(fixture.profileDir, 'package.json'), 'utf8')).toBe(activeBefore)
+      const transactionDir = join(fixture.dataDir, 'transactions', staged.id)
+      expect(JSON.parse(readFileSync(join(transactionDir, 'journal.json'), 'utf8')))
+        .toMatchObject({ state: 'waiting-for-old-process' })
+      expect(readdirSync(transactionDir).filter(name => name.startsWith('journal.json.'))).toEqual([])
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('fails staging on profile drift or pnpm build policy without changing the active profile', async () => {
